@@ -52,6 +52,9 @@ usage: burnisher <command> [options]
   weights-manifest          every tensor this runtime requires of a checkpoint, as JSON
   check-weights             load a real checkpoint and verify every required tensor
   noise                     the pinned initial latent for a seed, as .npy
+  decode                    run the VAE decoder on a latent from a .npy file
+  dit-step                  one denoiser forward pass, from .npy inputs
+  encode                    run the text encoder on token ids from a file
 
 common options:
   --impl NAME               registered implementation to use (default: stock)
@@ -162,6 +165,51 @@ void write_npy(const std::string& path, const Tensor& t) {
         const float v = t.get(i);
         out.write(reinterpret_cast<const char*>(&v), sizeof(v));
     }
+}
+
+// Minimal .npy v1.0 reader. Contiguous little-endian fp32 only, which is what crosses this
+// boundary; anything else is refused rather than reinterpreted.
+Tensor read_npy(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) throw std::runtime_error("cannot open " + path);
+    char magic[8];
+    in.read(magic, 8);
+    if (std::memcmp(magic, "\x93NUMPY", 6) != 0) {
+        throw std::runtime_error(path + " is not a .npy file");
+    }
+    uint16_t len = 0;
+    in.read(reinterpret_cast<char*>(&len), 2);
+    std::string header(len, '\0');
+    in.read(&header[0], len);
+    if (header.find("'<f4'") == std::string::npos &&
+        header.find("\"<f4\"") == std::string::npos) {
+        throw std::runtime_error(path + ": only little-endian fp32 is read. Converting silently "
+                                        "would change the thing being compared.");
+    }
+    if (header.find("'fortran_order': False") == std::string::npos) {
+        throw std::runtime_error(path + ": Fortran order is not read");
+    }
+    const size_t open_paren = header.find('(');
+    const size_t close_paren = header.find(')', open_paren);
+    std::vector<int64_t> shape;
+    {
+        std::string dims = header.substr(open_paren + 1, close_paren - open_paren - 1);
+        std::string tok;
+        std::istringstream is(dims);
+        while (std::getline(is, tok, ',')) {
+            const size_t a = tok.find_first_not_of(" \t");
+            if (a == std::string::npos) continue;
+            shape.push_back(std::stoll(tok.substr(a)));
+        }
+    }
+    Tensor t(shape, DType::F32);
+    for (int64_t i = 0; i < t.numel(); ++i) {
+        float v;
+        in.read(reinterpret_cast<char*>(&v), sizeof(v));
+        if (!in) throw std::runtime_error(path + ": truncated");
+        t.set(i, v);
+    }
+    return t;
 }
 
 size_t peak_rss_bytes() {
@@ -518,6 +566,153 @@ int cmd_noise(const Args& a) {
     return 0;
 }
 
+// One stage, one input file, one output file.
+//
+// It exists so a single stage can be compared against the reference implementation without
+// running a whole generation: `scripts/differential_test.py` feeds both the same latent and
+// compares the results. That is the correctness gate's question asked at a scale a CPU can
+// answer, and it is how the two defects in docs/STATUS.md would have been caught earlier.
+int cmd_decode(const Args& a) {
+    register_builtin_cpu_ops();
+    const std::string dir = a.get("weights");
+    const std::string in = a.get("latent");
+    const std::string out = a.get("out");
+    if (dir.empty() || in.empty() || out.empty()) {
+        std::cerr << "!! decode needs --weights DIR --latent IN.npy --out OUT.npy\n";
+        return 2;
+    }
+    VaeConfig vae;
+    const DType dt = dtype_arg(a);
+    Tensor latent = read_npy(in);
+    if (latent.rank() != 4 || latent.dim(1) != vae.latent_channels) {
+        throw std::runtime_error("decode: expected [1, " +
+                                 std::to_string(vae.latent_channels) + ", h, w], got " +
+                                 latent.describe());
+    }
+    auto w = std::make_shared<CheckpointWeights>(CheckpointWeights::component(dir, "vae"));
+    VaeDecoder dec(vae, *w, dt);
+    const ImplSelection impls = ImplSelection::from_request(a.get("impl", "stock"));
+
+    // The scaling divide belongs to the PIPELINE, not the decoder, and the reference's
+    // `vae.decode()` does not do it either. Applying it here would make the comparison off by
+    // 1/0.13025 and look like a catastrophic disagreement.
+    Tensor x = latent.to(dt);
+    const auto t0 = std::chrono::steady_clock::now();
+    Tensor pixels = dec.forward(x, impls);
+    const double secs = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - t0).count();
+    write_npy(out, pixels);
+    const OutputStats st = OutputStats::of(pixels);
+    std::ostringstream os;
+    os.precision(12);
+    os << "BURNISH_JSON: {\"metrics\":{\"latency_s\":" << secs
+       << ",\"peak_vram_bytes\":" << peak_rss_bytes() << "},\"effective\":"
+       << json_map({{"stage", "vae-decode"}, {"dtype", dtype_name(dt)},
+                    {"impl", a.get("impl", "stock")}, {"weights", "checkpoint"}})
+       << ",\"output_stats\":" << stats_json(st) << "}";
+    std::cout << os.str() << "\n";
+    return 0;
+}
+
+// One DiT forward pass, every input read from a file.
+//
+// Same purpose as `decode`: it lets `scripts/differential_test.py` feed this runtime and the
+// reference implementation identical tensors and compare the results. Nothing is generated
+// twice, so a disagreement is the model and not the inputs.
+int cmd_dit_step(const Args& a) {
+    register_builtin_cpu_ops();
+    const std::string dir = a.get("weights");
+    if (dir.empty() || a.get("latent").empty() || a.get("caption").empty() ||
+        a.get("mask").empty() || a.get("out").empty()) {
+        std::cerr << "!! dit-step needs --weights DIR --latent L.npy --caption C.npy "
+                     "--mask M.npy --out O.npy [--timestep T]\n";
+        return 2;
+    }
+    DiTConfig dit;
+    // --layers truncates the block stack, for bisecting a disagreement by depth. A discrepancy
+    // that grows linearly with depth is accumulation; one that appears at a particular block is
+    // a bug in it.
+    if (a.has("layers")) dit.num_layers = static_cast<int>(a.num("layers", dit.num_layers));
+    const DType dt = dtype_arg(a);
+    Tensor latent = read_npy(a.get("latent")).to(dt);
+    Tensor caption = read_npy(a.get("caption")).to(dt);
+    Tensor mask = read_npy(a.get("mask")).to(dt);
+    auto w = std::make_shared<CheckpointWeights>(
+        CheckpointWeights::component(dir, "transformer"));
+    PixArtDiT model(dit, *w, dt);
+    const ImplSelection impls = ImplSelection::from_request(a.get("impl", "stock"));
+    const auto t0 = std::chrono::steady_clock::now();
+    Tensor out = model.forward(latent, a.real("timestep", 500.0), caption, mask, impls);
+    const double secs = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - t0).count();
+    write_npy(a.get("out"), out);
+    const OutputStats st = OutputStats::of(out);
+    std::ostringstream os;
+    os.precision(12);
+    os << "BURNISH_JSON: {\"metrics\":{\"latency_s\":" << secs
+       << ",\"peak_vram_bytes\":" << peak_rss_bytes() << "},\"effective\":"
+       << json_map({{"stage", "dit-step"}, {"dtype", dtype_name(dt)},
+                    {"impl", a.get("impl", "stock")}, {"weights", "checkpoint"}})
+       << ",\"output_stats\":" << stats_json(st) << "}";
+    std::cout << os.str() << "\n";
+    return 0;
+}
+
+// The text encoder, from a token-ids file (one prompt per line, whitespace-separated ids).
+int cmd_encode(const Args& a) {
+    register_builtin_cpu_ops();
+    const std::string dir = a.get("weights");
+    const std::string ids_path = a.get("token-ids");
+    if (dir.empty() || ids_path.empty() || a.get("out").empty()) {
+        std::cerr << "!! encode needs --weights DIR --token-ids FILE --out O.npy\n";
+        return 2;
+    }
+    std::vector<std::vector<int64_t>> rows;
+    {
+        std::ifstream f(ids_path);
+        if (!f) throw std::runtime_error("cannot open " + ids_path);
+        std::string line;
+        while (std::getline(f, line)) {
+            std::istringstream is(line);
+            std::vector<int64_t> row;
+            long long v;
+            while (is >> v) row.push_back(static_cast<int64_t>(v));
+            if (!row.empty()) rows.push_back(std::move(row));
+        }
+    }
+    if (rows.empty()) throw std::runtime_error(ids_path + ": no token ids");
+    size_t width = 0;
+    for (const auto& r : rows) width = std::max(width, r.size());
+    Tensor ids({static_cast<int64_t>(rows.size()), static_cast<int64_t>(width)}, DType::F32);
+    for (size_t r = 0; r < rows.size(); ++r) {
+        for (size_t c = 0; c < width; ++c) {
+            ids.set(static_cast<int64_t>(r * width + c),
+                    c < rows[r].size() ? static_cast<float>(rows[r][c]) : 0.0f);
+        }
+    }
+    T5Config t5;
+    const DType dt = dtype_arg(a);
+    auto w = std::make_shared<CheckpointWeights>(
+        CheckpointWeights::component(dir, "text_encoder"));
+    T5Encoder enc(t5, *w, dt);
+    const ImplSelection impls = ImplSelection::from_request(a.get("impl", "stock"));
+    const auto t0 = std::chrono::steady_clock::now();
+    Tensor h = enc.forward(ids, impls);
+    const double secs = std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - t0).count();
+    write_npy(a.get("out"), h);
+    const OutputStats st = OutputStats::of(h);
+    std::ostringstream os;
+    os.precision(12);
+    os << "BURNISH_JSON: {\"metrics\":{\"latency_s\":" << secs
+       << ",\"peak_vram_bytes\":" << peak_rss_bytes() << "},\"effective\":"
+       << json_map({{"stage", "t5-encode"}, {"dtype", dtype_name(dt)},
+                    {"impl", a.get("impl", "stock")}, {"weights", "checkpoint"}})
+       << ",\"output_stats\":" << stats_json(st) << "}";
+    std::cout << os.str() << "\n";
+    return 0;
+}
+
 int cmd_probe(const Args&) {
 #ifndef BURNISHER_CUDA
     std::cerr << "!! burnisher probe needs a CUDA build. This binary was built without it, so\n"
@@ -658,6 +853,9 @@ int main(int argc, char** argv) {
         if (a.command == "weights-manifest") return cmd_weights_manifest(a);
         if (a.command == "check-weights") return cmd_check_weights(a);
         if (a.command == "noise") return cmd_noise(a);
+        if (a.command == "decode") return cmd_decode(a);
+        if (a.command == "dit-step") return cmd_dit_step(a);
+        if (a.command == "encode") return cmd_encode(a);
         if (a.command == "generate") return cmd_generate(a);
     } catch (const std::exception& e) {
         std::cerr << "!! " << e.what() << "\n";

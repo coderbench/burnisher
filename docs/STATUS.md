@@ -64,7 +64,7 @@ the reference implementation. That is the correctness gate, and it needs referen
 not exist yet — so "the output is plausible" is the strongest claim available here, and it is
 weaker than "the output is right".
 
-### Two correctness defects the runtime had, and how they were found
+### Three correctness defects the runtime had, and how they were found
 
 Both were invisible to every self-consistency check in the repository, which is the point worth
 recording: a deterministic wrong answer passes a determinism test, and two implementations that
@@ -80,6 +80,17 @@ when a cross-attention *mask* test asked a question the layout could not answer.
 head-last and `tests/test_ops.cpp` pins the invariant: H-head attention must equal H independent
 single-head attentions over the corresponding slices.
 
+**The output patch ordering was transposed.** The reference lays each token's output vector out
+as (row, column, CHANNEL) — channel varying fastest — and then permutes. The input side is
+(channel, row, column), because the patch embedding is a `Conv2d` and that is a conv weight's
+layout while the output projection is a `Linear`. Two different orderings at the two ends of the
+same model is not a design; it is what the reference does, and it is not optional.
+
+The signature is worth remembering: the disagreement was a relative L2 of **1.37** with the
+reference — completely different values — and an **identical mean and standard deviation to five
+decimal places**. The same numbers in a different arrangement. A round-trip test of
+`patchify`/`unpatchify` passes with both ends wrong, and did.
+
 **Padding was not masked at all.** A prompt is padded to a fixed 300 tokens, so most of a short
 caption is padding, and both the T5 self-attention and the DiT cross-attention were attending to
 it on every layer. That is a different model — one that still produces a plausible image. The
@@ -90,6 +101,34 @@ attends to padding or drops real tokens.
 Neither would have survived the correctness gate against a reference. Both survived everything
 this repository could check without one, which is the argument for getting the reference latents
 made.
+
+**And the strongest check now available: stage-by-stage against the reference.**
+
+`scripts/differential_test.py` runs one stage in this runtime and the same stage in diffusers,
+on the same weights and the same input tensor, and compares. That is the correctness gate's
+question at a scale a CPU can answer, and it is what found the patch-ordering defect.
+
+| stage | shape | relative L2 vs reference | verdict |
+|:--|:--|--:|:--|
+| `vae-decode` | 4x4 latent | **6.9e-06** | agrees to fp32 epsilon |
+| `dit-step` | 64px, batch 2, 28 blocks | **7.3e-04** | agrees; see below |
+
+The DiT figure needed explaining rather than accepting, so the block stack was truncated on both
+sides and the divergence measured against depth:
+
+| blocks | 1 | 2 | 4 | 8 | 16 | 28 |
+|---|--:|--:|--:|--:|--:|--:|
+| relative L2 | 1.3e-6 | 1.4e-6 | 3.2e-6 | 3.1e-5 | 6.6e-5 | 7.3e-4 |
+
+Per block the two agree to fp32 epsilon. The growth is the residual stack amplifying different
+reduction orders — the network, not the arithmetic. **This is a measured lower bound on any
+workable tolerance**: two correct fp32 implementations already differ by 7.3e-4 after one forward
+pass, so a gate set below about 1e-3 would reject a correct implementation. It is recorded in
+`eval/cells/BG-1/generation.json` under `tolerance._measured_floor`.
+
+It does *not* establish the 2% figure itself. That is one forward pass in fp32; the scored path
+is twenty steps in bf16, where both the rounding and the accumulation are larger. 2% remains a
+stated threshold expected to move once, when `burnish gate --calibrate-tolerance` runs.
 
 **What was done about the rest of that class.** The remaining intricate oracle details are now
 differential-tested against independent implementations written from the reference's published

@@ -62,9 +62,62 @@ int main() {
         Tensor p = patchify(x, 2, DType::F32);
         CHECK(p.dim(1) == 16);          // (8/2)^2 tokens
         CHECK(p.dim(2) == 3 * 4);       // channels * patch^2
-        Tensor back = unpatchify(p, 2, 3, 4, 2, DType::F32);
-        CHECK(max_abs_diff(x, back) == 0.0);
         CHECK_THROWS(patchify(x, 3, DType::F32));
+
+        // The two are NOT inverses and must not be tested as if they were. `patchify` lays a
+        // patch out (channel, row, col) because the reference's patch embedding is a Conv2d;
+        // `unpatchify` reads (row, col, channel) because the reference's output projection is a
+        // Linear followed by an einsum. A round-trip test would pass with BOTH wrong, and did:
+        // the output ordering was wrong for the whole of this repository's first day and every
+        // self-consistency check here was green.
+        //
+        // So each ordering is pinned against the reference's own formula instead.
+        {
+            const int64_t C = 3, P = 2, G = 4;
+            Tensor tokens({1, G * G, C * P * P}, DType::F32);
+            for (int64_t i = 0; i < tokens.numel(); ++i) tokens.set(i, static_cast<float>(i));
+            Tensor img = unpatchify(tokens, 1, static_cast<int>(C), static_cast<int>(G),
+                                    static_cast<int>(P), DType::F32);
+            // reshape(h, w, p, q, c) -> einsum("nhwpqc->nchpwq"): channel varies FASTEST
+            // within a token.
+            for (int64_t ty = 0; ty < G; ++ty) {
+                for (int64_t tx = 0; tx < G; ++tx) {
+                    for (int64_t ky = 0; ky < P; ++ky) {
+                        for (int64_t kx = 0; kx < P; ++kx) {
+                            for (int64_t c = 0; c < C; ++c) {
+                                const int64_t src =
+                                    ((ty * G + tx) * (C * P * P)) + (ky * P + kx) * C + c;
+                                const int64_t dst =
+                                    ((c * (G * P)) + ty * P + ky) * (G * P) + tx * P + kx;
+                                CHECK(img.get(dst) == tokens.get(src));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        {
+            // patchify: (channel, row, col), column fastest -- a conv weight's layout.
+            const int64_t C = 2, P = 2, G = 2;
+            Tensor img({1, C, G * P, G * P}, DType::F32);
+            for (int64_t i = 0; i < img.numel(); ++i) img.set(i, static_cast<float>(i));
+            Tensor tok = patchify(img, static_cast<int>(P), DType::F32);
+            for (int64_t ty = 0; ty < G; ++ty) {
+                for (int64_t tx = 0; tx < G; ++tx) {
+                    for (int64_t c = 0; c < C; ++c) {
+                        for (int64_t ky = 0; ky < P; ++ky) {
+                            for (int64_t kx = 0; kx < P; ++kx) {
+                                const int64_t dst =
+                                    ((ty * G + tx) * (C * P * P)) + (c * P + ky) * P + kx;
+                                const int64_t src =
+                                    ((c * (G * P)) + ty * P + ky) * (G * P) + tx * P + kx;
+                                CHECK(tok.get(dst) == img.get(src));
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // --- the timestep embedding's halves are cos then sin ---

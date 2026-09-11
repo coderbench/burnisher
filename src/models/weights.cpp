@@ -119,8 +119,12 @@ Tensor sinusoidal_timestep_embedding(double t, int dim, DType dtype) {
 }
 
 Tensor patchify(const Tensor& x, int patch, DType dtype) {
-    // [B, C, H, W] -> [B, (H/p)*(W/p), C*p*p], channels-last within a patch, matching the
-    // reference's conv-based patch embedding when that conv is read as a linear map.
+    // [B, C, H, W] -> [B, (H/p)*(W/p), C*p*p], laid out (channel, row, col) with COLUMN varying
+    // fastest -- which is a conv weight's layout, because the reference's patch embedding is a
+    // real Conv2d and this makes the following GEMM exactly that convolution.
+    //
+    // `unpatchify` at the other end of the model uses a DIFFERENT ordering, for a reason that is
+    // documented there. They are not meant to mirror each other.
     const int64_t B = x.dim(0), C = x.dim(1), H = x.dim(2), W = x.dim(3);
     if (H % patch || W % patch) throw std::runtime_error("patchify: size not divisible by patch");
     const int64_t gh = H / patch, gw = W / patch;
@@ -147,6 +151,19 @@ Tensor patchify(const Tensor& x, int patch, DType dtype) {
 }
 
 Tensor unpatchify(const Tensor& x, int batch, int channels, int grid, int patch, DType dtype) {
+    // ORACLE, and it does NOT mirror `patchify`. The reference reshapes each token's output
+    // vector as (row, col, CHANNEL) -- channel varying fastest -- and then permutes:
+    //
+    //     reshape(-1, h, w, p, q, c);  einsum("nhwpqc->nchpwq");  reshape(-1, c, h*p, w*q)
+    //
+    // The INPUT side is (channel, row, col) with column fastest, because the patch embedding is
+    // a real convolution and that is a conv weight's layout. Two different orderings at the two
+    // ends of the same model is not a design; it is what the reference does, because one end is
+    // a Conv2d and the other is a Linear.
+    //
+    // Getting this wrong produces the same numbers in a different arrangement: identical mean,
+    // identical standard deviation, and a completely different image. It survived every
+    // self-consistency test here and was caught only by comparing against the reference.
     const int64_t H = static_cast<int64_t>(grid) * patch;
     Tensor out({batch, channels, H, H}, dtype);
     for (int64_t b = 0; b < batch; ++b) {
@@ -158,7 +175,7 @@ Tensor unpatchify(const Tensor& x, int batch, int channels, int grid, int patch,
                         for (int64_t kx = 0; kx < patch; ++kx) {
                             const int64_t src =
                                 (b * grid * grid + token) * (channels * patch * patch) +
-                                (c * patch + ky) * patch + kx;
+                                (ky * patch + kx) * channels + c;
                             const int64_t dst =
                                 ((b * channels + c) * H + py * patch + ky) * H + px * patch + kx;
                             out.set(dst, x.get(src));
