@@ -1,0 +1,29 @@
+{
+ "_what_this_is": "The axes the benchmark declares, and the shape of one receipt. Both are inputs to the screen: the axes decide how much standing unsolved work exists (REGENERATION) and the receipt shape decides what a score costs in GPU time (SCORE_COST). They are configuration rather than constants in the code because a generation that wants a different matrix changes them here and re-runs the screen, and the screen then says whether the new matrix is still affordable.",
+
+ "stages": ["t5-encode", "dit-step", "vae-decode"],
+ "resolutions": [512, 1024, 2048],
+ "dtypes": ["bf16", "fp8", "nvfp4"],
+ "step_counts": [4, 20],
+
+ "_dtype_note": "bf16 is the v0 reference path and the only one with a pinned correctness tolerance. fp8 and nvfp4 are declared as AXES rather than shipped: the cells exist, their ceilings are computable today, and their reference implementations do not exist yet. Landing one is a cartography contribution and is scored as such -- see docs/CARTOGRAPHY.md. Declaring a cell nobody can run yet is deliberate and is the opposite of overselling: the ceiling table shows the room, and the cell is marked `implemented: false` so nobody mistakes an empty cell for an easy one.",
+
+ "_resolution_note": "512/1024/2048 rather than a denser sweep, because each one has to be CALIBRATED -- a published noise floor per cell costs repeated paired control runs, and a matrix nobody can afford to calibrate is a matrix with guessed floors in it, which is the failure this whole scoring model exists to fix.",
+
+ "held_out": {
+  "_what": "Shapes that are scored but never published, so a kernel fast only on the benchmarked shape scores nothing.",
+  "resolutions": [768, 1152],
+  "caption_lengths": [128, 300],
+  "_rule": "Every cell family is scored on its published shape AND on a held-out shape drawn from this list at evaluation time. A candidate whose gain appears on the published shape and vanishes on the held-out one is reported as SHAPE_OVERFIT and credits nothing. The held-out values live here in the open because hiding them would not help -- what makes the guard work is that the evaluator picks which one at run time, from the base commit, after the candidate is frozen."
+ },
+
+ "receipt_shape": {
+  "cells": 3,
+  "repeats": 5,
+  "prompts_per_cell": 2,
+  "gate_generations": 12,
+  "_cells_note": "The three v0 cells at the pinned resolution, both arms, interleaved.",
+  "_repeats_note": "Five paired interleaved repeats. Enough for a paired bootstrap to say something; RecurLocal spent nine on its worst cell and the answer was still bimodal, which is a fact about that cell rather than about the repeat count. The generation allows up to nine here for the same reason.",
+  "_gate_note": "Twelve generations for the correctness gate: ten determinism replays plus a frozen two-prompt latent comparison. It runs BEFORE any timing and its cost is part of a receipt whether or not the candidate is fast."
+ }
+}
