@@ -63,9 +63,13 @@ scripts/build_cuda.sh
 burnish probe                                   # measured peaks -> configs/devices.json
 burnish generation write && burnish roofline    # ceilings on measured peaks
 burnish gate --determinism --repeats 10         # stop here if this fails
-burnish gate                                    # against the pinned reference latents
+burnish gate --impl stock --output gate-base.json     # the base arm, against the reference
 burnish calibrate --repeats 9 --write           # achieved fractions and noise floors
-burnish bench --impl-candidate <name> --gate-result gate.json --output raw.json
+
+# then, per submission:
+burnish gate --impl <name> --output gate.json   # correctness first, always
+burnish bench --impl-candidate <name> \
+    --gate-result gate.json --gate-base-result gate-base.json --output raw.json
 burnish score raw.json --ledger <outside the worktree>
 ```
 

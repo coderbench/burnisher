@@ -26,6 +26,7 @@ toolkit were available when this was built.**
 | T5 encoder / PixArt DiT / VAE decoder graphs | complete | `burnisher selftest` |
 | DPM-Solver++ scheduler | complete, pinned against the reference construction | `ctest` |
 | End-to-end pipeline, byte-identical replays | complete | `burnisher selftest` |
+| Paired bench and calibration runners | complete, exercised against a fake device | `python3 -m unittest discover -s eval -t eval` |
 | CUDA device probe | **written, never compiled** | CI job `cuda-compile` |
 | CUDA op backend | **does not exist** | `issues/cuda-op-backend.md` |
 | Checkpoint load path | **not wired up** | `issues/checkpoint-load.md` |
@@ -33,6 +34,22 @@ toolkit were available when this was built.**
 | Every cell's achieved fraction | **null** | `burnish roofline` |
 | Every cell's noise floor | **null** | `burnish roofline` |
 | Device peaks behind every ceiling | **vendor, not probed** | `configs/devices.json` |
+
+### On "exercised against a fake device"
+
+`eval/tests/fakes/` holds a stub `nvidia-smi` and a stub runtime that speaks the `BURNISH_JSON`
+protocol. `eval/tests/test_device_runners.py` drives `bench.py` and `calibrate.py` through them
+end to end, including the closed loop: calibrate, bench, score, receipt.
+
+**The fakes replace the device, not the guards.** The idle check still shells out, still parses,
+and still refuses when the stub reports a busy device. The fallback check still compares the
+runtime's report against the request. What is removed is the silicon, and that is the only way
+code that runs exclusively beside a GPU gets tested at all.
+
+Writing those tests found two real defects: `bench.py` read the whole of `/dev/urandom` (a stream
+that never ends) when choosing a held-out shape, and it never produced the
+`latent_l2_vs_reference` objective the generation declares — so the frontier would have come out
+as exactly zero for both arms and every result would have read `MOVED_ALONG_FRONTIER`.
 
 ## The four things that are not known, stated precisely
 

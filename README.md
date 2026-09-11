@@ -227,8 +227,10 @@ Every one was learned by somebody getting it wrong.
   `eval/tests/test_schemas.py` fails if a modelled figure reaches a measured field.
 - **The evaluator is where the bugs are.** A broken evaluator prints a confident number. Never
   remove a guard without knowing which incident it encodes — they are all named where they live.
-  (Writing the tests for this one found two real defects: unresolved cells blocking a submission,
-  and a pooled frontier that made improvements invisible.)
+  (Writing the tests for this one found four real defects: unresolved cells blocking a
+  submission, a pooled frontier that made improvements invisible, a read of the whole of
+  `/dev/urandom`, and a bench runner that never produced one of the three objectives it is
+  scored on.)
 - **An axis whose spread sits inside its own noise is open, not solved.**
 - **Correctness before speed, always.** A submission failing the gate is rejected, not traded off.
 - **Never type a benchmark number by hand.** Every figure in `docs/ROOFLINE.md`, `docs/SCREEN.md`

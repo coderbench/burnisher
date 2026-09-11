@@ -47,7 +47,8 @@ Then, on the pinned hardware:
 
 ```bash
 burnish gate --impl <your-impl> --repeats 10 --output gate.json   # correctness first, always
-burnish bench --impl-candidate <your-impl> --gate-result gate.json --output raw.json
+burnish bench --impl-candidate <your-impl> \
+    --gate-result gate.json --gate-base-result gate-base.json --output raw.json
 burnish score raw.json
 ```
 

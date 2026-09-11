@@ -1,0 +1,88 @@
+#!/usr/bin/env python3
+"""A stand-in for the native runtime that speaks the BURNISH_JSON protocol.
+
+Latency is a deterministic function of (stage, impl, resolution) plus a small seeded wobble, so a
+test can ask for a known speedup and check the harness reports it. Nothing here computes anything;
+it exists to exercise the runner's guards, pairing and parsing.
+
+Knobs a test can set:
+  BURNISH_FAKE_SPEEDUP   candidate impl runs this many times faster
+  BURNISH_FAKE_WOBBLE    relative run-to-run spread
+  BURNISH_FAKE_FALLBACK  report `stock` whatever was asked for -- the silent-fallback incident
+  BURNISH_FAKE_DEGENERATE  report a constant output latent
+  BURNISH_FAKE_NO_JSON   print prose and no result line
+  BURNISH_FAKE_COUNTER   path to a call-counter file, so repeats differ from each other
+  BURNISH_FAKE_L2        report this as the gate's fidelity (unused by `bench`)
+"""
+import hashlib
+import json
+import os
+import sys
+
+args = sys.argv[1:]
+if not args or "--help" in args:
+    print("fake burnisher: info | bench | generate | probe")
+    sys.exit(0)
+
+opt = {}
+i = 1
+while i < len(args):
+    if args[i].startswith("--"):
+        key = args[i][2:]
+        if i + 1 < len(args) and not args[i + 1].startswith("--"):
+            opt[key] = args[i + 1]
+            i += 2
+        else:
+            opt[key] = "1"
+            i += 1
+    else:
+        i += 1
+
+if args[0] == "info":
+    print("fake burnisher\ncuda: fake")
+    sys.exit(0)
+
+if os.environ.get("BURNISH_FAKE_NO_JSON"):
+    print("ran fine, it was quite fast")
+    sys.exit(0)
+
+stage = opt.get("stage", "dit-step")
+impl = opt.get("impl", "stock")
+repeat = opt.get("seed", "0")
+base = {"t5-encode": 0.064, "dit-step": 0.115, "vae-decode": 0.278}.get(stage, 0.1)
+base *= float(opt.get("resolution", 1024)) / 1024.0
+
+if impl != "stock":
+    base /= float(os.environ.get("BURNISH_FAKE_SPEEDUP", "1.0"))
+
+# Real hardware varies between identical invocations; a deterministic stub does not, and a stub
+# that did not vary would make every measured noise floor come out as the instrument resolution.
+# A counter file keeps the wobble varying per call AND reproducible across a test run.
+wobble = float(os.environ.get("BURNISH_FAKE_WOBBLE", "0.002"))
+call = 0
+counter = os.environ.get("BURNISH_FAKE_COUNTER")
+if counter:
+    try:
+        with open(counter) as fh:
+            call = int(fh.read().strip() or 0)
+    except OSError:
+        call = 0
+    with open(counter, "w") as fh:
+        fh.write(str(call + 1))
+key = f"{stage}:{impl}:{repeat}:{call}"
+h = int(hashlib.sha256(key.encode()).hexdigest()[:8], 16)
+base *= 1.0 + wobble * ((h % 1000) / 500.0 - 1.0)
+
+reported = "stock" if os.environ.get("BURNISH_FAKE_FALLBACK") else impl
+stats = {"latent_mean": -0.02, "latent_std": 1.1, "latent_absmax": 4.3}
+if os.environ.get("BURNISH_FAKE_DEGENERATE"):
+    stats = {"latent_mean": 0.0, "latent_std": 0.0, "latent_absmax": 0.0}
+
+print("BURNISH_JSON: " + json.dumps({
+    "metrics": {"latency_s": base, "peak_vram_bytes": 11_000_000_000, "iters": 10},
+    "effective": {"stage": stage, "dtype": opt.get("dtype", "bf16"), "impl": reported,
+                  "resolution": opt.get("resolution", "1024"),
+                  "batch": opt.get("batch", "2"),
+                  "caption_len": opt.get("caption-len", "300")},
+    "output_stats": stats,
+}))

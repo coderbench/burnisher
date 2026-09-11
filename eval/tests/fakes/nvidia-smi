@@ -1,0 +1,21 @@
+#!/usr/bin/env python3
+"""A stand-in for nvidia-smi, so the device-side runners can be exercised without a device.
+
+This does NOT weaken any guard. Every check still runs -- the idle check still shells out, still
+parses, and still refuses when this script reports a busy device. What is faked is the device,
+not the guard, which is the only way code that only runs beside a GPU gets tested at all.
+
+`BURNISH_FAKE_BUSY` makes it report a running process, so the refusal path is testable too.
+"""
+import os
+import sys
+
+args = " ".join(sys.argv[1:])
+if "--query-compute-apps" in args:
+    if os.environ.get("BURNISH_FAKE_BUSY"):
+        print("31337, 21000 MiB, python3")
+    sys.exit(0)
+if "--query-gpu" in args:
+    print("NVIDIA GeForce RTX 5090 (FAKE), 999.99, 32768 MiB, 0000:01:00.0, GPU-fake-0000")
+    sys.exit(0)
+print("fake nvidia-smi")

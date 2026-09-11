@@ -17,7 +17,7 @@
 - [ ] Registered a new name; did **not** replace an existing implementation
 - [ ] `burnisher info` lists it
 - [ ] `burnish gate --impl <name> --repeats 10` passed — determinism **and** correctness
-- [ ] `burnish bench --impl-candidate <name> --gate-result gate.json` run on the pinned hardware
+- [ ] `burnish bench --impl-candidate <name> --gate-result gate.json --gate-base-result gate-base.json` run on the pinned hardware
 - [ ] Held-out shapes were run (no `--skip-held-out`)
 
 Paste the receipt summary from `burnish score`:

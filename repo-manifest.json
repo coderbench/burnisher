@@ -10,7 +10,7 @@
    "test_models"
   ],
   "python_pass": true,
-  "python_tests": 87
+  "python_tests": 105
  },
  "files": [
   ".github/PULL_REQUEST_TEMPLATE.md",
@@ -55,8 +55,11 @@
   "eval/runner.py",
   "eval/screen.py",
   "eval/tests/__init__.py",
+  "eval/tests/fakes/burnisher",
+  "eval/tests/fakes/nvidia-smi",
   "eval/tests/fixtures.py",
   "eval/tests/test_cli.py",
+  "eval/tests/test_device_runners.py",
   "eval/tests/test_runner.py",
   "eval/tests/test_schemas.py",
   "eval/tests/test_scoring.py",

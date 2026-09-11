@@ -222,6 +222,18 @@ def compute(generation, records, *, held_out_records=None, allow_partial=False,
             [r for r in records if r["cell"] == cell_id and r["variant"] == "base"],
             [r for r in records if r["cell"] == cell_id and r["variant"] == "candidate"],
             objs, generation.reference_point)
+    # A cell where BOTH arms produced no operating point is a harness fault, not a tie. It
+    # happens when the runner stopped reporting an objective the generation declares, and the
+    # symptom is a frontier delta of exactly zero -- which reads as "quality-neutral" rather than
+    # as "nobody measured this dimension". Caught here because it is invisible downstream.
+    for cell_id, d in fr_cells.items():
+        if d["points_base"] == 0 and d["points_candidate"] == 0:
+            raise ComputeError(
+                f"{cell_id}: neither arm produced an operating point. Every record was dropped, "
+                f"which means the runner did not report an objective this generation declares "
+                f"({', '.join(o.key for o in generation.objectives)}). A frontier computed from "
+                f"no points is exactly zero and looks like a neutral result; it is a missing "
+                f"measurement.")
     rel = 0.0
     for cell_id, d in fr_cells.items():
         r = d["relative_delta"]
