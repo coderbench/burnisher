@@ -35,10 +35,8 @@ namespace {
 
 constexpr int kBlock = 256;
 
-// Keys per tile in the attention kernel. Fixed rather than sized to kv_len so that shared memory
-// does not scale with the sequence: the VAE mid-block attends over 16384 positions at 1024px and
-// a full-length score buffer there would be 64 kB.
-constexpr int kAttnTile = 256;
+// The attention kernel is templated on its tile size and registered under several names, so the
+// choice is measured rather than argued. See register_cuda_ops().
 
 #define CU_OK(expr)                                                                  \
     do {                                                                             \
@@ -362,7 +360,7 @@ void patch_cuda(const PatchArgs& a) {
 // it is the single largest opportunity in the repository: `issues/dit-attention.md` has the
 // arithmetic.
 
-template <typename T>
+template <typename T, int kTile>
 __global__ void k_attention(const T* q, const T* k, const T* v, const T* bias,
                             const T* key_mask, T* out, int64_t heads, int64_t q_len,
                             int64_t kv_len, int64_t head_dim, float scale) {
@@ -384,9 +382,9 @@ __global__ void k_attention(const T* q, const T* k, const T* v, const T* bias,
     const int64_t b = row / (q_len * heads);
 
     extern __shared__ float shared[];
-    float* scores = shared;                       // kTile
-    float* red = shared + kAttnTile;              // blockDim.x
-    float* acc = shared + kAttnTile + blockDim.x; // head_dim
+    float* scores = shared;                   // kTile
+    float* red = shared + kTile;              // blockDim.x
+    float* acc = shared + kTile + blockDim.x; // head_dim
 
     const int64_t qbase = ((b * q_len + i) * heads + h) * head_dim;
 
@@ -395,8 +393,8 @@ __global__ void k_attention(const T* q, const T* k, const T* v, const T* bias,
     float run_den = 0.0f;
     __syncthreads();
 
-    for (int64_t base = 0; base < kv_len; base += kAttnTile) {
-        const int64_t tile = min((int64_t)kAttnTile, kv_len - base);
+    for (int64_t base = 0; base < kv_len; base += kTile) {
+        const int64_t tile = min((int64_t)kTile, kv_len - base);
 
         for (int64_t t = threadIdx.x; t < tile; t += blockDim.x) {
             const int64_t j = base + t;
@@ -468,17 +466,23 @@ __global__ void k_attention(const T* q, const T* k, const T* v, const T* bias,
     }
 }
 
-void attention_cuda(const AttentionArgs& a) {
-    require_device(*a.q, "attention");
+template <int kTile>
+void attention_cuda_tiled(const AttentionArgs& a) {
+    require_device(*a.q, "attention", "q");
     const float scale = a.scale > 0.0f ? a.scale : rsqrtf((float)a.head_dim);
     const int threads = 128;
     const int64_t rows = a.batch * a.heads * a.q_len;
     if (rows > 2147483647LL) throw std::runtime_error("cuda attention: too many rows");
-    // scores tile + reduction scratch + the accumulator. Fixed, so a 16384-key VAE mid-block
-    // needs no more shared memory than a 300-key cross-attention.
-    const size_t shmem = (kAttnTile + threads + a.head_dim) * sizeof(float);
+    // scores tile + reduction scratch + the accumulator. Fixed by the TILE, not by kv_len, so a
+    // 16384-key VAE mid-block needs no more shared memory than a 300-key cross-attention.
+    const size_t shmem = (kTile + threads + a.head_dim) * sizeof(float);
+    if (shmem > 48 * 1024) {
+        throw std::runtime_error("cuda attention: tile " + std::to_string(kTile) + " needs " +
+                                 std::to_string(shmem) + " bytes of shared memory, over the "
+                                 "48 kB default limit");
+    }
     DISPATCH(*a.q, T,
-             k_attention<T><<<(int)rows, threads, shmem>>>(
+             k_attention<T, kTile><<<(int)rows, threads, shmem>>>(
                  (const T*)a.q->data(), (const T*)a.k->data(), (const T*)a.v->data(),
                  a.bias ? (const T*)a.bias->data() : nullptr,
                  a.key_mask ? (const T*)a.key_mask->data() : nullptr,
@@ -772,9 +776,22 @@ void register_cuda_ops() {
     register_impl<GemmArgs>("gemm", "cuda", gemm_cuda,
                             "cuBLAS matmul with a SEPARATE bias/activation pass; fusing that "
                             "epilogue is issues/fused-adaln.md");
-    register_impl<AttentionArgs>("attention", "cuda", attention_cuda,
-                                 "one block per query row, streaming softmax, no tiling and no "
-                                 "tensor cores; issues/dit-attention.md");
+    // Three tile sizes, registered as three names.
+    //
+    // This is what the registry is FOR, and it is the smallest honest demonstration of the whole
+    // mechanism: three kernels that compute the same thing, differing in one constant, A/B'd in
+    // one process against one another. The tile decides how much shared memory a block holds and
+    // how many synchronisation points a row costs, and which one wins is a question for the
+    // hardware rather than for an argument.
+    register_impl<AttentionArgs>("attention", "cuda", attention_cuda_tiled<256>,
+                                 "tiled online softmax, 256 keys per tile, deterministic; "
+                                 "no tensor cores -- issues/dit-attention.md");
+    register_impl<AttentionArgs>("attention", "cuda-tile64", attention_cuda_tiled<64>,
+                                 "the same kernel at 64 keys per tile: less shared memory, more "
+                                 "synchronisation points per row");
+    register_impl<AttentionArgs>("attention", "cuda-tile1024", attention_cuda_tiled<1024>,
+                                 "the same kernel at 1024 keys per tile: fewer barriers, four "
+                                 "times the shared memory, fewer blocks resident");
     register_impl<NormArgs>("norm", "cuda", norm_cuda,
                             "one block per row, naive shared-memory reduction, fp32 accumulators");
     register_impl<ModulateArgs>("modulate", "cuda", modulate_cuda,
