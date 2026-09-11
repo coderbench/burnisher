@@ -1,7 +1,7 @@
 {
  "checks": {
   "_note": "Counted from the suites' own output by scripts/manifest.py --write --with-checks. These used to be typed, and they drifted.",
-  "cpp_assertions": 4843,
+  "cpp_assertions": 5083,
   "cpp_pass": true,
   "cpp_suites": [
    "test_tensor",
@@ -98,6 +98,7 @@
   "scripts/build.sh",
   "scripts/build_cuda.sh",
   "scripts/check.sh",
+  "scripts/differential_test.py",
   "scripts/make_issues.py",
   "scripts/make_reference_latents.py",
   "scripts/manifest.py",

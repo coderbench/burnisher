@@ -54,6 +54,21 @@ step "the runtime's tensor names match the pinned checkpoint"
 # check that turned "these names are probably right" into evidence.
 python3 scripts/verify_checkpoint_layout.py --against-saved || fail=1
 
+# Optional, because it needs a 22 GB checkpoint and the reference implementation. It is the only
+# check here with a SECOND OPINION, and it has found four defects that every self-consistency
+# check in this repository passed. Run it whenever you touch something that computes.
+if [ -n "${BURNISHER_CHECKPOINT:-}" ]; then
+  step "against the reference implementation (BURNISHER_CHECKPOINT is set)"
+  python3 scripts/differential_test.py --stage scheduler || fail=1
+  python3 scripts/differential_test.py --weights "$BURNISHER_CHECKPOINT" \
+      --stage vae-decode --resolution 32 || fail=1
+else
+  echo
+  echo "=== against the reference implementation: SKIPPED ==="
+  echo "    Set BURNISHER_CHECKPOINT to a checkpoint directory to run it. It needs diffusers"
+  echo "    and torch -- the REFERENCE implementation, deliberately not a dependency here."
+fi
+
 step "manifest"
 python3 scripts/manifest.py --check || fail=1
 
