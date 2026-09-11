@@ -14,18 +14,18 @@ and they would be working on a fiftieth of the clock.
 
 | steps | t5-encode | dit-step | vae-decode | total ceiling |
 |--:|--:|--:|--:|--:|
-| 20 | 2.0% | 94.3% | 3.7% | 1345 ms |
-| 4 | 8.1% | 76.7% | 15.1% | 331 ms |
+| 20 | 2.0% | 94.3% | 3.7% | 1189 ms |
+| 4 | 8.1% | 76.7% | 15.1% | 292 ms |
 
 So this is a **memory-axis** cell, not a latency one, and the frontier scores memory. Two things
 are worth real money here and neither is a faster kernel:
 
 - **Quantization.** fp8 takes the encoder to 4.76 GB and NVFP4 to
   2.68 GB, against 9.53 GB at bf16. That is
-  6.8 GB of a 32 GiB card returned
+  6.8 GB of a 31 GiB card returned
   to the denoise loop, and it is scored on the `peak_vram_bytes` objective directly.
 - **Caching.** The encoder output depends only on the prompt. A pipeline that re-encodes an
-  unchanged prompt is doing 27 ms of arithmetic for nothing. This is worth
+  unchanged prompt is doing 24 ms of arithmetic for nothing. This is worth
   the most exactly where the latency share is worst -- at four steps it is
   8.1% of the clock.
 

@@ -6,9 +6,9 @@
 
 | resolution | ceiling | FLOPs | bound by | fusion headroom | score matrix if materialized |
 |--:|--:|--:|:--|--:|--:|
-| 512 | 12.0 ms | 2.52 T | compute | 1.24x | 0.00 GB |
-| 1024 | 50.1 ms | 10.49 T | compute | 1.23x | 0.00 GB |
-| 2048 | 231.7 ms | 48.55 T | compute | 1.20x | 0.00 GB |
+| 512 | 10.6 ms | 2.52 T | compute | 1.32x | 0.00 GB |
+| 1024 | 44.3 ms | 10.49 T | compute | 1.31x | 0.00 GB |
+| 2048 | 204.9 ms | 48.55 T | compute | 1.27x | 0.00 GB |
 
 **A correction worth making before anyone starts.** VAE decode is widely described as
 memory-bound. On this part, at its arithmetic ceiling, it is not: the convolutions have
@@ -22,7 +22,7 @@ the bound.
 Two concrete surfaces the arithmetic does point at:
 
 - **Fusion.** The `fusion headroom` column is the sum of per-op bounds over the whole-stage
-  bound. At 2048px it is 1.20x, and that entire gap is
+  bound. At 2048px it is 1.27x, and that entire gap is
   intermediate traffic a fused implementation would not move. One 1024x1024x128 activation is
   268 MB in bf16 and a ResNet block touches several.
 - **The mid-block attention.** It is spatial self-attention over every latent position --

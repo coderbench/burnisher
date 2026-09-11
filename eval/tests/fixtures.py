@@ -67,6 +67,7 @@ def records(generation, *, speedups=None, repeats=5, jitter=0.002, vram=11.0e9,
 
 
 def scratch_generation(tmpdir, name, *, with_prompts=False, **calib):
+    """See calibrated_generation for `achieved` / `floor_pct`."""
     """A calibrated generation under `tmpdir/cells/<name>`, outside the repository.
 
     Tests must not write into the tree they are scoring. An interrupted run that left a

@@ -12,12 +12,12 @@
 | **all resident** | **10.85 GB** |
 | **streamed (largest stage only)** | **9.53 GB** |
 
-The card is 32 GiB. The difference between those last two rows --
+The card is 31 GiB. The difference between those last two rows --
 1.32 GB -- is what a streaming arrangement
 returns, and almost all of it is the text encoder sitting idle through the entire denoise loop.
 
 For PixArt-Sigma at 1024px this is comfortable either way, and that is worth saying plainly
-rather than overselling it: 10.85 GB of 32 GiB is not a
+rather than overselling it: 10.85 GB of 31 GiB is not a
 crisis. **It stops being comfortable immediately outside this generation.** Qwen-Image's DiT
 alone is 20B parameters -- 40 GB at bf16 against 32 -- and was ruled out of v0 on FIT, not on
 arithmetic (`configs/candidates.json`). Video models are worse again.

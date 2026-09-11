@@ -45,7 +45,20 @@ class DeviceRunnerCase(unittest.TestCase):
         self.gen_name = "BG-FAKE"
         # Outside the repository: a test must not leave a calibrated generation in eval/cells/,
         # where the next `burnish generation show` would report numbers nobody measured.
-        self.cells_root, self.gpath = fixtures.scratch_generation(self.dir, self.gen_name)
+        # The fixture's `achieved` is derived from the CEILING and the fake runtime's own
+        # latency, never hardcoded. Hardcoding it made the calibration stale the moment a device
+        # probe changed every ceiling -- and the drift guard in compute.py caught it, which is
+        # what it is for, but a test should not be the thing that trips it.
+        lat = json.loads((FAKES / "latencies.json").read_text())
+        gen_doc = json.loads(
+            (ROOT / "eval" / "cells" / "BG-1" / "generation.json").read_text())
+        achieved = {}
+        for c in gen_doc["cells"]:
+            if not c["implemented"]:
+                continue
+            achieved[c["id"]] = c["ceiling_seconds"] / lat[c["stage"]]
+        self.cells_root, self.gpath = fixtures.scratch_generation(
+            self.dir, self.gen_name, achieved=achieved)
         self.gen_dir = self.gpath.parent
 
     def tearDown(self):

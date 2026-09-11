@@ -6,9 +6,9 @@
 
 | resolution | DiT tokens | step ceiling |
 |--:|--:|--:|
-| 512 | 1024 | 12.3 ms |
-| 1024 | 4096 | 63.4 ms |
-| 2048 | 16384 | 500.2 ms |
+| 512 | 1024 | 10.9 ms |
+| 1024 | 4096 | 56.1 ms |
+| 2048 | 16384 | 442.2 ms |
 
 A kernel tuned at one token count is untuned at the next, and the counts here span
 1024 to 16384. This is the

@@ -9,7 +9,7 @@
    "test_scheduler",
    "test_models"
   ],
-  "python_pass": false,
+  "python_pass": true,
   "python_tests": 121
  },
  "files": [
@@ -63,6 +63,7 @@
   "eval/screen.py",
   "eval/tests/__init__.py",
   "eval/tests/fakes/burnisher",
+  "eval/tests/fakes/latencies.json",
   "eval/tests/fakes/nvidia-smi",
   "eval/tests/fixtures.py",
   "eval/tests/test_cli.py",

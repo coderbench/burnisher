@@ -82,7 +82,10 @@ if os.environ.get("BURNISH_FAKE_NO_JSON"):
 stage = opt.get("stage", "dit-step")
 impl = opt.get("impl", "stock")
 repeat = opt.get("seed", "0")
-base = {"t5-encode": 0.064, "dit-step": 0.115, "vae-decode": 0.278}.get(stage, 0.1)
+_here = os.path.dirname(os.path.abspath(__file__))
+with open(os.path.join(_here, "latencies.json")) as fh:
+    _lat = json.load(fh)
+base = _lat.get(stage, 0.1)
 base *= float(opt.get("resolution", 1024)) / 1024.0
 
 if impl != "stock":

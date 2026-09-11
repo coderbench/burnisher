@@ -1,0 +1,6 @@
+{
+ "_what": "Base latencies the fake runtime reports, per stage. Shared by the fake and by the tests that calibrate against it, so the two cannot drift apart -- which they did the moment a device probe changed every ceiling, and the calibration drift guard caught it exactly as designed.",
+ "t5-encode": 0.064,
+ "dit-step": 0.115,
+ "vae-decode": 0.278
+}

@@ -14,7 +14,7 @@ traffic -- 45% of it -- to do a negligible
 share of its 13.28 TFLOPs. Every byte of that is removable in principle by
 folding the modulation into the epilogue of the GEMM before it or the prologue of the one after.
 
-The whole-step fusion headroom at 1024px is **1.12x** (the sum of
+The whole-step fusion headroom at 1024px is **1.16x** (the sum of
 per-op bounds over the whole-stage bound), and this op family is most of it.
 
 **Why the ceiling does not move when you win.** The published ceiling counts only *unavoidable*
