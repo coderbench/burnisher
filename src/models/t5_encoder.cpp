@@ -108,7 +108,7 @@ Tensor T5Encoder::forward(const Tensor& token_ids, const ImplSelection& impls) c
     // By KEY only. Padded query rows still produce output and that output is meaningless; it is
     // masked out downstream by the caption mask in cross-attention, which is what the reference
     // does too.
-    Tensor mask_host({B, S}, dtype_, impls.device);
+    Tensor mask_host({B, S}, dtype_);
     for (int64_t i = 0; i < B * S; ++i) {
         mask_host.set(i, static_cast<int64_t>(ids_host.get(i)) == kPadTokenId ? 0.0f : 1.0f);
     }
