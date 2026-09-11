@@ -852,6 +852,7 @@ int cmd_generate(const Args& a) {
     cfg.guidance_scale = a.real("guidance-scale", 4.5);
     cfg.compute = dtype_arg(a);
     cfg.impl = a.get("impl", "stock");
+    cfg.device = device_arg(a);
     cfg.classifier_free_guidance = !a.has("no-cfg");
 
     // Token ids: one prompt per line, ids separated by whitespace. Rows are padded to the
@@ -917,6 +918,7 @@ int cmd_generate(const Args& a) {
         {"steps", std::to_string(cfg.steps)}, {"seed", std::to_string(cfg.seed)},
         {"caption_len", std::to_string(cfg.caption_len)},
         {"cfg", cfg.classifier_free_guidance ? "1" : "0"},
+        {"device", a.get("device", "cpu")},
     };
     for (const auto& kv : ImplSelection::from_request(cfg.impl).as_map()) {
         effective["impl." + kv.first] = kv.second;

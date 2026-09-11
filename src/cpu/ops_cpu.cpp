@@ -348,6 +348,26 @@ void patch_cpu(const PatchArgs& a) {
     }
 }
 
+void scale_cpu(const ScaleArgs& a) {
+    for (int64_t i = 0; i < a.numel; ++i) a.out->set(i, a.in->get(i) * a.scale);
+}
+
+void repeat_cpu(const RepeatArgs& a) {
+    for (int64_t r = 0; r < a.outer; ++r) {
+        for (int64_t i = 0; i < a.inner; ++i) a.out->set(r * a.inner + i, a.in->get(i));
+    }
+}
+
+void guidance_cpu(const GuidanceArgs& a) {
+    for (int64_t c = 0; c < a.channels; ++c) {
+        for (int64_t s = 0; s < a.spatial; ++s) {
+            const double u = a.prediction->get((0 * a.out_channels + c) * a.spatial + s);
+            const double k = a.prediction->get((1 * a.out_channels + c) * a.spatial + s);
+            a.out->set(c * a.spatial + s, static_cast<float>(u + a.scale * (k - u)));
+        }
+    }
+}
+
 void gather_cpu(const GatherArgs& a) {
     for (int64_t i = 0; i < a.rows; ++i) {
         const int64_t id = static_cast<int64_t>(a.ids->get(i));
@@ -412,6 +432,11 @@ void register_builtin_cpu_ops() {
                            "reach device memory");
     register_impl<ChunkArgs>("chunk", "stock", chunk_cpu,
                              "AdaLN-single's six modulation chunks plus the per-layer table");
+    register_impl<ScaleArgs>("scale", "stock", scale_cpu, "one multiply per element");
+    register_impl<RepeatArgs>("repeat", "stock", repeat_cpu,
+                              "replicate a latent across the guidance batch");
+    register_impl<GuidanceArgs>("guidance", "stock", guidance_cpu,
+                                "classifier-free guidance, discarding the learned-variance half");
     register_impl<GatherArgs>("gather", "stock", gather_cpu,
                               "embedding row gather; the table is resident, the rows are read");
     register_impl<UpsampleArgs>("upsample", "stock", upsample_cpu,
@@ -435,6 +460,9 @@ std::vector<OpListing> list_all_impls() {
         {ChunkRegistry::instance().op_name(), ChunkRegistry::instance().list()},
         {PatchRegistry::instance().op_name(), PatchRegistry::instance().list()},
         {GatherRegistry::instance().op_name(), GatherRegistry::instance().list()},
+        {ScaleRegistry::instance().op_name(), ScaleRegistry::instance().list()},
+        {RepeatRegistry::instance().op_name(), RepeatRegistry::instance().list()},
+        {GuidanceRegistry::instance().op_name(), GuidanceRegistry::instance().list()},
         {UpsampleRegistry::instance().op_name(), UpsampleRegistry::instance().list()},
         {TransposeRegistry::instance().op_name(), TransposeRegistry::instance().list()},
     };

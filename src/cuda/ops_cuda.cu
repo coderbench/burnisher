@@ -586,6 +586,64 @@ void conv2d_cuda(const Conv2dArgs& a) {
 }
 
 template <typename T>
+__global__ void k_scale(const T* in, T* out, int64_t n, float s) {
+    for (int64_t i = blockIdx.x * (int64_t)blockDim.x + threadIdx.x; i < n;
+         i += (int64_t)gridDim.x * blockDim.x) {
+        st(out, i, ld(in, i) * s);
+    }
+}
+
+void scale_cuda(const ScaleArgs& a) {
+    require_device(*a.in, "scale", "input");
+    const int grid = (int)std::min<int64_t>(65535, (a.numel + kBlock - 1) / kBlock);
+    DISPATCH(*a.in, T, k_scale<T><<<grid, kBlock>>>((const T*)a.in->data(),
+                                                    (T*)a.out->data(), a.numel, a.scale));
+    check_launch("scale");
+}
+
+template <typename T>
+__global__ void k_repeat(const T* in, T* out, int64_t outer, int64_t inner) {
+    const int64_t n = outer * inner;
+    for (int64_t i = blockIdx.x * (int64_t)blockDim.x + threadIdx.x; i < n;
+         i += (int64_t)gridDim.x * blockDim.x) {
+        st(out, i, ld(in, i % inner));
+    }
+}
+
+void repeat_cuda(const RepeatArgs& a) {
+    require_device(*a.in, "repeat", "input");
+    const int64_t n = a.outer * a.inner;
+    const int grid = (int)std::min<int64_t>(65535, (n + kBlock - 1) / kBlock);
+    DISPATCH(*a.in, T, k_repeat<T><<<grid, kBlock>>>((const T*)a.in->data(),
+                                                     (T*)a.out->data(), a.outer, a.inner));
+    check_launch("repeat");
+}
+
+template <typename T>
+__global__ void k_guidance(const T* pred, T* out, int64_t out_channels, int64_t channels,
+                           int64_t spatial, float scale) {
+    const int64_t n = channels * spatial;
+    for (int64_t i = blockIdx.x * (int64_t)blockDim.x + threadIdx.x; i < n;
+         i += (int64_t)gridDim.x * blockDim.x) {
+        const int64_t c = i / spatial, s = i % spatial;
+        const float u = ld(pred, (0 * out_channels + c) * spatial + s);
+        const float k = ld(pred, (1 * out_channels + c) * spatial + s);
+        st(out, i, u + scale * (k - u));
+    }
+}
+
+void guidance_cuda(const GuidanceArgs& a) {
+    require_device(*a.prediction, "guidance", "prediction");
+    const int64_t n = a.channels * a.spatial;
+    const int grid = (int)std::min<int64_t>(65535, (n + kBlock - 1) / kBlock);
+    DISPATCH(*a.prediction, T,
+             k_guidance<T><<<grid, kBlock>>>((const T*)a.prediction->data(),
+                                             (T*)a.out->data(), a.out_channels, a.channels,
+                                             a.spatial, a.scale));
+    check_launch("guidance");
+}
+
+template <typename T>
 __global__ void k_gather(const T* table, const T* ids, T* out, int64_t rows, int64_t cols) {
     const int64_t n = rows * cols;
     for (int64_t i = blockIdx.x * (int64_t)blockDim.x + threadIdx.x; i < n;
@@ -684,6 +742,9 @@ void register_cuda_ops() {
     register_impl<ChunkArgs>("chunk", "cuda", chunk_cuda, "AdaLN-single modulation chunks");
     register_impl<PatchArgs>("patch", "cuda", patch_cuda, "patchify and unpatchify");
     register_impl<GatherArgs>("gather", "cuda", gather_cuda, "embedding row gather");
+    register_impl<ScaleArgs>("scale", "cuda", scale_cuda, "one multiply per element");
+    register_impl<RepeatArgs>("repeat", "cuda", repeat_cuda, "guidance-batch replication");
+    register_impl<GuidanceArgs>("guidance", "cuda", guidance_cuda, "classifier-free guidance");
     register_impl<UpsampleArgs>("upsample", "cuda", upsample_cuda, "nearest 2x, NCHW");
     register_impl<TransposeArgs>("transpose", "cuda", transpose_cuda,
                                  "channels-major <-> tokens-major");

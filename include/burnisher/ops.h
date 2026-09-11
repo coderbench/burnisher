@@ -202,7 +202,40 @@ struct GatherArgs {
     int64_t rows, cols;
 };
 
+// out[i] = in[i] * scale. The VAE scaling factor, and anything else that is one multiply.
+struct ScaleArgs {
+    const Tensor* in;
+    Tensor* out;
+    int64_t numel;
+    float scale;
+};
+
+// out[r, :] = in[:] for every r. Replicating a latent across the classifier-free-guidance batch.
+struct RepeatArgs {
+    const Tensor* in;
+    Tensor* out;
+    int64_t outer, inner;
+};
+
+// Classifier-free guidance, reading a [2, out_channels, spatial] prediction and writing
+// [channels, spatial]:
+//
+//     out = uncond + scale * (cond - uncond)
+//
+// The channel slice is part of the op because the denoiser predicts 2 x in_channels -- epsilon
+// and a learned variance -- and the sampler is epsilon-only. Discarding the variance half is
+// what the reference does; NOT computing it would be a different model.
+struct GuidanceArgs {
+    const Tensor* prediction;   // [2, out_channels, spatial]
+    Tensor* out;                // [channels, spatial]
+    int64_t out_channels, channels, spatial;
+    float scale;
+};
+
 using GemmRegistry = OpRegistry<GemmArgs>;
+using ScaleRegistry = OpRegistry<ScaleArgs>;
+using RepeatRegistry = OpRegistry<RepeatArgs>;
+using GuidanceRegistry = OpRegistry<GuidanceArgs>;
 using GatherRegistry = OpRegistry<GatherArgs>;
 using UpsampleRegistry = OpRegistry<UpsampleArgs>;
 using TransposeRegistry = OpRegistry<TransposeArgs>;
@@ -230,6 +263,9 @@ struct ImplSelection {
     std::string patch = "stock";
     std::string upsample = "stock";
     std::string gather = "stock";
+    std::string scale = "stock";
+    std::string repeat = "stock";
+    std::string guidance = "stock";
     std::string transpose = "stock";
     // Where the model's intermediate tensors are allocated. Carried with the implementation
     // selection because the two cannot disagree: a CUDA kernel over host tensors is a fault, and

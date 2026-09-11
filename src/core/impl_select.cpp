@@ -25,6 +25,9 @@ bool op_has(const std::string& op, const std::string& name) {
     if (op == "chunk") return ChunkRegistry::instance().has(name);
     if (op == "patch") return PatchRegistry::instance().has(name);
     if (op == "gather") return GatherRegistry::instance().has(name);
+    if (op == "scale") return ScaleRegistry::instance().has(name);
+    if (op == "repeat") return RepeatRegistry::instance().has(name);
+    if (op == "guidance") return GuidanceRegistry::instance().has(name);
     if (op == "upsample") return UpsampleRegistry::instance().has(name);
     if (op == "transpose") return TransposeRegistry::instance().has(name);
     throw std::runtime_error("unknown op '" + op + "'");
@@ -50,7 +53,8 @@ std::string resolve_impl(const std::string& op, const std::string& requested) {
 
 bool any_op_has_impl(const std::string& name) {
     for (const char* op : {"gemm", "attention", "norm", "modulate", "activation", "conv2d",
-                           "add", "chunk", "patch", "upsample", "transpose", "gather"}) {
+                           "add", "chunk", "patch", "upsample", "transpose", "gather",
+                           "scale", "repeat", "guidance"}) {
         if (op_has(op, name)) return true;
     }
     return false;
@@ -66,7 +70,8 @@ std::map<std::string, std::string> resolve_all(const std::string& requested) {
     }
     std::map<std::string, std::string> out;
     for (const char* op : {"gemm", "attention", "norm", "modulate", "activation", "conv2d",
-                           "add", "chunk", "patch", "upsample", "transpose", "gather"}) {
+                           "add", "chunk", "patch", "upsample", "transpose", "gather",
+                           "scale", "repeat", "guidance"}) {
         out[op] = resolve_impl(op, requested);
     }
     return out;

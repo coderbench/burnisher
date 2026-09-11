@@ -24,6 +24,7 @@ struct PipelineConfig {
     uint64_t seed = 20260911;
     DType compute = DType::BF16;
     std::string impl = "stock";
+    Device device = Device::CPU;
 };
 
 struct OutputStats {

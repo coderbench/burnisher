@@ -60,7 +60,7 @@ Tensor Pipeline::generate(const Tensor& token_ids, StageTimings* timings,
     const auto secs = [](clock::time_point a, clock::time_point b) {
         return std::chrono::duration<double>(b - a).count();
     };
-    const ImplSelection impls = ImplSelection::from_request(cfg_.impl);
+    const ImplSelection impls = ImplSelection::from_request(cfg_.impl, cfg_.device);
     const int64_t batch = cfg_.classifier_free_guidance ? 2 : 1;
     if (token_ids.dim(0) != batch) {
         throw std::runtime_error(
@@ -72,28 +72,38 @@ Tensor Pipeline::generate(const Tensor& token_ids, StageTimings* timings,
     // The caption mask, derived from the ids rather than passed alongside them: a mask that can
     // disagree with the ids it describes is a mask that eventually will. Per batch row, because
     // the negative and positive prompts are different lengths.
-    Tensor caption_mask({batch, token_ids.dim(1)}, cfg_.compute);
-    for (int64_t i = 0; i < caption_mask.numel(); ++i) {
-        caption_mask.set(i, static_cast<int64_t>(token_ids.get(i)) != 0 ? 1.0f : 0.0f);
+    // Built on the host from host ids, then placed. The ids are a few hundred integers; the
+    // mask they imply is the same size, and deriving it on the device would be a kernel for
+    // nothing.
+    Tensor ids_host = (token_ids.device() == Device::CUDA) ? token_ids.to_host() : token_ids;
+    Tensor mask_host({batch, token_ids.dim(1)}, cfg_.compute);
+    for (int64_t i = 0; i < mask_host.numel(); ++i) {
+        mask_host.set(i, static_cast<int64_t>(ids_host.get(i)) != 0 ? 1.0f : 0.0f);
     }
+    Tensor caption_mask = (impls.device == Device::CUDA) ? mask_host.to_device() : mask_host;
+    Tensor ids = (impls.device == Device::CUDA && token_ids.device() != Device::CUDA)
+                     ? token_ids.to_device() : token_ids;
 
     const auto t0 = clock::now();
     T5Encoder text(t5cfg_, *tw_, cfg_.compute);
-    Tensor caption = text.forward(token_ids, impls);
+    Tensor caption = text.forward(ids, impls);
     const auto t1 = clock::now();
 
     PixArtDiT dit(ditcfg_, *dw_, cfg_.compute);
     DPMSolverMultistep sched(schedcfg_);
     sched.set_timesteps(cfg_.steps);
 
-    Tensor latent = initial_latent();
+    Tensor latent_host = initial_latent();
+    Tensor latent = (impls.device == Device::CUDA) ? latent_host.to_device() : latent_host;
     const int64_t per = latent.numel();
-    Tensor batched({batch, latent.dim(1), latent.dim(2), latent.dim(3)}, cfg_.compute);
-    Tensor eps(latent.shape(), cfg_.compute);
+    Tensor batched({batch, latent.dim(1), latent.dim(2), latent.dim(3)}, cfg_.compute,
+                   impls.device);
+    Tensor eps(latent.shape(), cfg_.compute, impls.device);
+    const auto& repeat = RepeatRegistry::instance().get(impls.repeat);
+    const auto& guidance = GuidanceRegistry::instance().get(impls.guidance);
 
     for (int i = 0; i < sched.steps(); ++i) {
-        for (int64_t b = 0; b < batch; ++b)
-            for (int64_t j = 0; j < per; ++j) batched.set(b * per + j, latent.get(j));
+        repeat(RepeatArgs{&latent, &batched, batch, per});
 
         Tensor out = dit.forward(batched, static_cast<double>(sched.timestep(i)), caption,
                                  caption_mask, impls);
@@ -103,30 +113,29 @@ Tensor Pipeline::generate(const Tensor& token_ids, StageTimings* timings,
         const int64_t oc = out.dim(1);
         const int64_t chan = latent.dim(1);
         const int64_t spatial = latent.dim(2) * latent.dim(3);
-        if (cfg_.classifier_free_guidance) {
-            for (int64_t c = 0; c < chan; ++c) {
-                for (int64_t s = 0; s < spatial; ++s) {
-                    const double uncond = out.get((0 * oc + c) * spatial + s);
-                    const double cond = out.get((1 * oc + c) * spatial + s);
-                    eps.set(c * spatial + s,
-                            static_cast<float>(uncond + cfg_.guidance_scale * (cond - uncond)));
-                }
-            }
-        } else {
-            for (int64_t c = 0; c < chan; ++c)
-                for (int64_t s = 0; s < spatial; ++s)
-                    eps.set(c * spatial + s, out.get(c * spatial + s));
-        }
-        sched.step(eps, i, latent);
+        guidance(GuidanceArgs{&out, &eps, oc, chan, spatial,
+                              cfg_.classifier_free_guidance
+                                  ? static_cast<float>(cfg_.guidance_scale) : 0.0f});
+        // The sampler is a handful of scalar coefficients over the whole latent and runs on the
+        // host. At 128x128x4 that is a 256 kB round trip per step against a 13 TFLOP forward
+        // pass -- immaterial, and it keeps one implementation of the ORACLE rather than two.
+        Tensor eps_host = (impls.device == Device::CUDA) ? eps.to_host() : eps;
+        Tensor lat_host = (impls.device == Device::CUDA) ? latent.to_host() : latent;
+        sched.step(eps_host, i, lat_host);
+        latent = (impls.device == Device::CUDA) ? lat_host.to_device() : lat_host;
     }
     const auto t2 = clock::now();
 
-    if (final_latent) *final_latent = latent;
-
-    Tensor scaled(latent.shape(), cfg_.compute);
-    for (int64_t i = 0; i < latent.numel(); ++i) {
-        scaled.set(i, static_cast<float>(latent.get(i) / vaecfg_.scaling_factor));
+    // Handed back on the HOST: the gate compares it with numpy, and a device tensor there would
+    // be a pointer nobody can read.
+    if (final_latent) {
+        *final_latent = (latent.device() == Device::CUDA) ? latent.to_host() : latent;
     }
+
+    Tensor scaled(latent.shape(), cfg_.compute, impls.device);
+    ScaleRegistry::instance().get(impls.scale)(
+        ScaleArgs{&latent, &scaled, latent.numel(),
+                  static_cast<float>(1.0 / vaecfg_.scaling_factor)});
     VaeDecoder vae(vaecfg_, *vw_, cfg_.compute);
     Tensor pixels = vae.forward(scaled, impls);
     const auto t3 = clock::now();
