@@ -19,7 +19,8 @@ burnish bench ... | burnish score   # a number with an interval on it
 
 **The instrument is complete and tested. The runtime runs end to end on the CPU, reproduces itself
 byte for byte, loads and runs the real pinned checkpoint, and agrees with the reference
-implementation stage by stage. Nothing has been measured on a GPU.** No Blackwell device and no CUDA
+implementation on all four stages — scheduler 1.7e-07, VAE 6.9e-06, T5 2.4e-06, DiT 7.3e-04
+relative L2. Nothing has been measured on a GPU.** No Blackwell device and no CUDA
 toolkit were available when this was built, so every cell's achieved fraction and noise floor is
 `null`, every ceiling stands on a vendor device peak rather than a probed one, and the CUDA op
 backend does not exist yet.

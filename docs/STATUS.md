@@ -114,15 +114,21 @@ made.
 
 **And the strongest check now available: stage-by-stage against the reference.**
 
-`scripts/differential_test.py` runs one stage in this runtime and the same stage in diffusers,
-on the same weights and the same input tensor, and compares. That is the correctness gate's
-question at a scale a CPU can answer, and it is what found the patch-ordering defect.
+`scripts/differential_test.py` runs one stage in this runtime and the same stage in diffusers, on
+the same weights and the same input tensor, and compares. That is the correctness gate's question
+at a scale a CPU can answer, and it is what found the patch-ordering and sampler defects.
+
+**All four stages now agree with the reference.** That is the strongest correctness statement this
+repository can make without a GPU, and it is still weaker than the gate: it is one forward pass
+per stage, in fp32, at shapes no receipt is scored on. It says the arithmetic is right. It does
+not say the twenty-step bf16 loop at 1024px is.
 
 | stage | shape | relative L2 vs reference | verdict |
 |:--|:--|--:|:--|
 | `vae-decode` | 4x4 latent | **6.9e-06** | agrees to fp32 epsilon |
 | `dit-step` | 64px, batch 2, 28 blocks | **7.3e-04** | agrees; see below |
 | `scheduler` | 20 steps, no weights | **1.7e-07** | agrees to fp32 epsilon |
+| `t5-encode` | 16 tokens, batch 2, 24 blocks | **2.4e-06** | agrees to fp32 epsilon |
 
 The DiT figure needed explaining rather than accepting, so the block stack was truncated on both
 sides and the divergence measured against depth:
