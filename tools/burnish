@@ -1,0 +1,334 @@
+#!/usr/bin/env python3
+"""burnish -- drive the Burnisher runtime and score changes to it.
+
+A burnisher is the tool a mezzotint printmaker uses on a plate roughened to solid black -- pure
+noise -- pressing it smooth until the image emerges. This is the command that does the pressing.
+
+    burnish screen                 which model should v0 pin, from arithmetic alone
+    burnish roofline               the per-cell ceiling table and how full each cell is
+    burnish generation check       is the frozen generation still consistent with configs/?
+
+    burnish probe                  measure this device's real peaks          [needs a GPU]
+    burnish calibrate              measure each cell's achieved fraction and noise floor  [GPU]
+    burnish gate                   correctness and self-determinism, before any timing    [GPU]
+    burnish bench                  paired interleaved base-vs-candidate runs              [GPU]
+
+    burnish score                  raw measurements -> a scored receipt
+    burnish receipt verify|show    check a receipt against itself and its generation
+    burnish ledger show|audit      the append-only history
+
+The split is deliberate. Everything above the line is arithmetic or bookkeeping and runs
+anywhere. Everything marked [GPU] produces a MEASUREMENT and cannot be faked, simulated, or
+estimated -- if the device is not there, these commands fail and say so rather than returning a
+plausible number. That distinction is the whole design.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "eval"))
+
+EXIT_NO_DEVICE = 3
+
+
+def _runtime_binary():
+    """Where the native runtime is, or a clear explanation of why it is not."""
+    for candidate in (os.environ.get("BURNISHER_BIN"),
+                      ROOT / "build" / "burnisher",
+                      ROOT / "build-cuda" / "burnisher"):
+        if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK):
+            return Path(candidate)
+    return None
+
+
+def _require_device(what):
+    """Refuse loudly. A measurement command with no device must not degrade into an estimate."""
+    binary = _runtime_binary()
+    problems = []
+    if binary is None:
+        problems.append("the native runtime is not built (looked for build/burnisher; build it "
+                        "with scripts/build.sh)")
+    if shutil.which("nvidia-smi") is None:
+        problems.append("nvidia-smi is not on PATH, so there is no NVIDIA device visible here")
+    if problems:
+        print(f"!! {what} needs a GPU and cannot run:", file=sys.stderr)
+        for p in problems:
+            print(f"     - {p}", file=sys.stderr)
+        print("\n   This command produces a MEASUREMENT. There is no fallback and there is not\n"
+              "   supposed to be one: an estimate printed where a measurement belongs is how an\n"
+              "   evaluator comes to publish a confident number for a run that never happened.\n"
+              "\n   Run it on the pinned hardware (see docs/HARDWARE.md), or use the commands\n"
+              "   that need no device: screen, roofline, generation, score, receipt, ledger.",
+              file=sys.stderr)
+        return None
+    return binary
+
+
+def _device_is_idle(verbose=True):
+    """Refuse to start a load while something else is on the device.
+
+    Two benchmarks on one GPU do not merely go slower -- they race for VRAM, one of them fails
+    to allocate, the harness retries into the same contention, and what comes out is a number
+    for a run that never happened. That is not hypothetical; it is the incident that put an
+    advisory lock into the harness this one is descended from, and it happened twice.
+    """
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-compute-apps=pid,used_memory,process_name",
+             "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        print(f"!! could not ask the device what is running on it: {exc}", file=sys.stderr)
+        return False
+    busy = [line for line in out.stdout.splitlines() if line.strip()]
+    if busy:
+        print("!! the device is not idle. Refusing to start a second load:", file=sys.stderr)
+        for line in busy:
+            print(f"     {line}", file=sys.stderr)
+        print("\n   Two benchmarks on one GPU race for VRAM and the loser becomes a\n"
+              "   plausible-looking number. Wait, or stop the other process BY PID -- never\n"
+              "   with `pkill -f`, which over ssh matches and kills your own session when the\n"
+              "   remote command line contains the pattern.", file=sys.stderr)
+        return False
+    if verbose:
+        print(">> device is idle")
+    return True
+
+
+# --------------------------------------------------------------------------- no-GPU commands
+
+def cmd_screen(args, rest):
+    return subprocess.call([sys.executable, str(ROOT / "eval" / "screen.py")] + rest)
+
+
+def cmd_roofline(args, rest):
+    return subprocess.call([sys.executable, str(ROOT / "eval" / "roofline_table.py")] + rest)
+
+
+def cmd_generation(args, rest):
+    script = str(ROOT / "eval" / "make_generation.py")
+    if args.action == "check":
+        return subprocess.call([sys.executable, script, "--check"] + rest)
+    if args.action == "write":
+        return subprocess.call([sys.executable, script, "--write"] + rest)
+    path = ROOT / "eval" / "cells" / args.name / "generation.json"
+    if not path.exists():
+        print(f"!! no such generation: {path}", file=sys.stderr)
+        return 2
+    from burnscore import cells as C
+    gen = C.load(path)
+    print(json.dumps({
+        "name": gen.name, "digest": gen.digest, "device": gen.device,
+        "model": gen.model, "cells": {c.id: c.to_json() for c in gen.published_cells()},
+        "scorable_now": [c.id for c in gen.scorable_cells()],
+        "uncalibrated": [c.id for c in gen.published_cells()
+                         if c.implemented and not c.calibrated],
+    }, indent=1, sort_keys=True))
+    return 0
+
+
+def cmd_score(args, rest):
+    from burnscore import cells as C, compute as CP, receipt as R, ledger as L
+    gen = C.load(ROOT / "eval" / "cells" / args.generation / "generation.json")
+    records = json.loads(Path(args.results).read_text())
+    if isinstance(records, dict):
+        held = records.get("held_out") or None
+        prov = records.get("provenance") or {}
+        correctness = records.get("correctness", "PASS")
+        determinism = records.get("determinism")
+        records = records["records"]
+    else:
+        held, prov, correctness, determinism = None, {}, "PASS", None
+    if determinism is None:
+        print("!! the raw results do not say whether the build reproduces itself.\n"
+              "   A build that has not passed `burnish gate --determinism` cannot be a "
+              "reference\n   for anything, and scoring it would attribute noise to a candidate.",
+              file=sys.stderr)
+        return 2
+    out = CP.compute(gen, records, held_out_records=held,
+                     allow_partial=args.allow_partial)
+    rec = R.build_receipt(
+        generation=gen, per_cell=out["per_cell"], aggregate=out["aggregate"],
+        interval=out["interval"], frontier=out["frontier"], correctness=correctness,
+        determinism=determinism, coverage=out["coverage"],
+        held_out=(out["held_out"] or {}).get("survived", True) is not False,
+        provenance=prov, pr=args.pr)
+    text = json.dumps(rec, indent=1, sort_keys=True) + "\n"
+    if args.output:
+        Path(args.output).write_text(text)
+        print(f">> wrote {args.output}")
+    if args.ledger:
+        p = L.append_receipt(args.ledger, rec, generation=gen)
+        print(f">> appended {p}")
+    if not (args.output or args.ledger):
+        print(text)
+    _print_receipt_summary(rec)
+    return 0
+
+
+def _print_receipt_summary(rec):
+    s = rec["score"]
+    print(f"\n  status            {rec['status']}")
+    print(f"  gap closed        {s['gap_closed']:+.4f}   "
+          f"(credited {s['credited_gap_closed']:+.4f})")
+    ci = s["confidence_interval"]
+    print(f"  {int(ci['level'] * 100)}% interval     "
+          f"[{ci['lower']:+.4f}, {ci['upper']:+.4f}]")
+    print(f"  resolved          {s['resolved']}")
+    print(f"  frontier          {rec['frontier'].get('delta'):+.5f} "
+          f"({'expanded' if rec['frontier'].get('expanded') else 'not expanded'})")
+    print("\n  per cell:")
+    print(f"    {'cell':26s} {'gap':>8s} {'achieved':>18s} {'floor':>7s} {'res':>4s}")
+    for cid, c in sorted(rec["per_cell"].items()):
+        print(f"    {cid:26s} {c['gap_closed']:+8.4f} "
+              f"{c['achieved_base']:>8.1%} -> {c['achieved_candidate']:<7.1%} "
+              f"{c['floor_pct']:>6.3f}% {'yes' if c['resolved'] else 'NO':>4s}")
+    if rec.get("credit_withheld"):
+        print(f"\n  CREDIT WITHHELD: {rec['credit_withheld']['reason']}")
+    print()
+
+
+def cmd_receipt(args, rest):
+    from burnscore import cells as C, receipt as R
+    doc = json.loads(Path(args.path).read_text())
+    if args.action == "show":
+        _print_receipt_summary(doc)
+        return 0
+    gen = None
+    gpath = ROOT / "eval" / "cells" / doc.get("benchmark_generation", "") / "generation.json"
+    if gpath.exists():
+        gen = C.load(gpath)
+    try:
+        R.verify_receipt(doc, gen)
+    except R.ReceiptError as exc:
+        print(f"!! receipt does not verify: {exc}", file=sys.stderr)
+        return 1
+    print(f"ok: {args.path} verifies against itself"
+          + (f" and against {gen.name}" if gen else " (its generation is not in this tree)"))
+    return 0
+
+
+def cmd_ledger(args, rest):
+    from burnscore import cells as C, ledger as L
+    root = args.root or (ROOT / "eval" / "cells")
+    if args.action == "show":
+        print(json.dumps(L.show(root, args.generation), indent=1, sort_keys=True))
+        return 0
+    gpath = ROOT / "eval" / "cells" / args.generation / "generation.json"
+    gen = C.load(gpath) if gpath.exists() else None
+    report = L.audit(root, args.generation, gen)
+    print(json.dumps(report, indent=1, sort_keys=True))
+    return 0 if report["ok"] else 1
+
+
+# --------------------------------------------------------------------------- GPU commands
+
+def cmd_probe(args, rest):
+    binary = _require_device("burnish probe")
+    if binary is None:
+        return EXIT_NO_DEVICE
+    if not _device_is_idle():
+        return EXIT_NO_DEVICE
+    return subprocess.call([str(binary), "probe"] + rest)
+
+
+def cmd_calibrate(args, rest):
+    binary = _require_device("burnish calibrate")
+    if binary is None:
+        return EXIT_NO_DEVICE
+    if not _device_is_idle():
+        return EXIT_NO_DEVICE
+    return subprocess.call([sys.executable, str(ROOT / "eval" / "calibrate.py"),
+                            "--binary", str(binary)] + rest)
+
+
+def cmd_gate(args, rest):
+    binary = _require_device("burnish gate")
+    if binary is None:
+        return EXIT_NO_DEVICE
+    if not _device_is_idle():
+        return EXIT_NO_DEVICE
+    return subprocess.call([sys.executable, str(ROOT / "eval" / "gate.py"),
+                            "--binary", str(binary)] + rest)
+
+
+def cmd_bench(args, rest):
+    binary = _require_device("burnish bench")
+    if binary is None:
+        return EXIT_NO_DEVICE
+    if not _device_is_idle():
+        return EXIT_NO_DEVICE
+    return subprocess.call([sys.executable, str(ROOT / "eval" / "bench.py"),
+                            "--binary", str(binary)] + rest)
+
+
+def build_parser():
+    ap = argparse.ArgumentParser(
+        prog="burnish", description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    sub = ap.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("screen", help="which model should v0 pin (arithmetic only)",
+                       description="Forwards to eval/screen.py; pass --help for its options.")
+    p.set_defaults(fn=cmd_screen)
+
+    p = sub.add_parser("roofline", help="the per-cell ceiling table",
+                       description="Forwards to eval/roofline_table.py.")
+    p.set_defaults(fn=cmd_roofline)
+
+    p = sub.add_parser("generation", help="inspect or check a frozen generation")
+    p.add_argument("action", choices=["show", "check", "write"])
+    p.add_argument("--name", default="BG-1")
+    p.set_defaults(fn=cmd_generation)
+
+    p = sub.add_parser("score", help="raw measurements -> a scored receipt")
+    p.add_argument("results", help="raw results JSON from `burnish bench`")
+    p.add_argument("--generation", default="BG-1")
+    p.add_argument("--output")
+    p.add_argument("--ledger", help="append the receipt to this ledger root")
+    p.add_argument("--pr", type=int)
+    p.add_argument("--allow-partial", action="store_true",
+                   help="score an incomplete matrix; the receipt will say PARTIAL and credit "
+                        "nothing")
+    p.set_defaults(fn=cmd_score)
+
+    p = sub.add_parser("receipt", help="verify or show a receipt")
+    p.add_argument("action", choices=["verify", "show"])
+    p.add_argument("path")
+    p.set_defaults(fn=cmd_receipt)
+
+    p = sub.add_parser("ledger", help="the append-only receipt history")
+    p.add_argument("action", choices=["show", "audit"])
+    p.add_argument("--generation", default="BG-1")
+    p.add_argument("--root")
+    p.set_defaults(fn=cmd_ledger)
+
+    for name, fn, helptext in (
+            ("probe", cmd_probe, "measure this device's sustained bandwidth and FLOPS [GPU]"),
+            ("calibrate", cmd_calibrate,
+             "measure each cell's achieved fraction and noise floor [GPU]"),
+            ("gate", cmd_gate, "correctness and self-determinism, before any timing [GPU]"),
+            ("bench", cmd_bench, "paired interleaved base-vs-candidate runs [GPU]")):
+        p = sub.add_parser(name, help=helptext,
+                           description=f"{helptext}\n\nThis command produces a MEASUREMENT. "
+                                       f"Without a device it fails; it does not estimate.")
+        p.set_defaults(fn=fn)
+    return ap
+
+
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    ap = build_parser()
+    args, rest = ap.parse_known_args(argv)
+    return args.fn(args, rest)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
