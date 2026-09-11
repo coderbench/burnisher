@@ -73,7 +73,7 @@ def encode_prompts(weights, ids_doc, prompt_ids, dtype):
     return out
 
 
-def denoise(weights, embeds, noise, steps, guidance, dtype):
+def denoise(weights, embeds, noise, steps, guidance, dtype, out_dir=None):
     """The reference denoise loop: the reference transformer and the reference scheduler."""
     import torch
     from diffusers import Transformer2DModel, DPMSolverMultistepScheduler
@@ -118,6 +118,13 @@ def denoise(weights, embeds, noise, steps, guidance, dtype):
                 print(f"   {pid:16s} step {i + 1}/{steps}  "
                       f"{(time.time() - t0) / (i + 1):.1f}s/step", flush=True)
         out[pid] = latent.float().numpy()
+        if out_dir is not None:
+            # Written as each one finishes, not at the end. A five-hour job that loses everything
+            # to an interruption is a five-hour job nobody runs twice.
+            import numpy as np
+            out_dir.mkdir(parents=True, exist_ok=True)
+            np.save(out_dir / f"{pid}.npy", out[pid])
+            print(f"   {pid:16s} saved", flush=True)
         print(f"   {pid:16s} done in {time.time() - t0:.0f}s", flush=True)
     del model
     gc.collect()
@@ -159,10 +166,10 @@ def main():
     print(f"checkpoint: {gen['model']['repo']} @ {gen['model']['revision'][:12]}")
     print(f"noise: {noise.shape}, steps {steps}, guidance {args.guidance}, dtype {args.dtype}\n")
 
-    embeds = encode_prompts(args.weights, ids_doc, prompt_ids, dtype)
-    latents = denoise(args.weights, embeds, noise, steps, args.guidance, dtype)
-
     out_dir = gdir / "reference-latents"
+    embeds = encode_prompts(args.weights, ids_doc, prompt_ids, dtype)
+    latents = denoise(args.weights, embeds, noise, steps, args.guidance, dtype,
+                      out_dir if args.write else None)
     manifest = {
         "_what": "The pinned reference latents: the oracle the correctness gate compares "
                  "against. Produced by the REFERENCE implementation, never by this runtime -- a "
@@ -190,8 +197,6 @@ def main():
               f"absmax {abs(arr).max():.3f}")
     if args.write:
         out_dir.mkdir(parents=True, exist_ok=True)
-        for pid, arr in latents.items():
-            np.save(out_dir / f"{pid}.npy", arr)
         (out_dir / "manifest.json").write_text(
             json.dumps(manifest, indent=1, sort_keys=True) + "\n")
         print(f"\n>> wrote {len(latents)} latents to {out_dir}")

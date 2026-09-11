@@ -54,7 +54,8 @@ Tensor Pipeline::initial_latent() const {
     return z;
 }
 
-Tensor Pipeline::generate(const Tensor& token_ids, StageTimings* timings) {
+Tensor Pipeline::generate(const Tensor& token_ids, StageTimings* timings,
+                          Tensor* final_latent) {
     using clock = std::chrono::steady_clock;
     const auto secs = [](clock::time_point a, clock::time_point b) {
         return std::chrono::duration<double>(b - a).count();
@@ -119,6 +120,8 @@ Tensor Pipeline::generate(const Tensor& token_ids, StageTimings* timings) {
         sched.step(eps, i, latent);
     }
     const auto t2 = clock::now();
+
+    if (final_latent) *final_latent = latent;
 
     Tensor scaled(latent.shape(), cfg_.compute);
     for (int64_t i = 0; i < latent.numel(); ++i) {

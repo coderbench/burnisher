@@ -60,7 +60,8 @@ common options:
   --steps N                 denoise steps (default: 20)
   --seed N                  fixed seed (default: 20260911)
   --token-ids FILE          T5 token ids, one prompt per line (negative first under CFG)
-  --dump-latents FILE       write the output tensor as .npy, for the correctness gate
+  --dump-latents FILE       write the denoised LATENT as .npy -- what the gate compares
+  --dump-pixels FILE        write the decoded image as .npy
   --weights DIR             checkpoint directory (transformer/ vae/ text_encoder/);
                             omit to use synthetic weights, which exercise the graph but say
                             nothing about the loader or the tensor-name mapping
@@ -137,6 +138,30 @@ std::string stats_json(const OutputStats& s) {
     os << "{\"latent_mean\":" << s.latent_mean << ",\"latent_std\":" << s.latent_std
        << ",\"latent_absmax\":" << s.latent_absmax << "}";
     return os.str();
+}
+
+// Minimal .npy v1.0. Enough for a contiguous little-endian fp32 tensor, which is all that
+// crosses this boundary; numpy on the other side does the rest.
+void write_npy(const std::string& path, const Tensor& t) {
+    if (path.empty()) return;
+    std::ofstream out(path, std::ios::binary);
+    if (!out) throw std::runtime_error("cannot write " + path);
+    std::ostringstream hdr;
+    hdr << "{'descr': '<f4', 'fortran_order': False, 'shape': (";
+    for (size_t i = 0; i < t.rank(); ++i) hdr << t.dim(i) << ", ";
+    hdr << "), }";
+    std::string h = hdr.str();
+    while ((10 + h.size() + 1) % 64) h += ' ';
+    h += '\n';
+    const unsigned char magic[] = {0x93, 'N', 'U', 'M', 'P', 'Y', 1, 0};
+    out.write(reinterpret_cast<const char*>(magic), 8);
+    const uint16_t len = static_cast<uint16_t>(h.size());
+    out.write(reinterpret_cast<const char*>(&len), 2);
+    out.write(h.data(), static_cast<std::streamsize>(h.size()));
+    for (int64_t i = 0; i < t.numel(); ++i) {
+        const float v = t.get(i);
+        out.write(reinterpret_cast<const char*>(&v), sizeof(v));
+    }
 }
 
 size_t peak_rss_bytes() {
@@ -485,24 +510,7 @@ int cmd_noise(const Args& a) {
         std::cerr << "!! --out FILE is required\n";
         return 2;
     }
-    std::ofstream f(out, std::ios::binary);
-    if (!f) throw std::runtime_error("cannot write " + out);
-    std::ostringstream hdr;
-    hdr << "{'descr': '<f4', 'fortran_order': False, 'shape': (";
-    for (size_t i = 0; i < z.rank(); ++i) hdr << z.dim(i) << ", ";
-    hdr << "), }";
-    std::string h = hdr.str();
-    while ((10 + h.size() + 1) % 64) h += ' ';
-    h += '\n';
-    const unsigned char magic[] = {0x93, 'N', 'U', 'M', 'P', 'Y', 1, 0};
-    f.write(reinterpret_cast<const char*>(magic), 8);
-    const uint16_t len = static_cast<uint16_t>(h.size());
-    f.write(reinterpret_cast<const char*>(&len), 2);
-    f.write(h.data(), static_cast<std::streamsize>(h.size()));
-    for (int64_t i = 0; i < z.numel(); ++i) {
-        const float v = z.get(i);
-        f.write(reinterpret_cast<const char*>(&v), sizeof(v));
-    }
+    write_npy(out, z);
     const OutputStats st = OutputStats::of(z);
     std::cout << "BURNISH_JSON: {\"effective\":{\"seed\":" << cfg.seed
               << ",\"resolution\":" << cfg.resolution << "},\"output_stats\":"
@@ -600,33 +608,16 @@ int cmd_generate(const Args& a) {
 
     Pipeline p(cfg, text, den, dec, t5, dit, vae, sched);
     StageTimings t{};
-    Tensor pixels = p.generate(ids, &t);
-    const OutputStats st = OutputStats::of(pixels);
+    Tensor final_latent;
+    Tensor pixels = p.generate(ids, &t, &final_latent);
+    // The gate's statistics are about the LATENT, because the latent is what the gate compares.
+    const OutputStats st = OutputStats::of(final_latent);
 
-    const std::string dump = a.get("dump-latents");
-    if (!dump.empty()) {
-        // A .npy of the final PIXELS, so eval/gate.py can compare them with numpy. Latents are
-        // what the gate actually wants; this is the pixel tensor because the pipeline returns
-        // it, and `--dump-latents` keeps the harness's flag name.
-        std::ofstream out(dump, std::ios::binary);
-        if (!out) throw std::runtime_error("cannot write " + dump);
-        std::ostringstream hdr;
-        hdr << "{'descr': '<f4', 'fortran_order': False, 'shape': (";
-        for (size_t i = 0; i < pixels.rank(); ++i) hdr << pixels.dim(i) << ", ";
-        hdr << "), }";
-        std::string h = hdr.str();
-        while ((10 + h.size() + 1) % 64) h += ' ';
-        h += '\n';
-        const unsigned char magic[] = {0x93, 'N', 'U', 'M', 'P', 'Y', 1, 0};
-        out.write(reinterpret_cast<const char*>(magic), 8);
-        const uint16_t len = static_cast<uint16_t>(h.size());
-        out.write(reinterpret_cast<const char*>(&len), 2);
-        out.write(h.data(), static_cast<std::streamsize>(h.size()));
-        for (int64_t i = 0; i < pixels.numel(); ++i) {
-            const float v = pixels.get(i);
-            out.write(reinterpret_cast<const char*>(&v), sizeof(v));
-        }
-    }
+    // --dump-latents writes the denoised LATENT, before the VAE. The VAE decode is itself under
+    // optimization, so comparing pixels would fold two questions into one and let a decoder
+    // change hide a denoiser change. --dump-pixels is separate and is for looking at.
+    write_npy(a.get("dump-latents"), final_latent);
+    write_npy(a.get("dump-pixels"), pixels);
 
     std::map<std::string, std::string> effective{
         {"impl", cfg.impl}, {"dtype", dtype_name(cfg.compute)},

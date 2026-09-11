@@ -54,7 +54,14 @@ class Pipeline {
     // then the positive. Pre-tokenized on purpose -- the T5 tokenizer is a SentencePiece model
     // and vendoring one would put a second oracle in the repository. docs/CORRECTNESS.md has the
     // procedure for producing the ids and pinning their digest.
-    Tensor generate(const Tensor& token_ids, StageTimings* timings);
+    // Returns the decoded pixels. `final_latent`, when given, receives the latent as it stood
+    // AFTER the denoise loop and BEFORE the VAE -- which is what the correctness gate compares.
+    //
+    // Latents, not pixels, and the distinction is load-bearing: the VAE decode is itself one of
+    // the things under optimization, so comparing images would fold two questions into one and
+    // let a decoder change hide a denoiser change.
+    Tensor generate(const Tensor& token_ids, StageTimings* timings,
+                    Tensor* final_latent = nullptr);
 
     // Deterministic Gaussian noise from the seed. Drawn on the host, in a fixed order, and NOT
     // on the device: a sampler that drew its noise in kernel-launch order would make the whole
