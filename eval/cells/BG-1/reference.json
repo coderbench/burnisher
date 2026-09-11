@@ -1,0 +1,45 @@
+{
+ "_device_probe_note": "Null until `burnish probe --device` runs. Until then the ceilings behind these cells stand on VENDOR peaks, which no kernel reaches -- so every achieved fraction computed against them is a LOWER bound on how done a cell really is.",
+ "_how_to_fill_this_in": "burnish calibrate --generation BG-1 --repeats 9 --write",
+ "_status": "UNCALIBRATED. No cell has been measured on the pinned hardware, so every `achieved` and `floor_pct` below is null and the scorer will refuse to produce a receipt. This is the honest state of the repository and not an oversight: publishing a plausible achieved fraction would make every gap-closed score a fiction with a checksum on it.",
+ "_what_this_is": "Per-cell CALIBRATION: the fraction of the arithmetic ceiling currently achieved, and the measured run-to-run noise floor. Both are measurements and neither can be computed from a config file.",
+ "cells": {
+  "dit-step/1024/bf16": {
+   "achieved": null,
+   "floor_pct": null,
+   "floor_repeats": null,
+   "measured_seconds": null,
+   "peak_vram_bytes": null
+  },
+  "dit-step/1024/fp8": {
+   "achieved": null,
+   "floor_pct": null,
+   "floor_repeats": null,
+   "measured_seconds": null,
+   "peak_vram_bytes": null
+  },
+  "dit-step/1024/nvfp4": {
+   "achieved": null,
+   "floor_pct": null,
+   "floor_repeats": null,
+   "measured_seconds": null,
+   "peak_vram_bytes": null
+  },
+  "t5-encode/1024/bf16": {
+   "achieved": null,
+   "floor_pct": null,
+   "floor_repeats": null,
+   "measured_seconds": null,
+   "peak_vram_bytes": null
+  },
+  "vae-decode/1024/bf16": {
+   "achieved": null,
+   "floor_pct": null,
+   "floor_repeats": null,
+   "measured_seconds": null,
+   "peak_vram_bytes": null
+  }
+ },
+ "device_probe": null,
+ "generation": "BG-1"
+}
