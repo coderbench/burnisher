@@ -93,7 +93,11 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
     Tensor patches = patchify(latent, static_cast<int>(patch), dtype_);
     Tensor x({M, d}, dtype_);
     {
-        Tensor pw = w_.require("pos_embed.proj.weight");   // [d, C, p, p] == [d, C*p*p]
+        // [d, C, p, p] in the checkpoint. Read as a [d, C*p*p] matrix: contiguously those are
+        // the same bytes in the same order, and `patchify` lays each token out as (c, ky, kx) to
+        // match. The gemm below is therefore the patch-embedding convolution, exactly.
+        Tensor pw = w_.require("pos_embed.proj.weight")
+                        .reshape({d, cfg_.in_channels * patch * patch});
         Tensor pb = w_.require("pos_embed.proj.bias");
         Tensor flat = patches.reshape({M, cfg_.in_channels * patch * patch});
         gemm(GemmArgs{&flat, &pw, &pb, &x, M, d, cfg_.in_channels * patch * patch, true});

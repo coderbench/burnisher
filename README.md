@@ -210,7 +210,8 @@ the thing that runs and nothing else would notice.
 `issues/README.md` — twelve items, each carrying its own arithmetic. The two that block everything:
 
 - **`cuda-op-backend`** — there is no CUDA implementation of any op, so nothing can be measured.
-- **`checkpoint-load`** — the load path and the pinned reference latents do not exist yet.
+- **`checkpoint-load`** — the load path and the pinned reference latents do not exist yet. (The
+  962 tensor names and shapes the runtime requires *are* verified against the pinned revisions.)
 
 Then: DiT attention at 4k–16k tokens (fp8/NVFP4), VAE decode tiling and the 16384-token mid-block
 attention, T5 quantization and caching, fused AdaLN, weight formats on silicon with no reference
@@ -235,6 +236,10 @@ Every one was learned by somebody getting it wrong.
 - **Correctness before speed, always.** A submission failing the gate is rejected, not traded off.
 - **Never type a benchmark number by hand.** Every figure in `docs/ROOFLINE.md`, `docs/SCREEN.md`
   and `issues/` is generated; CI fails if any of them is stale.
+- **Check the assumption rather than restating it.** The runtime's 962 required tensor names were
+  written from the reference implementation's module structure — usually right, and not evidence.
+  Reading the real checkpoint's safetensors headers by HTTP range request (1.8 MB, not 22 GB)
+  turned that into evidence and found a wrong shape declaration on the first run.
 - **Never run two benchmarks at once.** They race for VRAM and the harness turns the loser into a
   plausible-looking number.
 - **Clocks cannot be pinned in a container**, so only paired interleaved same-box deltas mean

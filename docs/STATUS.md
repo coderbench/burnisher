@@ -30,6 +30,7 @@ toolkit were available when this was built.**
 | Paired bench and calibration runners | complete, exercised against a fake device | `python3 -m unittest discover -s eval -t eval` |
 | CUDA device probe | **written, never compiled** | CI job `cuda-compile` |
 | CUDA op backend | **does not exist** | `issues/cuda-op-backend.md` |
+| Checkpoint tensor names and shapes | verified against the pinned revisions, 962/962 | `scripts/verify_checkpoint_layout.py` |
 | Checkpoint load path | **not wired up** | `issues/checkpoint-load.md` |
 | Reference latents for the gate | **do not exist** | `issues/checkpoint-load.md` |
 | Every cell's achieved fraction | **null** | `burnish roofline` |
@@ -101,9 +102,11 @@ In this order, because each step unblocks the next:
 - **`peak_vram_bytes` on a CPU build is host RSS.** On a CUDA build it must be the device
   allocator's high-water mark. Scoring the wrong resource would make the entire memory axis
   meaningless and would look completely reasonable.
-- **The checkpoint tensor names in `declare_pixart_shapes()` were written from the reference
-  implementation's module structure, not checked against the real file.** They are usually right
-  and that is not evidence.
+- ~~The checkpoint tensor names were written from the reference implementation's module
+  structure, not checked against the real file.~~ **Now checked**: all 962 names and shapes match
+  the pinned revisions, verified by reading the real safetensors headers over HTTP range requests
+  (about 1.8 MB, not 22 GB). `configs/checkpoint-layout.json` is the committed record and CI
+  re-checks it offline. That check found one real defect on its first run.
 - **The 2D position embedding is sin-then-cos and the timestep embedding is cos-then-sin.** Two
   conventions in one model is not a design, it is history. Both are marked `ORACLE` in the source.
 - **The tolerance in BG-1 is a stated, falsifiable threshold and is expected to move once**, the

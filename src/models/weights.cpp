@@ -167,7 +167,12 @@ void declare_pixart_shapes(SyntheticWeights& w, const T5Config& t5, const DiTCon
     }
 
     const int64_t d = dit.d(), dff = dit.d_ff(), p2 = dit.patch_size * dit.patch_size;
-    w.declare("pos_embed.proj.weight", {d, dit.in_channels * p2});
+    // [out, in, kh, kw], the checkpoint's own conv layout -- NOT the flattened [out, in*kh*kw].
+    // Contiguously they are the same bytes in the same order, and the patch embedding reads it
+    // as a matrix, so the runtime works either way. The declaration still has to match the
+    // checkpoint: it is what scripts/verify_checkpoint_layout.py compares against, and a shape
+    // this file gets wrong is a shape nothing else can catch.
+    w.declare("pos_embed.proj.weight", {d, dit.in_channels, dit.patch_size, dit.patch_size});
     w.declare("pos_embed.proj.bias", {d});
     w.declare("adaln_single.emb.timestep_embedder.linear_1.weight", {d, 256});
     w.declare("adaln_single.emb.timestep_embedder.linear_1.bias", {d});

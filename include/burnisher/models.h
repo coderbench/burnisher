@@ -52,6 +52,9 @@ class SyntheticWeights : public WeightSource {
     bool has(const std::string&) const override { return true; }
     Tensor get(const std::string& name) const override;
     void declare(const std::string& name, std::vector<int64_t> shape);
+    // Every name and shape this fixture was told about. Exposed so the runtime can PUBLISH what
+    // it requires of a checkpoint, and something else can check that against a real one.
+    const std::map<std::string, std::vector<int64_t>>& declared() const { return shapes_; }
 
   private:
     DType dtype_;

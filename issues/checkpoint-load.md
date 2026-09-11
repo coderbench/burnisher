@@ -4,16 +4,24 @@
 **Basis:** model (arithmetic). No measurement appears below.  
 **Device:** NVIDIA GeForce RTX 5090
 
-`burnisher generate --weights DIR` currently exits 4 and explains why. Three things are missing
-and each is small; together they are what stands between this repository and its first real
-number.
+`burnisher generate --weights DIR` currently exits 4 and explains why. Three things stood between
+this repository and its first real number. One is now done; two remain.
 
-**1. The checkpoint layout mapping.** `SafeTensors` maps a file and resolves tensors by name, and
-`declare_pixart_shapes()` enumerates every name the three models ask for. What has not happened
-is checking those names against the actual
-`PixArt-alpha/PixArt-Sigma-XL-2-1024-MS`
-checkpoint. They were written from the reference implementation's module structure, which is
-usually right and is not evidence.
+**1. The checkpoint layout mapping — DONE, and verified.** `SafeTensors` maps a file and resolves
+tensors by name, and `declare_pixart_shapes()` enumerates every name the three models ask for.
+All **962** of them have now been checked against the real checkpoint at the pinned
+revisions: **0 missing, 0 wrong shape**.
+
+The check costs about 1.8 MB rather than 22 GB. A safetensors file begins with an 8-byte header
+length and then that many bytes of JSON naming every tensor and its shape, so two HTTP range
+requests per shard fetch the whole layout. `scripts/verify_checkpoint_layout.py` does it;
+`configs/checkpoint-layout.json` is the committed record, and CI re-checks the runtime against it
+offline on every push.
+
+It found one real defect on its first run — `pos_embed.proj.weight` was declared flattened as
+`[1152, 16]` where the checkpoint stores the conv layout `[1152, 4, 2, 2]`. Same bytes in the same
+order, so the runtime would have worked; the declaration was still wrong, and a shape that file
+gets wrong is a shape nothing else can catch.
 
 **2. Pre-tokenized prompt ids.** The T5 tokenizer is a SentencePiece model. Vendoring one would
 put a second oracle in the repository, so the pipeline takes token ids directly and

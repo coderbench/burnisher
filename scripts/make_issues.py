@@ -92,6 +92,14 @@ def facts(cand, devices, axes):
                          wdtype=dt, adtype="bf16")
         f[f"dit_ceiling_{dt}_ms"] = bound_for(d, dev, cell="x").ceiling_seconds * 1e3
         f[f"dit_params_{dt}_gb"] = d.param_bytes / 1e9
+    # From the verification's own record rather than re-derived here, and certainly not typed.
+    # The figure is how many tensors the RUNTIME requires -- not how many the checkpoint holds,
+    # which includes a VAE encoder this pipeline never reads.
+    layout = ROOT / "configs" / "checkpoint-layout.json"
+    v = json.loads(layout.read_text()).get("verified", {}) if layout.exists() else {}
+    f["checkpoint_tensors_verified"] = v.get("required_by_runtime", 0)
+    f["checkpoint_missing"] = v.get("missing")
+    f["checkpoint_wrong_shape"] = v.get("wrong_shape")
     t5 = G.t5_encoder(cand["text_encoder"], seq=300, batch=2)
     f["t5_params_gb"] = t5.param_bytes / 1e9
     f["t5_ceiling_ms"] = bound_for(t5, dev, cell="t5").ceiling_seconds * 1e3
@@ -456,17 +464,26 @@ The CI job `cuda-compile` compiles `device.cu` for sm_120 on a runner with a too
 @issue("checkpoint-load", "Load the pinned checkpoint and pin the reference latents",
        ["blocking", "correctness", "v0"])
 def _(f):
+    n_tensors = f["checkpoint_tensors_verified"]
     return f"""
-`burnisher generate --weights DIR` currently exits 4 and explains why. Three things are missing
-and each is small; together they are what stands between this repository and its first real
-number.
+`burnisher generate --weights DIR` currently exits 4 and explains why. Three things stood between
+this repository and its first real number. One is now done; two remain.
 
-**1. The checkpoint layout mapping.** `SafeTensors` maps a file and resolves tensors by name, and
-`declare_pixart_shapes()` enumerates every name the three models ask for. What has not happened
-is checking those names against the actual
-`{json.loads((ROOT / 'configs' / 'candidates.json').read_text())['candidates']['pixart-sigma-xl2-1024']['repo']}`
-checkpoint. They were written from the reference implementation's module structure, which is
-usually right and is not evidence.
+**1. The checkpoint layout mapping — DONE, and verified.** `SafeTensors` maps a file and resolves
+tensors by name, and `declare_pixart_shapes()` enumerates every name the three models ask for.
+All **{n_tensors}** of them have now been checked against the real checkpoint at the pinned
+revisions: **{f['checkpoint_missing']} missing, {f['checkpoint_wrong_shape']} wrong shape**.
+
+The check costs about 1.8 MB rather than 22 GB. A safetensors file begins with an 8-byte header
+length and then that many bytes of JSON naming every tensor and its shape, so two HTTP range
+requests per shard fetch the whole layout. `scripts/verify_checkpoint_layout.py` does it;
+`configs/checkpoint-layout.json` is the committed record, and CI re-checks the runtime against it
+offline on every push.
+
+It found one real defect on its first run — `pos_embed.proj.weight` was declared flattened as
+`[1152, 16]` where the checkpoint stores the conv layout `[1152, 4, 2, 2]`. Same bytes in the same
+order, so the runtime would have worked; the declaration was still wrong, and a shape that file
+gets wrong is a shape nothing else can catch.
 
 **2. Pre-tokenized prompt ids.** The T5 tokenizer is a SentencePiece model. Vendoring one would
 put a second oracle in the repository, so the pipeline takes token ids directly and

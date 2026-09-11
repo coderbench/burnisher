@@ -56,6 +56,24 @@ jobs:
       - name: manifest
         run: python3 scripts/manifest.py --check
 
+  checkpoint-layout:
+    # Does the runtime ask for tensors the pinned checkpoint actually has? 962 names and shapes,
+    # checked offline against a record read from the real safetensors headers by HTTP range
+    # request. A misread name does not crash -- it produces a plausible image from wrong weights.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: cmake -S . -B build -DBURNISHER_BUILD_TESTS=OFF && cmake --build build -j2
+      - name: against the pinned layout record
+        run: python3 scripts/verify_checkpoint_layout.py --against-saved
+      - name: and against the live checkpoint, if HuggingFace is reachable
+        # A difference here means the checkpoint moved under a pinned revision, which is a
+        # changed oracle. Non-blocking because it depends on a third party being up.
+        continue-on-error: true
+        run: python3 scripts/verify_checkpoint_layout.py
+
   help:
     # A --help smoke test on every entry point. The cheapest possible check that a binary is not
     # simply broken, and the one that catches a bad refactor before a benchmark run does.

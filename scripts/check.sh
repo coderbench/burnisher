@@ -48,6 +48,12 @@ for e in tools/burnish eval/screen.py eval/roofline_table.py eval/make_generatio
 done
 ./build/burnisher --help >/dev/null || { echo "!! burnisher --help failed"; fail=1; }
 
+step "the runtime's tensor names match the pinned checkpoint"
+# Offline, against the layout record in configs/. The record was produced by reading the real
+# checkpoint's safetensors headers over HTTP range requests at the pinned revisions. This is the
+# check that turned "these names are probably right" into evidence.
+python3 scripts/verify_checkpoint_layout.py --against-saved || fail=1
+
 step "manifest"
 python3 scripts/manifest.py --check || fail=1
 
