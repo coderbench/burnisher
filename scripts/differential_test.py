@@ -80,8 +80,9 @@ def report(name, ours, theirs, tolerance=None):
     return ok
 
 
-def run_ours(binary, args, out, impl=None):
-    cmd = [str(binary)] + args + (["--impl", impl] if impl else [])
+def run_ours(binary, args, out, impl=None, device=None):
+    cmd = ([str(binary)] + args + (["--impl", impl] if impl else []) +
+           (["--device", device] if device else []))
     t0 = time.time()
     p = subprocess.run(cmd, capture_output=True, text=True)
     if p.returncode != 0:
@@ -117,9 +118,10 @@ def stage_vae(args):
             "--out", "/tmp/diff_pixels.npy", "--dtype", args.dtype]
     if args.against != "reference":
         print(f">> ours, impl={args.against}")
-        ref = run_ours(args.binary, argv, "/tmp/diff_pixels.npy", args.against)
+        ref = run_ours(args.binary, argv, "/tmp/diff_pixels.npy", args.against,
+                       args.against_device)
     print(f">> ours, impl={args.impl}")
-    ours = run_ours(args.binary, argv, "/tmp/diff_pixels.npy", args.impl)
+    ours = run_ours(args.binary, argv, "/tmp/diff_pixels.npy", args.impl, args.device)
     return report("vae-decode", ours, ref, tolerance=args.tolerance)
 
 
@@ -174,9 +176,10 @@ def stage_dit(args):
             (["--layers", str(args.layers)] if args.layers else []))
     if args.against != "reference":
         print(f">> ours, impl={args.against}")
-        ref = run_ours(args.binary, argv, "/tmp/diff_dit_out.npy", args.against)
+        ref = run_ours(args.binary, argv, "/tmp/diff_dit_out.npy", args.against,
+                       args.against_device)
     print(f">> ours, impl={args.impl}")
-    ours = run_ours(args.binary, argv, "/tmp/diff_dit_out.npy", args.impl)
+    ours = run_ours(args.binary, argv, "/tmp/diff_dit_out.npy", args.impl, args.device)
     return report("dit-step", ours, ref, tolerance=args.tolerance)
 
 
@@ -212,9 +215,10 @@ def stage_t5(args):
             "--out", "/tmp/diff_t5_out.npy", "--dtype", args.dtype]
     if args.against != "reference":
         print(f">> ours, impl={args.against}")
-        ref = run_ours(args.binary, argv, "/tmp/diff_t5_out.npy", args.against)
+        ref = run_ours(args.binary, argv, "/tmp/diff_t5_out.npy", args.against,
+                       args.against_device)
     print(f">> ours, impl={args.impl}")
-    ours = run_ours(args.binary, argv, "/tmp/diff_t5_out.npy", args.impl)
+    ours = run_ours(args.binary, argv, "/tmp/diff_t5_out.npy", args.impl, args.device)
     # The encoder's output at PADDED positions is meaningless on both sides -- it is masked out
     # downstream. Comparing it would compare two different pieces of garbage, so the comparison
     # is restricted to real tokens, which is also what the model's consumer sees.
@@ -291,6 +295,10 @@ def main():
                     help="'reference' compares against diffusers; an IMPL NAME compares two of "
                          "this runtime's own implementations against each other, which is how a "
                          "CUDA kernel is checked against the CPU oracle")
+    ap.add_argument("--device", default=None,
+                    help="where the tested implementation runs (cpu|cuda)")
+    ap.add_argument("--against-device", default=None,
+                    help="where the comparison implementation runs")
     ap.add_argument("--tolerance", type=float,
                     help="override the per-stage default")
     args = ap.parse_args()
