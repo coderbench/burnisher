@@ -73,7 +73,7 @@ PixArtDiT::PixArtDiT(DiTConfig cfg, const WeightSource& w, DType compute)
     : cfg_(std::move(cfg)), w_(w), dtype_(compute) {}
 
 Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& caption,
-                          const ImplSelection& impls) const {
+                          const Tensor& caption_mask, const ImplSelection& impls) const {
     const auto& gemm = GemmRegistry::instance().get(impls.gemm);
     const auto& attn = AttentionRegistry::instance().get(impls.attention);
     const auto& norm = NormRegistry::instance().get(impls.norm);
@@ -160,6 +160,18 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
     Tensor ff0({M, dff}, dtype_), ffa({M, dff}, dtype_);
     Tensor scale({B, d}, dtype_), shift({B, d}, dtype_), gate({B, d}, dtype_);
 
+    // Cross-attention mask over the caption keys, per batch row. Under classifier-free guidance
+    // the negative prompt is usually far shorter than the positive one, so a single shared mask
+    // would either attend to the negative branch's padding or drop the positive branch's real
+    // tokens.
+    if (caption_mask.numel() != B * cap_len) {
+        throw std::runtime_error(
+            "dit: caption_mask has " + std::to_string(caption_mask.numel()) +
+            " entries, expected batch x caption_len = " + std::to_string(B * cap_len) +
+            ". Cross-attention over unmasked padding is a different model that still produces a "
+            "plausible image.");
+    }
+
     // ORACLE: the six chunks are (shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp,
     // gate_mlp), in that order, and the per-layer scale_shift_table is ADDED to the shared
     // modulation before chunking. Reordering them is invisible in a diff and fatal to the image.
@@ -220,7 +232,7 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
         gemm(GemmArgs{&cap, &wk2, &bk2, &kc, Mcap, d, d, true});
         gemm(GemmArgs{&cap, &wv2, &bv2, &vc, Mcap, d, d, true});
         attn(AttentionArgs{&q, &kc, &vc, &ctx, B, cfg_.num_heads, N, cap_len, cfg_.head_dim,
-                           0.0f, nullptr});
+                           0.0f, nullptr, &caption_mask});
         gemm(GemmArgs{&ctx, &wo2, &bo2, &proj, M, d, d, true});
         for (int64_t i = 0; i < M * d; ++i) x.set(i, x.get(i) + proj.get(i));
 

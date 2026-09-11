@@ -13,6 +13,9 @@ namespace {
 
 const char* kPrefix = "encoder.block.";
 
+// T5's pad id. Padding is the only thing that uses it, so a zero in the ids is a pad position.
+constexpr int64_t kPadTokenId = 0;
+
 std::string blk(int i, const std::string& tail) {
     return kPrefix + std::to_string(i) + "." + tail;
 }
@@ -80,6 +83,18 @@ Tensor T5Encoder::forward(const Tensor& token_ids, const ImplSelection& impls) c
         }
     }
 
+    // The padding mask, PER BATCH ROW. Not optional and not a detail: a prompt is padded to a
+    // fixed 300 tokens, so most of a short caption's sequence is padding, and attending to it
+    // changes every hidden state in the encoder.
+    //
+    // By KEY only. Padded query rows still produce output and that output is meaningless; it is
+    // masked out downstream by the caption mask in cross-attention, which is what the reference
+    // does too.
+    Tensor key_mask({B, S}, dtype_);
+    for (int64_t i = 0; i < B * S; ++i) {
+        key_mask.set(i, static_cast<int64_t>(token_ids.get(i)) == kPadTokenId ? 0.0f : 1.0f);
+    }
+
     Tensor normed({M, d}, dtype_);
     Tensor q({M, inner}, dtype_), k({M, inner}, dtype_), v({M, inner}, dtype_);
     Tensor ctx({M, inner}, dtype_), proj({M, d}, dtype_);
@@ -103,7 +118,8 @@ Tensor T5Encoder::forward(const Tensor& token_ids, const ImplSelection& impls) c
         // T5 does NOT scale the attention scores by 1/sqrt(d_kv); the scaling is folded into
         // the query projection's initialisation. Applying it here would be a quiet, uniform
         // temperature change across every layer.
-        AttentionArgs aa{&q, &k, &v, &ctx, B, cfg_.num_heads, S, S, cfg_.d_kv, 1.0f, &bias};
+        AttentionArgs aa{&q, &k, &v, &ctx, B, cfg_.num_heads, S, S, cfg_.d_kv, 1.0f, &bias,
+                         &key_mask};
         attn(aa);
         gemm(GemmArgs{&ctx, &wo, nullptr, &proj, M, d, inner, true});
         for (int64_t i = 0; i < M * d; ++i) x.set(i, x.get(i) + proj.get(i));

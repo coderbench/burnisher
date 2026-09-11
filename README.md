@@ -229,10 +229,11 @@ Every one was learned by somebody getting it wrong.
   `eval/tests/test_schemas.py` fails if a modelled figure reaches a measured field.
 - **The evaluator is where the bugs are.** A broken evaluator prints a confident number. Never
   remove a guard without knowing which incident it encodes — they are all named where they live.
-  (Writing the tests for this one found four real defects: unresolved cells blocking a
-  submission, a pooled frontier that made improvements invisible, a read of the whole of
-  `/dev/urandom`, and a bench runner that never produced one of the three objectives it is
-  scored on.)
+  (Writing the tests found six real defects — four in the harness, two in the runtime. The two
+  runtime ones are the instructive pair: attention read `[batch, heads, seq, dim]` over buffers
+  laid out `[batch, seq, heads, dim]`, and padding was never masked. Both are *deterministic*
+  wrong answers, so a determinism test passes them and two implementations wrong the same way
+  agree with each other. See `docs/STATUS.md`.)
 - **An axis whose spread sits inside its own noise is open, not solved.**
 - **Correctness before speed, always.** A submission failing the gate is rejected, not traded off.
 - **Never type a benchmark number by hand.** Every figure in `docs/ROOFLINE.md`, `docs/SCREEN.md`

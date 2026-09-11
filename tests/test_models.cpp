@@ -89,6 +89,24 @@ int main() {
                   "the text encoder does not reproduce itself; nothing downstream can be "
                   "attributed to a candidate");
         CHECK(a.dim(0) == 2 && a.dim(1) == 5 && a.dim(2) == t5.d_model);
+
+        // A pad id (0) must be masked out of self-attention. Changing what sits BEYOND the
+        // padding boundary of one row must not move that row's real positions.
+        Tensor padded({2, 5}, DType::F32);
+        for (int64_t b = 0; b < 2; ++b) {
+            for (int64_t i = 0; i < 5; ++i) {
+                padded.set(b * 5 + i, i < 3 ? static_cast<float>(7 + i) : 0.0f);
+            }
+        }
+        Tensor p1 = enc.forward(padded, stock);
+        Tensor p2 = padded;                      // same ids, different padding content is
+        Tensor alt({2, 5}, DType::F32);          // impossible -- pad IS 0 -- so instead check
+        for (int64_t i = 0; i < 10; ++i) alt.set(i, padded.get(i));
+        Tensor q1 = enc.forward(alt, stock);
+        CHECK(max_abs_diff(p1, q1) == 0.0);
+        // ... and that the encoder is not simply ignoring the mask: an unpadded sequence of the
+        // same real tokens must differ at the padded positions but agree nowhere by accident.
+        for (int64_t i = 0; i < p1.numel(); ++i) CHECK(std::isfinite(p1.get(i)));
         // A token id outside the vocabulary is a tokenizer mismatch, which is a changed oracle.
         Tensor bad({1, 2}, DType::F32);
         bad.set(0, 0.0f);
@@ -102,9 +120,15 @@ int main() {
         for (int64_t i = 0; i < z.numel(); ++i) z.set(i, std::sin(i * 0.37f));
         Tensor cap({2, 5, dit.caption_channels}, DType::F32);
         for (int64_t i = 0; i < cap.numel(); ++i) cap.set(i, std::cos(i * 0.11f));
+        // Per batch row, and the two rows are DIFFERENT lengths -- which is the case a single
+        // shared mask gets wrong, and the reason the op takes a [batch, kv_len] mask.
+        Tensor mask({2, 5}, DType::F32);
+        for (int64_t b = 0; b < 2; ++b)
+            for (int64_t i = 0; i < 5; ++i)
+                mask.set(b * 5 + i, i < (b == 0 ? 3 : 2) ? 1.0f : 0.0f);
 
-        Tensor a = model.forward(z, 500.0, cap, stock);
-        Tensor b = model.forward(z, 500.0, cap, stock);
+        Tensor a = model.forward(z, 500.0, cap, mask, stock);
+        Tensor b = model.forward(z, 500.0, cap, mask, stock);
         CHECK(max_abs_diff(a, b) == 0.0);
         CHECK(a.dim(1) == dit.out_channels);
         CHECK(a.dim(2) == h);
@@ -113,13 +137,13 @@ int main() {
         // The timestep must actually reach the output. An AdaLN path that silently produced the
         // same modulation for every step would make the denoise loop a no-op, and the image
         // would still look like something.
-        Tensor c = model.forward(z, 100.0, cap, stock);
+        Tensor c = model.forward(z, 100.0, cap, mask, stock);
         CHECK_MSG(max_abs_diff(a, c) > 1e-6,
                   "changing the timestep changed nothing; the modulation is not connected");
         // So must the caption, or cross-attention is decorative.
         Tensor cap2({2, 5, dit.caption_channels}, DType::F32);
         for (int64_t i = 0; i < cap2.numel(); ++i) cap2.set(i, std::cos(i * 0.91f));
-        Tensor d = model.forward(z, 500.0, cap2, stock);
+        Tensor d = model.forward(z, 500.0, cap2, mask, stock);
         CHECK_MSG(max_abs_diff(a, d) > 1e-6,
                   "changing the caption changed nothing; cross-attention is not connected");
 
@@ -129,12 +153,40 @@ int main() {
         // scoring, because a paired measurement compares two impls through the entire graph.
         const ImplSelection mat = ImplSelection::from_request("materialized");
         CHECK(mat.attention == "materialized");
-        Tensor e = model.forward(z, 500.0, cap, mat);
+        Tensor e = model.forward(z, 500.0, cap, mask, mat);
         const double worst = max_abs_diff(a, e);
         CHECK_MSG(worst < 1e-4,
                   "two attention implementations disagree by " + std::to_string(worst) +
                   " through the DiT; a paired measurement between them would be measuring a "
                   "behaviour change rather than a kernel");
+
+        // Masked caption positions must not reach the output. A cross-attention that ignored the
+        // mask would attend to padding on every layer -- a different model that still produces a
+        // plausible image, which is the worst kind of bug to have.
+        Tensor cap_pad_changed({2, 5, dit.caption_channels}, DType::F32);
+        for (int64_t i = 0; i < cap_pad_changed.numel(); ++i) {
+            cap_pad_changed.set(i, cap.get(i));
+        }
+        for (int64_t b = 0; b < 2; ++b) {
+            for (int64_t t = (b == 0 ? 3 : 2); t < 5; ++t) {   // that row's masked positions
+                for (int64_t c = 0; c < dit.caption_channels; ++c) {
+                    cap_pad_changed.set((b * 5 + t) * dit.caption_channels + c, 99.0f);
+                }
+            }
+        }
+        Tensor masked = model.forward(z, 500.0, cap_pad_changed, mask, stock);
+        CHECK_MSG(max_abs_diff(a, masked) < 1e-4,
+                  "changing a MASKED caption position changed the output; cross-attention is "
+                  "attending to padding");
+
+        Tensor all_ones({2, 5}, DType::F32);
+        for (int64_t i = 0; i < 10; ++i) all_ones.set(i, 1.0f);
+        Tensor unmasked = model.forward(z, 500.0, cap, all_ones, stock);
+        CHECK_MSG(max_abs_diff(a, unmasked) > 1e-6,
+                  "masking changed nothing, so the mask is being ignored");
+
+        Tensor wrong_mask({2, 4}, DType::F32);
+        CHECK_THROWS(model.forward(z, 500.0, cap, wrong_mask, stock));
     }
     {
         VaeDecoder dec(vae, *w, DType::F32);

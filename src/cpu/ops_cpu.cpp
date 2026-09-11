@@ -84,22 +84,29 @@ void gemm_cpu(const GemmArgs& a) {
 void attention_streaming(const AttentionArgs& a) {
     const float scale = a.scale > 0.0f ? a.scale
                                        : 1.0f / std::sqrt(static_cast<float>(a.head_dim));
+    // Head-LAST indexing: element (b, s, h, d) of [batch, seq, heads, head_dim].
+    const auto qi = [&](int64_t b, int64_t s, int64_t h, int64_t d) {
+        return ((b * a.q_len + s) * a.heads + h) * a.head_dim + d;
+    };
+    const auto ki = [&](int64_t b, int64_t s, int64_t h, int64_t d) {
+        return ((b * a.kv_len + s) * a.heads + h) * a.head_dim + d;
+    };
     std::vector<float> acc(a.head_dim);
     std::vector<float> scores(a.kv_len);
     for (int64_t b = 0; b < a.batch; ++b) {
         for (int64_t h = 0; h < a.heads; ++h) {
-            const int64_t qbase = ((b * a.heads) + h) * a.q_len * a.head_dim;
-            const int64_t kbase = ((b * a.heads) + h) * a.kv_len * a.head_dim;
             for (int64_t i = 0; i < a.q_len; ++i) {
                 float row_max = -INFINITY;
                 for (int64_t j = 0; j < a.kv_len; ++j) {
                     float s = 0.0f;
                     for (int64_t d = 0; d < a.head_dim; ++d) {
-                        s += a.q->get(qbase + i * a.head_dim + d) *
-                             a.k->get(kbase + j * a.head_dim + d);
+                        s += a.q->get(qi(b, i, h, d)) * a.k->get(ki(b, j, h, d));
                     }
                     s *= scale;
                     if (a.bias) s += a.bias->get((h * a.q_len + i) * a.kv_len + j);
+                    // -1e9 rather than -infinity: an all-masked row would make the softmax 0/0
+                    // and NaN out the whole model. A finite sentinel degrades to a uniform row.
+                    if (a.key_mask && a.key_mask->get(b * a.kv_len + j) == 0.0f) s = -1e9f;
                     scores[j] = s;
                     row_max = std::max(row_max, s);
                 }
@@ -112,11 +119,11 @@ void attention_streaming(const AttentionArgs& a) {
                 for (int64_t j = 0; j < a.kv_len; ++j) {
                     const float w = scores[j];
                     for (int64_t d = 0; d < a.head_dim; ++d) {
-                        acc[d] += w * a.v->get(kbase + j * a.head_dim + d);
+                        acc[d] += w * a.v->get(ki(b, j, h, d));
                     }
                 }
                 for (int64_t d = 0; d < a.head_dim; ++d) {
-                    a.out->set(qbase + i * a.head_dim + d, acc[d] / denom);
+                    a.out->set(qi(b, i, h, d), acc[d] / denom);
                 }
             }
         }
@@ -132,20 +139,24 @@ void attention_streaming(const AttentionArgs& a) {
 void attention_materialized(const AttentionArgs& a) {
     const float scale = a.scale > 0.0f ? a.scale
                                        : 1.0f / std::sqrt(static_cast<float>(a.head_dim));
+    const auto qi = [&](int64_t b, int64_t s, int64_t h, int64_t d) {
+        return ((b * a.q_len + s) * a.heads + h) * a.head_dim + d;
+    };
+    const auto ki = [&](int64_t b, int64_t s, int64_t h, int64_t d) {
+        return ((b * a.kv_len + s) * a.heads + h) * a.head_dim + d;
+    };
     std::vector<float> mat(static_cast<size_t>(a.q_len) * a.kv_len);
     for (int64_t b = 0; b < a.batch; ++b) {
         for (int64_t h = 0; h < a.heads; ++h) {
-            const int64_t qbase = ((b * a.heads) + h) * a.q_len * a.head_dim;
-            const int64_t kbase = ((b * a.heads) + h) * a.kv_len * a.head_dim;
             for (int64_t i = 0; i < a.q_len; ++i) {
                 for (int64_t j = 0; j < a.kv_len; ++j) {
                     float s = 0.0f;
                     for (int64_t d = 0; d < a.head_dim; ++d) {
-                        s += a.q->get(qbase + i * a.head_dim + d) *
-                             a.k->get(kbase + j * a.head_dim + d);
+                        s += a.q->get(qi(b, i, h, d)) * a.k->get(ki(b, j, h, d));
                     }
                     s *= scale;
                     if (a.bias) s += a.bias->get((h * a.q_len + i) * a.kv_len + j);
+                    if (a.key_mask && a.key_mask->get(b * a.kv_len + j) == 0.0f) s = -1e9f;
                     mat[static_cast<size_t>(i) * a.kv_len + j] = s;
                 }
             }
@@ -163,9 +174,9 @@ void attention_materialized(const AttentionArgs& a) {
                     float acc = 0.0f;
                     for (int64_t j = 0; j < a.kv_len; ++j) {
                         acc += mat[static_cast<size_t>(i) * a.kv_len + j] *
-                               a.v->get(kbase + j * a.head_dim + d);
+                               a.v->get(ki(b, j, h, d));
                     }
-                    a.out->set(qbase + i * a.head_dim + d, acc);
+                    a.out->set(qi(b, i, h, d), acc);
                 }
             }
         }

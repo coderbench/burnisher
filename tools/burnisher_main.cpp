@@ -298,7 +298,15 @@ int cmd_bench(const Args& a) {
             Tensor cap({batch, caption_len, dit.caption_channels}, dt);
             for (int64_t i = 0; i < cap.numel(); ++i)
                 cap.set(i, static_cast<float>(std::cos(static_cast<double>(i) * 0.11)));
-            return d.forward(z, 500.0, cap, impls);
+            // Three quarters padding, which is what a short caption in a 300-token window looks
+            // like. A bench that masked nothing would time a cheaper attention than the pipeline
+            // runs and would not notice.
+            Tensor mask({batch, caption_len}, dt);
+            for (int64_t b = 0; b < batch; ++b)
+                for (int64_t i = 0; i < caption_len; ++i)
+                    mask.set(b * caption_len + i,
+                             i < std::max<int64_t>(1, caption_len / 4) ? 1.0f : 0.0f);
+            return d.forward(z, 500.0, cap, mask, impls);
         }
         if (stage == "vae-decode") {
             VaeDecoder v(vae, *weights, dt);

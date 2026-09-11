@@ -67,9 +67,9 @@ int main() {
                v = ramp({B, H, M, D}, 0.53);
         Tensor a({B, H, S, D}, DType::F32), b({B, H, S, D}, DType::F32);
         AttentionRegistry::instance().get("stock")(
-            AttentionArgs{&q, &k, &v, &a, B, H, S, M, D, 0.0f, nullptr});
+            AttentionArgs{&q, &k, &v, &a, B, H, S, M, D, 0.0f, nullptr, nullptr});
         AttentionRegistry::instance().get("materialized")(
-            AttentionArgs{&q, &k, &v, &b, B, H, S, M, D, 0.0f, nullptr});
+            AttentionArgs{&q, &k, &v, &b, B, H, S, M, D, 0.0f, nullptr, nullptr});
         double worst = 0.0;
         for (int64_t i = 0; i < a.numel(); ++i) {
             worst = std::max(worst, static_cast<double>(std::fabs(a.get(i) - b.get(i))));
@@ -95,7 +95,7 @@ int main() {
         }
         Tensor out({1, 1, S, D}, DType::F32);
         AttentionRegistry::instance().get("stock")(
-            AttentionArgs{&q, &k, &v, &out, 1, 1, S, S, D, 0.0f, nullptr});
+            AttentionArgs{&q, &k, &v, &out, 1, 1, S, S, D, 0.0f, nullptr, nullptr});
         for (int64_t i = 0; i < S; ++i) CHECK_NEAR(out.get(i * D), 1.0, 1e-5);
 
         // Drive every row's attention onto key 0, so channel 1 of the output must collapse to 0.
@@ -103,7 +103,7 @@ int main() {
         for (int64_t i = 0; i < bias.numel(); ++i) bias.set(i, (i % S == 0) ? 50.0f : 0.0f);
         Tensor biased({1, 1, S, D}, DType::F32);
         AttentionRegistry::instance().get("stock")(
-            AttentionArgs{&q, &k, &v, &biased, 1, 1, S, S, D, 0.0f, &bias});
+            AttentionArgs{&q, &k, &v, &biased, 1, 1, S, S, D, 0.0f, &bias, nullptr});
         bool moved = false;
         for (int64_t i = 0; i < out.numel(); ++i) {
             if (std::fabs(out.get(i) - biased.get(i)) > 1e-6) moved = true;
@@ -112,6 +112,100 @@ int main() {
         for (int64_t i = 0; i < S; ++i) {
             CHECK_NEAR(biased.get(i * D + 1), 0.0, 1e-4);   // all mass on key 0
         }
+    }
+
+    // --- the attention LAYOUT, pinned ---
+    //
+    // Head-last: [batch, seq, heads, head_dim]. Every projection in this runtime is a GEMM
+    // producing [batch*seq, heads*head_dim], which is that layout contiguously. An attention op
+    // that read the same buffer as [batch, heads, seq, head_dim] attends over reinterpreted
+    // slices -- consistently, deterministically, and wrongly -- and every self-consistency check
+    // here still passes. That is exactly what happened, and only a cross-attention mask test
+    // caught it.
+    //
+    // The invariant that pins it: H-head attention must equal H independent single-head
+    // attentions over the corresponding strided slices. Nothing about a wrong layout satisfies
+    // that, because it mixes data across heads.
+    {
+        const int64_t B = 2, H = 3, S = 5, D = 4;
+        Tensor q = ramp({B, S, H, D}, 0.29), k = ramp({B, S, H, D}, 0.13),
+               v = ramp({B, S, H, D}, 0.41);
+        Tensor multi({B, S, H, D}, DType::F32);
+        AttentionRegistry::instance().get("stock")(
+            AttentionArgs{&q, &k, &v, &multi, B, H, S, S, D, 0.0f, nullptr, nullptr});
+
+        for (int64_t b = 0; b < B; ++b) {
+            for (int64_t h = 0; h < H; ++h) {
+                // Gather this head's slice into a dense single-head tensor.
+                Tensor sq({1, S, 1, D}, DType::F32), sk({1, S, 1, D}, DType::F32),
+                       sv({1, S, 1, D}, DType::F32), so({1, S, 1, D}, DType::F32);
+                for (int64_t t = 0; t < S; ++t) {
+                    for (int64_t d = 0; d < D; ++d) {
+                        const int64_t src = ((b * S + t) * H + h) * D + d;
+                        sq.set(t * D + d, q.get(src));
+                        sk.set(t * D + d, k.get(src));
+                        sv.set(t * D + d, v.get(src));
+                    }
+                }
+                AttentionRegistry::instance().get("stock")(
+                    AttentionArgs{&sq, &sk, &sv, &so, 1, 1, S, S, D, 0.0f, nullptr, nullptr});
+                for (int64_t t = 0; t < S; ++t) {
+                    for (int64_t d = 0; d < D; ++d) {
+                        CHECK_NEAR(multi.get(((b * S + t) * H + h) * D + d), so.get(t * D + d),
+                                   1e-5);
+                    }
+                }
+            }
+        }
+    }
+
+    // --- the key mask ---
+    {
+        // Masked keys must not reach the output, and the mask is PER BATCH ROW: under
+        // classifier-free guidance the two prompts are different lengths, so a shared mask
+        // either attends to padding or drops real tokens.
+        const int64_t B = 2, H = 2, S = 3, KV = 4, D = 2;
+        Tensor q = ramp({B, S, H, D}, 0.7), k = ramp({B, KV, H, D}, 0.3);
+        Tensor v({B, KV, H, D}, DType::F32);
+        for (int64_t i = 0; i < v.numel(); ++i) v.set(i, static_cast<float>(i));
+        Tensor mask({B, KV}, DType::F32);
+        for (int64_t b = 0; b < B; ++b) {
+            for (int64_t j = 0; j < KV; ++j) mask.set(b * KV + j, j < (b == 0 ? 3 : 2) ? 1.f : 0.f);
+        }
+        Tensor out({B, S, H, D}, DType::F32);
+        AttentionRegistry::instance().get("stock")(
+            AttentionArgs{&q, &k, &v, &out, B, H, S, KV, D, 0.0f, nullptr, &mask});
+
+        // Changing a masked key's VALUE must change nothing.
+        Tensor v2({B, KV, H, D}, DType::F32);
+        for (int64_t i = 0; i < v.numel(); ++i) v2.set(i, v.get(i));
+        for (int64_t b = 0; b < B; ++b) {
+            for (int64_t j = (b == 0 ? 3 : 2); j < KV; ++j) {
+                for (int64_t h = 0; h < H; ++h) {
+                    for (int64_t d = 0; d < D; ++d) {
+                        v2.set(((b * KV + j) * H + h) * D + d, 1234.0f);
+                    }
+                }
+            }
+        }
+        Tensor out2({B, S, H, D}, DType::F32);
+        AttentionRegistry::instance().get("stock")(
+            AttentionArgs{&q, &k, &v2, &out2, B, H, S, KV, D, 0.0f, nullptr, &mask});
+        for (int64_t i = 0; i < out.numel(); ++i) CHECK_NEAR(out.get(i), out2.get(i), 1e-4);
+
+        // Both implementations must agree with the mask applied, or the A/B is measuring the
+        // mask rather than the kernel.
+        Tensor outm({B, S, H, D}, DType::F32);
+        AttentionRegistry::instance().get("materialized")(
+            AttentionArgs{&q, &k, &v, &outm, B, H, S, KV, D, 0.0f, nullptr, &mask});
+        for (int64_t i = 0; i < out.numel(); ++i) CHECK_NEAR(out.get(i), outm.get(i), 1e-5);
+
+        // An all-masked row must degrade to something finite rather than NaN.
+        Tensor none({B, KV}, DType::F32);
+        Tensor outn({B, S, H, D}, DType::F32);
+        AttentionRegistry::instance().get("stock")(
+            AttentionArgs{&q, &k, &v, &outn, B, H, S, KV, D, 0.0f, nullptr, &none});
+        for (int64_t i = 0; i < outn.numel(); ++i) CHECK(std::isfinite(outn.get(i)));
     }
 
     // --- norms ---

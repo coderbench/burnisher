@@ -58,6 +58,33 @@ the reference implementation. That is the correctness gate, and it needs referen
 not exist yet — so "the output is plausible" is the strongest claim available here, and it is
 weaker than "the output is right".
 
+### Two correctness defects the runtime had, and how they were found
+
+Both were invisible to every self-consistency check in the repository, which is the point worth
+recording: a deterministic wrong answer passes a determinism test, and two implementations that
+are wrong the same way agree with each other.
+
+**Attention was reading the wrong slices.** The op indexed `[batch, heads, seq, head_dim]` while
+every projection GEMM produces `[batch * seq, heads * head_dim]` — which is `[batch, seq, heads,
+head_dim]` contiguously. So attention attended over reinterpreted data, consistently and
+deterministically, in the DiT, the T5 encoder and the VAE mid-block. The streaming and
+materialised implementations agreed with each other because they were wrong identically; the
+whole-model determinism test passed because the wrongness was deterministic. It surfaced only
+when a cross-attention *mask* test asked a question the layout could not answer. The op is now
+head-last and `tests/test_ops.cpp` pins the invariant: H-head attention must equal H independent
+single-head attentions over the corresponding slices.
+
+**Padding was not masked at all.** A prompt is padded to a fixed 300 tokens, so most of a short
+caption is padding, and both the T5 self-attention and the DiT cross-attention were attending to
+it on every layer. That is a different model — one that still produces a plausible image. The
+attention op now takes a `[batch, kv_len]` key mask, per batch row, because under classifier-free
+guidance the negative and positive prompts have different lengths and one shared mask either
+attends to padding or drops real tokens.
+
+Neither would have survived the correctness gate against a reference. Both survived everything
+this repository could check without one, which is the argument for getting the reference latents
+made.
+
 ### On "exercised against a fake device"
 
 `eval/tests/fakes/` holds a stub `nvidia-smi` and a stub runtime that speaks the `BURNISH_JSON`
@@ -69,7 +96,7 @@ and still refuses when the stub reports a busy device. The fallback check still 
 runtime's report against the request. What is removed is the silicon, and that is the only way
 code that runs exclusively beside a GPU gets tested at all.
 
-Writing those tests found two real defects: `bench.py` read the whole of `/dev/urandom` (a stream
+Writing those tests found two defects in the harness: `bench.py` read the whole of `/dev/urandom` (a stream
 that never ends) when choosing a held-out shape, and it never produced the
 `latent_l2_vs_reference` objective the generation declares — so the frontier would have come out
 as exactly zero for both arms and every result would have read `MOVED_ALONG_FRONTIER`.

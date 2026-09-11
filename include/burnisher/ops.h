@@ -43,7 +43,17 @@ struct GemmArgs {
     const Tensor* gate_bias = nullptr;
 };
 
-// Scaled dot-product attention over [batch, heads, seq, head_dim].
+// Scaled dot-product attention over **[batch, seq, heads, head_dim]** -- head-LAST.
+//
+// That layout is not a preference. Every projection in this runtime is a GEMM producing
+// `[batch * seq, heads * head_dim]`, which IS [batch, seq, heads, head_dim] contiguously. An
+// attention op that indexed [batch, heads, seq, head_dim] over the same buffer would silently
+// attend over reinterpreted slices -- consistently, deterministically, and wrongly -- and every
+// self-consistency test in the repository would still pass. It did, until a cross-attention mask
+// test caught it.
+//
+// The alternative is a materialised transpose per projection, which is real traffic at these
+// shapes for no benefit; production attention kernels take head-last for the same reason.
 //
 // `materialize` selects between writing the full score matrix and streaming it. Both are
 // registered, because the difference between them is one of the published cells: the VAE
@@ -56,7 +66,14 @@ struct AttentionArgs {
     Tensor* out;
     int64_t batch, heads, q_len, kv_len, head_dim;
     float scale = 0.0f;          // 0 means 1/sqrt(head_dim)
-    const Tensor* bias = nullptr;  // additive, broadcast over batch; T5's relative position bias
+    // Additive, [heads, q_len, kv_len], broadcast over batch. T5's relative position bias.
+    const Tensor* bias = nullptr;
+    // [batch, kv_len]; 1 keeps a key, 0 masks it. PER BATCH ROW, which is the whole reason it is
+    // not folded into `bias`: under classifier-free guidance the negative and positive prompts
+    // have different lengths, so one shared mask either attends to padding or drops real tokens.
+    // Kept separate from `bias` rather than materialised into it because a [batch, heads, q, kv]
+    // bias at this model's shapes is 157 MB to express a 600-element fact.
+    const Tensor* key_mask = nullptr;
 };
 
 // LayerNorm over the last dimension. `weight`/`bias` may be null (PixArt's norms are affine-free

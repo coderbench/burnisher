@@ -123,9 +123,14 @@ class T5Encoder {
 class PixArtDiT {
   public:
     PixArtDiT(DiTConfig cfg, const WeightSource& w, DType compute);
-    // latent: [batch, in_channels, h, w]; caption: [batch, caption_len, caption_channels]
+    // latent: [batch, in_channels, h, w]; caption: [batch, caption_len, caption_channels].
+    //
+    // `caption_mask` is [batch, caption_len], 1 for a real token and 0 for padding, and it is
+    // REQUIRED rather than optional. A caption is padded to a fixed length, so cross-attention
+    // without a mask attends to padding on every layer -- which is a different model, and one
+    // that still produces a plausible image. Pass a tensor of ones if the caption is unpadded.
     Tensor forward(const Tensor& latent, double timestep, const Tensor& caption,
-                   const ImplSelection& impls) const;
+                   const Tensor& caption_mask, const ImplSelection& impls) const;
     const DiTConfig& config() const { return cfg_; }
 
   private:

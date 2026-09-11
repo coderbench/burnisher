@@ -68,6 +68,14 @@ Tensor Pipeline::generate(const Tensor& token_ids, StageTimings* timings) {
             ". Under classifier-free guidance the negative prompt comes FIRST.");
     }
 
+    // The caption mask, derived from the ids rather than passed alongside them: a mask that can
+    // disagree with the ids it describes is a mask that eventually will. Per batch row, because
+    // the negative and positive prompts are different lengths.
+    Tensor caption_mask({batch, token_ids.dim(1)}, cfg_.compute);
+    for (int64_t i = 0; i < caption_mask.numel(); ++i) {
+        caption_mask.set(i, static_cast<int64_t>(token_ids.get(i)) != 0 ? 1.0f : 0.0f);
+    }
+
     const auto t0 = clock::now();
     T5Encoder text(t5cfg_, *tw_, cfg_.compute);
     Tensor caption = text.forward(token_ids, impls);
@@ -87,7 +95,7 @@ Tensor Pipeline::generate(const Tensor& token_ids, StageTimings* timings) {
             for (int64_t j = 0; j < per; ++j) batched.set(b * per + j, latent.get(j));
 
         Tensor out = dit.forward(batched, static_cast<double>(sched.timestep(i)), caption,
-                                 impls);
+                                 caption_mask, impls);
         // The DiT predicts 2*in_channels: epsilon and a learned variance. The sampler is
         // epsilon-only, so the variance half is discarded -- computing it and throwing it away
         // is what the reference does, and not computing it would be a different model.
