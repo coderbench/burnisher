@@ -4,6 +4,8 @@
 #include <cstring>
 #include <sstream>
 
+#include "burnisher/device.h"
+
 namespace burnisher {
 
 int64_t numel_of(const std::vector<int64_t>& shape) {
@@ -33,12 +35,13 @@ size_t Tensor::nbytes() const {
 Tensor::Tensor(std::vector<int64_t> shape, DType dtype, Device device)
     : shape_(std::move(shape)), dtype_(dtype), device_(device) {
     numel_ = numel_of(shape_);
-    if (device_ != Device::CPU) {
-        throw std::runtime_error(
-            "Tensor: only CPU allocation is implemented in the core; device tensors come from "
-            "the CUDA backend so that a build without CUDA cannot silently allocate nothing");
+    const size_t bytes = nbytes();
+    if (device_ == Device::CUDA) {
+        void* p = device::alloc(bytes ? bytes : 1);
+        owned_ = std::shared_ptr<void>(p, [](void* q) { device::release(q); });
+        data_ = p;
+        return;
     }
-    size_t bytes = nbytes();
     void* p = std::calloc(bytes ? bytes : 1, 1);
     if (!p) throw std::bad_alloc();
     owned_ = std::shared_ptr<void>(p, std::free);
@@ -60,6 +63,12 @@ Tensor Tensor::view(void* data, std::vector<int64_t> shape, DType dtype, Device 
 }
 
 float Tensor::get(int64_t i) const {
+    if (device_ != Device::CPU) {
+        throw std::runtime_error(
+            "Tensor::get on a device tensor. Scalar host access to device memory is not a slow "
+            "path, it is a fault -- every piece of glue in a model graph has to be an op. Copy "
+            "it back with `to_host()` if you really want to look at it.");
+    }
     switch (dtype_) {
         case DType::F32: return static_cast<const float*>(data_)[i];
         case DType::BF16: return bf16_to_f32(static_cast<const BF16*>(data_)[i]);
@@ -71,6 +80,9 @@ float Tensor::get(int64_t i) const {
 }
 
 void Tensor::set(int64_t i, float v) {
+    if (device_ != Device::CPU) {
+        throw std::runtime_error("Tensor::set on a device tensor; see Tensor::get");
+    }
     switch (dtype_) {
         case DType::F32: static_cast<float*>(data_)[i] = v; return;
         case DType::BF16: static_cast<BF16*>(data_)[i] = f32_to_bf16(v); return;
@@ -82,8 +94,25 @@ void Tensor::set(int64_t i, float v) {
 
 Tensor Tensor::to(DType target) const {
     if (target == dtype_) return *this;
+    if (device_ != Device::CPU) {
+        throw std::runtime_error("Tensor::to: convert on the host, then upload");
+    }
     Tensor out(shape_, target, device_);
     for (int64_t i = 0; i < numel_; ++i) out.set(i, get(i));
+    return out;
+}
+
+Tensor Tensor::to_device() const {
+    if (device_ == Device::CUDA) return *this;
+    Tensor out(shape_, dtype_, Device::CUDA);
+    device::copy_to_device(out.data_, data_, nbytes());
+    return out;
+}
+
+Tensor Tensor::to_host() const {
+    if (device_ == Device::CPU) return *this;
+    Tensor out(shape_, dtype_, Device::CPU);
+    device::copy_to_host(out.data_, data_, nbytes());
     return out;
 }
 

@@ -20,15 +20,92 @@
 // NOT COMPILED. There was no CUDA toolkit and no Blackwell device available when this was
 // written. docs/STATUS.md says so in those words and the CI job `cuda-compile` exists to make it
 // stop being true. Treat every line here as unverified until that job is green.
+#include <algorithm>
+
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <cuda_bf16.h>
 
 #include <cstdio>
+#include <map>
+#include <mutex>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
+#include "burnisher/device.h"
+
 namespace burnisher {
+namespace device {
+namespace {
+
+// Allocation is tracked HERE rather than read from the driver. `nvidia-smi` and
+// `cudaMemGetInfo` both include the CUDA context and the allocator's own slack -- hundreds of
+// megabytes a candidate cannot influence and should not be scored on. The frontier's memory
+// objective is what the runtime asked for.
+std::mutex g_mutex;
+size_t g_live = 0;
+size_t g_peak = 0;
+
+std::map<void*, size_t>& size_table() {
+    static std::map<void*, size_t> t;
+    return t;
+}
+
+void check(cudaError_t e, const char* what) {
+    if (e != cudaSuccess) {
+        throw std::runtime_error(std::string("cuda ") + what + ": " + cudaGetErrorString(e));
+    }
+}
+
+}  // namespace
+
+bool available() {
+    int n = 0;
+    return cudaGetDeviceCount(&n) == cudaSuccess && n > 0;
+}
+
+void* alloc(size_t bytes) {
+    void* p = nullptr;
+    check(cudaMalloc(&p, bytes), "cudaMalloc");
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_live += bytes;
+    g_peak = std::max(g_peak, g_live);
+    // The size is recorded against the pointer so `release` can subtract it; cudaFree does not
+    // report how much it freed.
+    size_table()[p] = bytes;
+    return p;
+}
+
+void release(void* p) {
+    if (!p) return;
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        auto it = size_table().find(p);
+        if (it != size_table().end()) {
+            g_live -= std::min(g_live, it->second);
+            size_table().erase(it);
+        }
+    }
+    cudaFree(p);
+}
+
+void copy_to_device(void* dst, const void* src, size_t bytes) {
+    check(cudaMemcpy(dst, src, bytes, cudaMemcpyHostToDevice), "memcpy H2D");
+}
+
+void copy_to_host(void* dst, const void* src, size_t bytes) {
+    check(cudaMemcpy(dst, src, bytes, cudaMemcpyDeviceToHost), "memcpy D2H");
+}
+
+void synchronize() { check(cudaDeviceSynchronize(), "synchronize"); }
+
+size_t allocated_bytes() { std::lock_guard<std::mutex> l(g_mutex); return g_live; }
+size_t peak_allocated_bytes() { std::lock_guard<std::mutex> l(g_mutex); return g_peak; }
+void reset_peak() { std::lock_guard<std::mutex> l(g_mutex); g_peak = g_live; }
+
+}  // namespace device
+
 namespace {
 
 #define CU_CHECK(expr)                                                              \

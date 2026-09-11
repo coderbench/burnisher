@@ -49,6 +49,10 @@ class Tensor {
     void set(int64_t flat, float v);
 
     Tensor to(DType target) const;
+    // Explicit copies across the device boundary. Explicit because an implicit one is a copy
+    // nobody sees in the code and everybody sees in the profile.
+    Tensor to_device() const;
+    Tensor to_host() const;
     Tensor reshape(std::vector<int64_t> shape) const;
     std::string describe() const;
 

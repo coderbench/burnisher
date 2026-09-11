@@ -28,6 +28,7 @@ add_compile_options(-Wall -Wextra -Wno-unused-parameter)
 set(BURNISHER_SOURCES
   src/core/tensor.cpp
   src/core/impl_select.cpp
+  src/core/device_stub.cpp
   src/core/safetensors.cpp
   src/cpu/ops_cpu.cpp
   src/sched/dpm_solver.cpp
@@ -53,7 +54,7 @@ if(BURNISHER_BUILD_CUDA)
   # device.cu only. The CUDA OP backend is not written: see docs/STATUS.md and the backlog
   # issues. Shipping unverified kernels as though they worked is the failure this repository
   # exists to avoid, and there was no toolkit and no Blackwell part to verify them against.
-  target_sources(burnisher_core PRIVATE src/cuda/device.cu)
+  target_sources(burnisher_core PRIVATE src/cuda/device.cu src/cuda/ops_cuda.cu)
   target_compile_definitions(burnisher_core PUBLIC BURNISHER_CUDA=1)
   set_target_properties(burnisher_core PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
   find_package(CUDAToolkit REQUIRED)
