@@ -68,11 +68,14 @@ __device__ __forceinline__ void st(__nv_bfloat16* p, int64_t i, float v) {
     p[i] = __float2bfloat16(v);
 }
 
-void require_device(const Tensor& t, const char* what) {
+void require_device(const Tensor& t, const char* what, const char* operand = "operand") {
     if (t.device() != Device::CUDA) {
-        throw std::runtime_error(std::string("cuda ") + what + ": operand is a host tensor. "
-                                 "Mixing host and device operands in one op is a fault, not a "
-                                 "slow path.");
+        throw std::runtime_error(
+            std::string("cuda ") + what + ": " + operand + " " + t.describe() + " is a HOST "
+            "tensor. Mixing host and device operands in one op is a fault, not a slow path.\n"
+            "  The usual cause is a scratch tensor in a model graph declared without a device -- "
+            "and multi-declarations (`Tensor a(...), b(...);`) are where they hide, because they "
+            "do not look like the single-declaration form a search finds.");
     }
 }
 

@@ -76,7 +76,7 @@ Tensor T5Encoder::forward(const Tensor& token_ids, const ImplSelection& impls) c
         GatherArgs{&embed, &token_ids, &x, M, d});
 
     // Relative position bias, computed once and added into every layer's scores.
-    Tensor bias_host({static_cast<int64_t>(cfg_.num_heads), S, S}, dtype_);
+    Tensor bias_host({static_cast<int64_t>(cfg_.num_heads), S, S}, dtype_, impls.device);
     {
         Tensor& bias = bias_host;
         // 32 x heads of parameters. Pulled to the host because the bucketing is a scalar
@@ -104,15 +104,15 @@ Tensor T5Encoder::forward(const Tensor& token_ids, const ImplSelection& impls) c
     // By KEY only. Padded query rows still produce output and that output is meaningless; it is
     // masked out downstream by the caption mask in cross-attention, which is what the reference
     // does too.
-    Tensor mask_host({B, S}, dtype_);
+    Tensor mask_host({B, S}, dtype_, impls.device);
     for (int64_t i = 0; i < B * S; ++i) {
         mask_host.set(i, static_cast<int64_t>(ids_host.get(i)) == kPadTokenId ? 0.0f : 1.0f);
     }
     Tensor key_mask = (impls.device == Device::CUDA) ? mask_host.to_device() : mask_host;
 
     Tensor normed({M, d}, dtype_, impls.device);
-    Tensor q({M, inner}, dtype_), k({M, inner}, dtype_), v({M, inner}, dtype_);
-    Tensor ctx({M, inner}, dtype_), proj({M, d}, dtype_);
+    Tensor q({M, inner}, dtype_, impls.device), k({M, inner}, dtype_, impls.device), v({M, inner}, dtype_, impls.device);
+    Tensor ctx({M, inner}, dtype_, impls.device), proj({M, d}, dtype_, impls.device);
     Tensor h0({M, static_cast<int64_t>(cfg_.d_ff)}, dtype_, impls.device);
     Tensor h1({M, static_cast<int64_t>(cfg_.d_ff)}, dtype_, impls.device);
     Tensor hact({M, static_cast<int64_t>(cfg_.d_ff)}, dtype_, impls.device);

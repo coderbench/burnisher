@@ -165,12 +165,17 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
 
     // Scratch, allocated once. A forward pass that allocated per layer would spend its time in
     // the allocator and make every kernel measurement noisier than the thing being measured.
-    Tensor normed({M, d}, dtype_), modded({M, d}, dtype_);
-    Tensor q({M, d}, dtype_), k({M, d}, dtype_), v({M, d}, dtype_);
-    Tensor kc({Mcap, d}, dtype_), vc({Mcap, d}, dtype_);
-    Tensor ctx({M, d}, dtype_), proj({M, d}, dtype_);
-    Tensor ff0({M, dff}, dtype_), ffa({M, dff}, dtype_);
-    Tensor scale({B, d}, dtype_), shift({B, d}, dtype_), gate({B, d}, dtype_);
+    const Device dev = impls.device;
+    Tensor normed({M, d}, dtype_, dev), modded({M, d}, dtype_, dev);
+    Tensor q({M, d}, dtype_, dev), k({M, d}, dtype_, dev), v({M, d}, dtype_, dev);
+    Tensor kc({Mcap, d}, dtype_, dev), vc({Mcap, d}, dtype_, dev);
+    Tensor ctx({M, d}, dtype_, dev), proj({M, d}, dtype_, dev);
+    Tensor ff0({M, dff}, dtype_, dev), ffa({M, dff}, dtype_, dev);
+    Tensor scale({B, d}, dtype_, dev), shift({B, d}, dtype_, dev), gate({B, d}, dtype_, dev);
+    // One zero tensor for the whole pass: the gated residual is a modulation with zero scale and
+    // shift, so it needs a zero operand, and allocating one per layer is 28 allocations of a
+    // constant.
+    Tensor zero({B, d}, dtype_, dev);
 
     // Cross-attention mask over the caption keys, per batch row. Under classifier-free guidance
     // the negative prompt is usually far shorter than the positive one, so a single shared mask
