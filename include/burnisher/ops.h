@@ -195,7 +195,12 @@ struct ImplSelection {
     std::string add = "stock";
     std::string chunk = "stock";
     std::string patch = "stock";
-    static ImplSelection from_request(const std::string& requested);
+    // Where the model's intermediate tensors are allocated. Carried with the implementation
+    // selection because the two cannot disagree: a CUDA kernel over host tensors is a fault, and
+    // a host kernel over device tensors is a worse one.
+    Device device = Device::CPU;
+    static ImplSelection from_request(const std::string& requested,
+                                      Device device = Device::CPU);
     std::map<std::string, std::string> as_map() const;
 };
 

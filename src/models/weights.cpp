@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cmath>
+#include <mutex>
 #include <cstring>
 #include <filesystem>
 #include <sstream>
@@ -188,6 +189,30 @@ Tensor unpatchify(const Tensor& x, int batch, int channels, int grid, int patch,
     return out;
 }
 
+DeviceWeights::DeviceWeights(const WeightSource& host, DType dtype)
+    : host_(host), dtype_(dtype) {}
+
+bool DeviceWeights::has(const std::string& name) const { return host_.has(name); }
+
+Tensor DeviceWeights::get(const std::string& name) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto it = cache_.find(name);
+    if (it != cache_.end()) return it->second;
+    // Converted on the HOST and then uploaded, once, and cached. A weight re-uploaded per layer
+    // would dominate every measurement and would look like a slow kernel.
+    Tensor host = host_.get(name).to(dtype_);
+    Tensor dev = host.to_device();
+    cache_.emplace(name, dev);
+    return dev;
+}
+
+size_t DeviceWeights::resident_bytes() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    size_t n = 0;
+    for (const auto& kv : cache_) n += kv.second.nbytes();
+    return n;
+}
+
 void declare_pixart_shapes(SyntheticWeights& w, const T5Config& t5, const DiTConfig& dit,
                            const VaeConfig& vae) {
     const int64_t inner = static_cast<int64_t>(t5.num_heads) * t5.d_kv;
@@ -291,7 +316,7 @@ void declare_pixart_shapes(SyntheticWeights& w, const T5Config& t5, const DiTCon
     conv_w("decoder.conv_out", prev, 3, 3);
 }
 
-ImplSelection ImplSelection::from_request(const std::string& requested) {
+ImplSelection ImplSelection::from_request(const std::string& requested, Device device) {
     // Checked HERE, not only in resolve_all(): this is the entry point every model and the CLI
     // actually use, and until a test caught it an unknown name resolved silently to `stock` for
     // every op and the run reported success. A silent fallback is the one failure mode the
@@ -313,13 +338,15 @@ ImplSelection ImplSelection::from_request(const std::string& requested) {
     s.add = resolve_impl("add", requested);
     s.chunk = resolve_impl("chunk", requested);
     s.patch = resolve_impl("patch", requested);
+    s.device = device;
     return s;
 }
 
 std::map<std::string, std::string> ImplSelection::as_map() const {
     return {{"gemm", gemm}, {"attention", attention}, {"norm", norm},
             {"modulate", modulate}, {"activation", activation}, {"conv2d", conv2d},
-            {"add", add}, {"chunk", chunk}, {"patch", patch}};
+            {"add", add}, {"chunk", chunk}, {"patch", patch},
+            {"device", device == Device::CUDA ? "cuda" : "cpu"}};
 }
 
 }  // namespace burnisher

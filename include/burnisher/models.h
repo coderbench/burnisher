@@ -9,6 +9,7 @@
 
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -67,6 +68,24 @@ class SyntheticWeights : public WeightSource {
     DType dtype_;
     uint64_t seed_;
     std::map<std::string, std::vector<int64_t>> shapes_;
+};
+
+// Weights uploaded to the device once and cached by name.
+//
+// The upload is the expensive part and it must happen once, not once per layer: a weight
+// re-uploaded every forward pass dominates the measurement and looks exactly like a slow kernel.
+class DeviceWeights : public WeightSource {
+  public:
+    DeviceWeights(const WeightSource& host, DType dtype);
+    bool has(const std::string& name) const override;
+    Tensor get(const std::string& name) const override;
+    size_t resident_bytes() const;
+
+  private:
+    const WeightSource& host_;
+    DType dtype_;
+    mutable std::mutex mutex_;
+    mutable std::map<std::string, Tensor> cache_;
 };
 
 struct T5Config {

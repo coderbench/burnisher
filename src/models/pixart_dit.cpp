@@ -97,10 +97,10 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
     const int64_t Mcap = B * cap_len;
 
     // --- patch embedding ---
-    Tensor patches({B, N, cfg_.in_channels * patch * patch}, dtype_);
+    Tensor patches({B, N, cfg_.in_channels * patch * patch}, dtype_, impls.device);
     patch_op(PatchArgs{&latent, &patches, B, cfg_.in_channels,
                        static_cast<int64_t>(grid), patch, false});
-    Tensor x({M, d}, dtype_);
+    Tensor x({M, d}, dtype_, impls.device);
     {
         // [d, C, p, p] in the checkpoint. Read as a [d, C*p*p] matrix: contiguously those are
         // the same bytes in the same order, and `patchify` lays each token out as (c, ky, kx) to
@@ -116,27 +116,27 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
             static_cast<int>(d), static_cast<int>(grid), base, 2.0);
         // Computed on the host once per forward -- it depends only on the shape -- then added
         // through the op, broadcast over the batch. The table is [N, d] and x is [B*N, d].
-        Tensor pos({N, d}, dtype_);
+        Tensor pos({N, d}, dtype_, impls.device);
         for (int64_t i = 0; i < N * d; ++i) pos.set(i, static_cast<float>(pe[i]));
         add(AddArgs{&x, &pos, &x, B, N * d, 1.0f, true});
     }
 
     // --- AdaLN-single: ONE modulation projection per forward, not per layer ---
-    Tensor embedded_t({B, d}, dtype_);   // fed to the OUTPUT modulation
-    Tensor modulation({B, 6 * d}, dtype_);
+    Tensor embedded_t({B, d}, dtype_, impls.device);   // fed to the OUTPUT modulation
+    Tensor modulation({B, 6 * d}, dtype_, impls.device);
     {
         Tensor proj = sinusoidal_timestep_embedding(timestep, 256, dtype_);
-        Tensor broad({B, 256}, dtype_);
+        Tensor broad({B, 256}, dtype_, impls.device);
         for (int64_t b = 0; b < B; ++b)
             for (int64_t i = 0; i < 256; ++i) broad.set(b * 256 + i, proj.get(i));
         Tensor w1 = w_.require("adaln_single.emb.timestep_embedder.linear_1.weight");
         Tensor b1 = w_.require("adaln_single.emb.timestep_embedder.linear_1.bias");
         Tensor w2 = w_.require("adaln_single.emb.timestep_embedder.linear_2.weight");
         Tensor b2 = w_.require("adaln_single.emb.timestep_embedder.linear_2.bias");
-        Tensor h({B, d}, dtype_);
+        Tensor h({B, d}, dtype_, impls.device);
         gemm(GemmArgs{&broad, &w1, &b1, &h, B, d, 256, true, Epilogue::Silu});
         gemm(GemmArgs{&h, &w2, &b2, &embedded_t, B, d, d, true});
-        Tensor silu({B, d}, dtype_);
+        Tensor silu({B, d}, dtype_, impls.device);
         act(ActivationArgs{&embedded_t, &silu, B * d, Epilogue::Silu, nullptr});
         Tensor wl = w_.require("adaln_single.linear.weight");
         Tensor bl = w_.require("adaln_single.linear.bias");
@@ -144,14 +144,14 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
     }
 
     // --- caption projection: T5 hidden 4096 -> d, once per forward ---
-    Tensor cap({Mcap, d}, dtype_);
+    Tensor cap({Mcap, d}, dtype_, impls.device);
     {
         Tensor flat = caption.reshape({Mcap, cfg_.caption_channels});
         Tensor w1 = w_.require("caption_projection.linear_1.weight");
         Tensor b1 = w_.require("caption_projection.linear_1.bias");
         Tensor w2 = w_.require("caption_projection.linear_2.weight");
         Tensor b2 = w_.require("caption_projection.linear_2.bias");
-        Tensor h({Mcap, d}, dtype_);
+        Tensor h({Mcap, d}, dtype_, impls.device);
         gemm(GemmArgs{&flat, &w1, &b1, &h, Mcap, d, cfg_.caption_channels, true,
                       Epilogue::Gelu});
         gemm(GemmArgs{&h, &w2, &b2, &cap, Mcap, d, d, true});
@@ -213,7 +213,7 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
         // out = x + gate * attn_out. Expressed through the modulate op with a unit scale so the
         // gated residual is one kernel a contributor can fuse, rather than two loops here.
         {
-            Tensor zero({B, d}, dtype_);
+            Tensor zero({B, d}, dtype_, impls.device);
             modulate(ModulateArgs{&proj, &zero, &zero, &x, B, N, d, &x, &gate});
         }
 
@@ -250,7 +250,7 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
         gemm(GemmArgs{&modded, &w0, &b0, &ff0, M, dff, d, true, Epilogue::Gelu});
         gemm(GemmArgs{&ff0, &w2, &b2, &proj, M, d, dff, true});
         {
-            Tensor zero({B, d}, dtype_);
+            Tensor zero({B, d}, dtype_, impls.device);
             modulate(ModulateArgs{&proj, &zero, &zero, &x, B, N, d, &x, &gate});
         }
     }
@@ -265,11 +265,11 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
     norm(NormArgs{&x, nullptr, nullptr, &normed, M, d, static_cast<float>(cfg_.eps), false, 0});
     modulate(ModulateArgs{&normed, &scale, &shift, &modded, B, N, d, nullptr, nullptr});
     const int64_t out_per_token = patch * patch * cfg_.out_channels;
-    Tensor tokens({M, out_per_token}, dtype_);
+    Tensor tokens({M, out_per_token}, dtype_, impls.device);
     Tensor wp = w_.require("proj_out.weight");
     Tensor bp = w_.require("proj_out.bias");
     gemm(GemmArgs{&modded, &wp, &bp, &tokens, M, out_per_token, d, true});
-    Tensor image({B, cfg_.out_channels, grid * patch, grid * patch}, dtype_);
+    Tensor image({B, cfg_.out_channels, grid * patch, grid * patch}, dtype_, impls.device);
     patch_op(PatchArgs{&tokens, &image, B, cfg_.out_channels,
                        static_cast<int64_t>(grid), patch, true});
     return image;

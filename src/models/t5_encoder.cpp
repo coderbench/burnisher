@@ -60,7 +60,7 @@ Tensor T5Encoder::forward(const Tensor& token_ids, const ImplSelection& impls) c
     // Embedding gather. The table is `vocab x d` resident and M rows are read; a loader that
     // materialised the whole thing per call would move 263 MB to produce 2.4 MB of output.
     Tensor embed = w_.require("shared.weight");
-    Tensor x({M, d}, dtype_);
+    Tensor x({M, d}, dtype_, impls.device);
     for (int64_t i = 0; i < M; ++i) {
         const int64_t id = static_cast<int64_t>(token_ids.get(i));
         if (id < 0 || id >= cfg_.vocab_size) {
@@ -71,7 +71,7 @@ Tensor T5Encoder::forward(const Tensor& token_ids, const ImplSelection& impls) c
     }
 
     // Relative position bias, computed once and added into every layer's scores.
-    Tensor bias({static_cast<int64_t>(cfg_.num_heads), S, S}, dtype_);
+    Tensor bias({static_cast<int64_t>(cfg_.num_heads), S, S}, dtype_, impls.device);
     {
         Tensor rel = w_.require(
             "encoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight");
@@ -93,17 +93,17 @@ Tensor T5Encoder::forward(const Tensor& token_ids, const ImplSelection& impls) c
     // By KEY only. Padded query rows still produce output and that output is meaningless; it is
     // masked out downstream by the caption mask in cross-attention, which is what the reference
     // does too.
-    Tensor key_mask({B, S}, dtype_);
+    Tensor key_mask({B, S}, dtype_, impls.device);
     for (int64_t i = 0; i < B * S; ++i) {
         key_mask.set(i, static_cast<int64_t>(token_ids.get(i)) == kPadTokenId ? 0.0f : 1.0f);
     }
 
-    Tensor normed({M, d}, dtype_);
+    Tensor normed({M, d}, dtype_, impls.device);
     Tensor q({M, inner}, dtype_), k({M, inner}, dtype_), v({M, inner}, dtype_);
     Tensor ctx({M, inner}, dtype_), proj({M, d}, dtype_);
-    Tensor h0({M, static_cast<int64_t>(cfg_.d_ff)}, dtype_);
-    Tensor h1({M, static_cast<int64_t>(cfg_.d_ff)}, dtype_);
-    Tensor hact({M, static_cast<int64_t>(cfg_.d_ff)}, dtype_);
+    Tensor h0({M, static_cast<int64_t>(cfg_.d_ff)}, dtype_, impls.device);
+    Tensor h1({M, static_cast<int64_t>(cfg_.d_ff)}, dtype_, impls.device);
+    Tensor hact({M, static_cast<int64_t>(cfg_.d_ff)}, dtype_, impls.device);
 
     for (int layer = 0; layer < cfg_.num_layers; ++layer) {
         Tensor ln0 = w_.require(blk(layer, "layer.0.layer_norm.weight"));
