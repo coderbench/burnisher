@@ -255,7 +255,7 @@ void small_configs(T5Config* t5, DiTConfig* dit, VaeConfig* vae) {
 int cmd_info(const Args&) {
     // Registration is an explicit call, so `info` has to make it too -- otherwise it reports an
     // empty build and the first thing anyone learns about this binary is wrong.
-    register_builtin_cpu_ops();
+    register_all_ops();
     std::cout << "burnisher 0.1.0\n";
 #ifdef BURNISHER_CUDA
     std::cout << "cuda: enabled\n";
@@ -276,7 +276,7 @@ int cmd_info(const Args&) {
 }
 
 int cmd_selftest(const Args& a) {
-    register_builtin_cpu_ops();
+    register_all_ops();
     T5Config t5; DiTConfig dit; VaeConfig vae;
     small_configs(&t5, &dit, &vae);
     SchedulerConfig sched;
@@ -315,7 +315,7 @@ int cmd_selftest(const Args& a) {
 }
 
 int cmd_bench(const Args& a) {
-    register_builtin_cpu_ops();
+    register_all_ops();
     const std::string stage = a.get("stage", "dit-step");
     const std::string impl = a.get("impl", "stock");
     const DType dt = dtype_arg(a);
@@ -574,7 +574,7 @@ int cmd_noise(const Args& a) {
 // compares the results. That is the correctness gate's question asked at a scale a CPU can
 // answer, and it is how the two defects in docs/STATUS.md would have been caught earlier.
 int cmd_decode(const Args& a) {
-    register_builtin_cpu_ops();
+    register_all_ops();
     const std::string dir = a.get("weights");
     const std::string in = a.get("latent");
     const std::string out = a.get("out");
@@ -621,7 +621,7 @@ int cmd_decode(const Args& a) {
 // reference implementation identical tensors and compare the results. Nothing is generated
 // twice, so a disagreement is the model and not the inputs.
 int cmd_dit_step(const Args& a) {
-    register_builtin_cpu_ops();
+    register_all_ops();
     const std::string dir = a.get("weights");
     if (dir.empty() || a.get("latent").empty() || a.get("caption").empty() ||
         a.get("mask").empty() || a.get("out").empty()) {
@@ -661,7 +661,7 @@ int cmd_dit_step(const Args& a) {
 
 // The text encoder, from a token-ids file (one prompt per line, whitespace-separated ids).
 int cmd_encode(const Args& a) {
-    register_builtin_cpu_ops();
+    register_all_ops();
     const std::string dir = a.get("weights");
     const std::string ids_path = a.get("token-ids");
     if (dir.empty() || ids_path.empty() || a.get("out").empty()) {
@@ -765,7 +765,7 @@ int cmd_probe(const Args&) {
 }
 
 int cmd_generate(const Args& a) {
-    register_builtin_cpu_ops();
+    register_all_ops();
     const std::string dir = a.get("weights");
     const std::string ids_path = a.get("token-ids");
     if (dir.empty() || ids_path.empty()) {

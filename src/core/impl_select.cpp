@@ -6,6 +6,13 @@
 
 namespace burnisher {
 
+void register_all_ops() {
+    register_builtin_cpu_ops();
+#ifdef BURNISHER_CUDA
+    register_cuda_ops();
+#endif
+}
+
 namespace {
 bool op_has(const std::string& op, const std::string& name) {
     if (op == "gemm") return GemmRegistry::instance().has(name);

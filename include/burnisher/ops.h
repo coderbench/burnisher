@@ -228,4 +228,11 @@ void register_builtin_cpu_ops();
 void register_cuda_ops();
 #endif
 
+// Register everything this build contains. ONE entry point, called by every command.
+//
+// There were two before -- a CPU one that every command called and a CUDA one that nothing did.
+// The build reported `cuda: enabled` and `burnisher info` listed no CUDA kernels, which is the
+// most confusing possible way to be broken: the feature is present, compiled, and unreachable.
+void register_all_ops();
+
 }  // namespace burnisher
