@@ -1,0 +1,73 @@
+{
+ "_device_note": "Where the REFERENCE ran. It is the oracle, not the thing being timed, so it may run anywhere -- but fp32 on a GPU and fp32 on a CPU are not bit-identical, and a receipt should be able to say which produced its oracle.",
+ "_pin_note": "A moved reference version, checkpoint revision, token-id set or noise tensor is a CHANGED ORACLE and therefore a new generation, never an edit.",
+ "_what": "The pinned reference latents: the oracle the correctness gate compares against. Produced by the REFERENCE implementation, never by this runtime -- a candidate that produced its own oracle would pass.",
+ "checkpoint": {
+  "repo": "PixArt-alpha/PixArt-Sigma-XL-2-1024-MS",
+  "revision": "e102b3591cc82e97071b8b4cb90d834d0c487207",
+  "text_encoder_repo": "PixArt-alpha/pixart_sigma_sdxlvae_T5_diffusers",
+  "text_encoder_revision": "2c17b4e85261cd549b4068d086b7c2ba9d468e9f"
+ },
+ "device": "cuda",
+ "dtype": "bfloat16",
+ "generation": "BG-1",
+ "guidance_scale": 4.5,
+ "latents": {
+  "dense-detail": {
+   "absmax": 3.390625,
+   "mean": -0.1539989709854126,
+   "sha256": "bed83fd0299731ff83d8006cd1532b3fcd560dd9641fe4aff94e58bba803f5fb",
+   "shape": [
+    1,
+    4,
+    128,
+    128
+   ],
+   "std": 0.9738457798957825
+  },
+  "flat-graphic": {
+   "absmax": 3.53125,
+   "mean": 0.25931432843208313,
+   "sha256": "21625681c57d02a4944f8d2c0d45ae578a97b3707e4177a40e74182658a79a77",
+   "shape": [
+    1,
+    4,
+    128,
+    128
+   ],
+   "std": 1.4688767194747925
+  },
+  "long-caption": {
+   "absmax": 2.84375,
+   "mean": 0.1171589195728302,
+   "sha256": "38fc3b29a754d123514de23993679197584ed77db991084ec76ea8e260b5edf8",
+   "shape": [
+    1,
+    4,
+    128,
+    128
+   ],
+   "std": 0.8346468210220337
+  },
+  "short-caption": {
+   "absmax": 3.1875,
+   "mean": -0.0073871612548828125,
+   "sha256": "5560cb378764c0bab393b58edebac152fbf5e3c6c0e97646ba74dde302efa2f1",
+   "shape": [
+    1,
+    4,
+    128,
+    128
+   ],
+   "std": 0.8964167237281799
+  }
+ },
+ "noise_sha256": "95e820ebf1fa52052b66355eb9414798eef3f067bf3e87260308f66854e36e29",
+ "reference_versions": {
+  "diffusers": "0.35.1",
+  "torch": "2.12.0+cu130",
+  "transformers": "4.57.1"
+ },
+ "steps": 20,
+ "token_ids_digest": "74a7cde0c4242662d0d590b2ab0cda89a3220ff6fcc2ea7cad27cea10e87e0a1"
+}
