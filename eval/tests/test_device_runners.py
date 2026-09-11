@@ -43,18 +43,12 @@ class DeviceRunnerCase(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self.tmp.name)
         self.gen_name = "BG-FAKE"
-        self.gen_dir = ROOT / "eval" / "cells" / self.gen_name
-        self.gen_dir.mkdir(parents=True, exist_ok=True)
-        src = fixtures.calibrated_generation(self.dir)
-        doc = json.loads(src.read_text())
-        doc["name"] = self.gen_name
-        (self.gen_dir / "generation.json").write_text(json.dumps(doc, indent=1, sort_keys=True))
-        (self.gen_dir / "reference.json").write_text(
-            (src.parent / "reference.json").read_text())
+        # Outside the repository: a test must not leave a calibrated generation in eval/cells/,
+        # where the next `burnish generation show` would report numbers nobody measured.
+        self.cells_root, self.gpath = fixtures.scratch_generation(self.dir, self.gen_name)
+        self.gen_dir = self.gpath.parent
 
     def tearDown(self):
-        import shutil
-        shutil.rmtree(self.gen_dir, ignore_errors=True)
         self.tmp.cleanup()
 
     def gate_file(self, impl="fused-adaln", correctness="PASS", determinism=True,
@@ -81,6 +75,7 @@ class DeviceRunnerCase(unittest.TestCase):
                "--repeats", "3",
                "--gate-result", str(gate),
                "--gate-base-result", str(base_gate),
+               "--cells-root", str(self.cells_root),
                "--output", str(self.dir / "raw.json"), *extra]
         return subprocess.run(cmd, capture_output=True, text=True,
                               env=env or fake_env(), cwd=str(ROOT))
@@ -167,6 +162,7 @@ class TestBench(DeviceRunnerCase):
         cmd = [sys.executable, str(ROOT / "eval" / "bench.py"),
                "--binary", str(FAKES / "burnisher"), "--generation", self.gen_name,
                "--impl-candidate", "fused-adaln", "--gate-result", str(gate),
+               "--cells-root", str(self.cells_root),
                "--output", str(self.dir / "raw.json")]
         r = subprocess.run(cmd, capture_output=True, text=True, env=fake_env(), cwd=str(ROOT))
         self.assertEqual(r.returncode, 2)
@@ -182,6 +178,7 @@ class TestBench(DeviceRunnerCase):
         cmd = [sys.executable, str(ROOT / "eval" / "bench.py"),
                "--binary", str(FAKES / "burnisher"), "--generation", self.gen_name,
                "--impl-candidate", "x", "--gate-base-result", str(self.base_gate()),
+               "--cells-root", str(self.cells_root),
                "--output", str(self.dir / "raw.json")]
         r = subprocess.run(cmd, capture_output=True, text=True, env=fake_env(), cwd=str(ROOT))
         self.assertEqual(r.returncode, 2)
@@ -193,6 +190,7 @@ class TestCalibrate(DeviceRunnerCase):
         cmd = [sys.executable, str(ROOT / "eval" / "calibrate.py"),
                "--binary", str(FAKES / "burnisher"),
                "--generation", self.gen_name, "--repeats", "5",
+               "--cells-root", str(self.cells_root),
                "--output", str(self.dir / "ref.json"), *extra]
         return subprocess.run(cmd, capture_output=True, text=True,
                               env=env or fake_env(), cwd=str(ROOT))
@@ -261,7 +259,8 @@ class TestCalibrate(DeviceRunnerCase):
 
         out = self.dir / "receipt.json"
         s = subprocess.run([sys.executable, str(ROOT / "tools" / "burnish"), "score", str(raw),
-                            "--generation", self.gen_name, "--output", str(out)],
+                            "--generation", self.gen_name,
+                            "--cells-root", str(self.cells_root), "--output", str(out)],
                            capture_output=True, text=True, cwd=str(ROOT), env=fake_env())
         self.assertEqual(s.returncode, 0, s.stderr)
         rec = json.loads(out.read_text())

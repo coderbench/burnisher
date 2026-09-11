@@ -135,6 +135,25 @@ class TestScoreCli(unittest.TestCase):
         self.assertGreater(rec["score"]["gap_closed"], 0.0)
 
 
+class TestTestsDoNotPolluteTheTree(unittest.TestCase):
+    """A test that leaves a calibrated generation in `eval/cells/` leaves the next
+    `burnish generation show` reporting numbers nobody measured. This pins the invariant, because
+    an interrupted run is exactly when it would break and exactly when nobody is watching."""
+
+    def test_scratch_generations_are_written_outside_the_repository(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root, gpath = fixtures.scratch_generation(tmp, "BG-INVARIANT")
+            self.assertTrue(gpath.exists())
+            self.assertNotIn(str(ROOT / "eval" / "cells"), str(root.resolve()))
+            self.assertFalse((ROOT / "eval" / "cells" / "BG-INVARIANT").exists())
+
+    def test_the_committed_tree_holds_only_real_generations(self):
+        present = sorted(p.name for p in (ROOT / "eval" / "cells").iterdir() if p.is_dir())
+        self.assertEqual(present, ["BG-1"],
+                         f"eval/cells holds {present}; a scratch generation leaked into the "
+                         f"repository")
+
+
 class TestGenerationCli(unittest.TestCase):
     def test_show_reports_the_real_bg1_as_uncalibrated(self):
         r = run("generation", "show", "--name", "BG-1")
