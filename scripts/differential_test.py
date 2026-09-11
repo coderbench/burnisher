@@ -80,8 +80,8 @@ def report(name, ours, theirs, tolerance=None):
     return ok
 
 
-def run_ours(binary, args, out):
-    cmd = [str(binary)] + args
+def run_ours(binary, args, out, impl=None):
+    cmd = [str(binary)] + args + (["--impl", impl] if impl else [])
     t0 = time.time()
     p = subprocess.run(cmd, capture_output=True, text=True)
     if p.returncode != 0:
@@ -113,12 +113,14 @@ def stage_vae(args):
         ref = vae.decode(torch.from_numpy(latent), return_dict=False)[0].numpy()
     print(f"    ({time.time() - t0:.0f}s)")
 
-    print(">> ours")
-    ours = run_ours(args.binary,
-                    ["decode", "--weights", args.weights, "--latent", "/tmp/diff_latent.npy",
-                     "--out", "/tmp/diff_pixels.npy", "--dtype", "fp32"],
-                    "/tmp/diff_pixels.npy")
-    return report("vae-decode", ours, ref)
+    argv = ["decode", "--weights", args.weights, "--latent", "/tmp/diff_latent.npy",
+            "--out", "/tmp/diff_pixels.npy", "--dtype", args.dtype]
+    if args.against != "reference":
+        print(f">> ours, impl={args.against}")
+        ref = run_ours(args.binary, argv, "/tmp/diff_pixels.npy", args.against)
+    print(f">> ours, impl={args.impl}")
+    ours = run_ours(args.binary, argv, "/tmp/diff_pixels.npy", args.impl)
+    return report("vae-decode", ours, ref, tolerance=args.tolerance)
 
 
 def stage_dit(args):
@@ -163,17 +165,19 @@ def stage_dit(args):
                     return_dict=False)[0].numpy()
     print(f"    ({time.time() - t0:.0f}s)")
 
-    print(">> ours")
-    ours = run_ours(args.binary,
-                    ["dit-step", "--weights", args.weights,
-                     "--latent", "/tmp/diff_dit_latent.npy",
-                     "--caption", "/tmp/diff_dit_caption.npy",
-                     "--mask", "/tmp/diff_dit_mask.npy",
-                     "--timestep", str(args.timestep),
-                     "--out", "/tmp/diff_dit_out.npy", "--dtype", "fp32"] +
-                    (["--layers", str(args.layers)] if args.layers else []),
-                    "/tmp/diff_dit_out.npy")
-    return report("dit-step", ours, ref)
+    argv = (["dit-step", "--weights", args.weights,
+             "--latent", "/tmp/diff_dit_latent.npy",
+             "--caption", "/tmp/diff_dit_caption.npy",
+             "--mask", "/tmp/diff_dit_mask.npy",
+             "--timestep", str(args.timestep),
+             "--out", "/tmp/diff_dit_out.npy", "--dtype", args.dtype] +
+            (["--layers", str(args.layers)] if args.layers else []))
+    if args.against != "reference":
+        print(f">> ours, impl={args.against}")
+        ref = run_ours(args.binary, argv, "/tmp/diff_dit_out.npy", args.against)
+    print(f">> ours, impl={args.impl}")
+    ours = run_ours(args.binary, argv, "/tmp/diff_dit_out.npy", args.impl)
+    return report("dit-step", ours, ref, tolerance=args.tolerance)
 
 
 def stage_t5(args):
@@ -204,17 +208,19 @@ def stage_t5(args):
     print(f"    ({time.time() - t0:.0f}s)")
     del enc
 
-    print(">> ours")
-    ours = run_ours(args.binary,
-                    ["encode", "--weights", args.weights,
-                     "--token-ids", "/tmp/diff_ids.txt",
-                     "--out", "/tmp/diff_t5_out.npy", "--dtype", "fp32"],
-                    "/tmp/diff_t5_out.npy")
+    argv = ["encode", "--weights", args.weights, "--token-ids", "/tmp/diff_ids.txt",
+            "--out", "/tmp/diff_t5_out.npy", "--dtype", args.dtype]
+    if args.against != "reference":
+        print(f">> ours, impl={args.against}")
+        ref = run_ours(args.binary, argv, "/tmp/diff_t5_out.npy", args.against)
+    print(f">> ours, impl={args.impl}")
+    ours = run_ours(args.binary, argv, "/tmp/diff_t5_out.npy", args.impl)
     # The encoder's output at PADDED positions is meaningless on both sides -- it is masked out
     # downstream. Comparing it would compare two different pieces of garbage, so the comparison
     # is restricted to real tokens, which is also what the model's consumer sees.
     keep = mask.numpy().astype(bool)
-    return report("t5-encode (real tokens only)", ours[keep], ref[keep])
+    return report("t5-encode (real tokens only)", ours[keep], ref[keep],
+                  tolerance=args.tolerance)
 
 
 def stage_scheduler(args):
@@ -279,8 +285,21 @@ def main():
     ap.add_argument("--timestep", type=float, default=500.0)
     ap.add_argument("--layers", type=int, help="truncate the DiT block stack on BOTH sides")
     ap.add_argument("--steps", type=int, default=20)
+    ap.add_argument("--dtype", default="fp32")
+    ap.add_argument("--impl", default="stock", help="which registered implementation to test")
+    ap.add_argument("--against", default="reference",
+                    help="'reference' compares against diffusers; an IMPL NAME compares two of "
+                         "this runtime's own implementations against each other, which is how a "
+                         "CUDA kernel is checked against the CPU oracle")
+    ap.add_argument("--tolerance", type=float,
+                    help="override the per-stage default")
     args = ap.parse_args()
 
+    if args.against == "reference":
+        try:
+            import torch  # noqa: F401
+        except ImportError:
+            pass
     try:
         import torch  # noqa: F401
     except ImportError:
@@ -288,7 +307,10 @@ def main():
               "dependency of the runtime or the harness.", file=sys.stderr)
         return 2
 
-    print(f"differential test: {args.stage} at {args.resolution}px\n")
+    against = "diffusers (the reference)" if args.against == "reference" else \
+              f"impl '{args.against}' (this runtime)"
+    print(f"differential test: {args.stage} at {args.resolution}px, "
+          f"impl '{args.impl}' vs {against}, dtype {args.dtype}\n")
     return 0 if STAGES[args.stage](args) else 1
 
 
