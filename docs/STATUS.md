@@ -26,6 +26,7 @@ toolkit were available when this was built.**
 | T5 encoder / PixArt DiT / VAE decoder graphs | complete | `burnisher selftest` |
 | DPM-Solver++ scheduler | complete, pinned against the reference construction | `ctest` |
 | End-to-end pipeline, byte-identical replays | complete | `burnisher selftest` |
+| Correctness gate (determinism + reference) | complete, exercised against a fake device |
 | Paired bench and calibration runners | complete, exercised against a fake device | `python3 -m unittest discover -s eval -t eval` |
 | CUDA device probe | **written, never compiled** | CI job `cuda-compile` |
 | CUDA op backend | **does not exist** | `issues/cuda-op-backend.md` |

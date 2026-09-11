@@ -37,6 +37,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from burnscore import cells as C
+from paths import add_argument as add_cells_root_arg, generation_path
 from runner import (GpuLock, RunnerError, device_fingerprint, interleave, parse_result,
                     require_idle_device, require_not_degenerate, require_ran_what_it_claimed,
                     run_once)
@@ -85,6 +86,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--binary", required=True)
     ap.add_argument("--generation", default="BG-1")
+    add_cells_root_arg(ap)
     ap.add_argument("--impl-base", default="stock",
                     help="the registered implementation the base commit uses")
     ap.add_argument("--impl-candidate", required=True,
@@ -107,7 +109,7 @@ def main():
                     help="skip the held-out shapes; the receipt cannot be credited without them")
     args = ap.parse_args()
 
-    generation = C.load(ROOT / "eval" / "cells" / args.generation / "generation.json")
+    generation = C.load(generation_path(args.generation, args.cells_root))
 
     # Correctness precedes speed, always, and the check is that the gate RAN -- not that
     # somebody remembered to run it.

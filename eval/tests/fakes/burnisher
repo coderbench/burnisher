@@ -12,12 +12,15 @@ Knobs a test can set:
   BURNISH_FAKE_DEGENERATE  report a constant output latent
   BURNISH_FAKE_NO_JSON   print prose and no result line
   BURNISH_FAKE_COUNTER   path to a call-counter file, so repeats differ from each other
-  BURNISH_FAKE_L2        report this as the gate's fidelity (unused by `bench`)
+  BURNISH_FAKE_DRIFT     how far a non-stock impl's latents sit from stock's
+  BURNISH_FAKE_FLAKY     perturb every generation, so the determinism check fails
 """
 import hashlib
 import json
 import os
 import sys
+
+import numpy as np
 
 args = sys.argv[1:]
 if not args or "--help" in args:
@@ -40,6 +43,36 @@ while i < len(args):
 
 if args[0] == "info":
     print("fake burnisher\ncuda: fake")
+    sys.exit(0)
+
+if args[0] == "generate":
+    # A deterministic latent keyed by (prompt, seed, impl), so replays of one build are
+    # byte-identical and two builds differ by a controllable amount.
+    #   BURNISH_FAKE_DRIFT   how far the candidate impl sits from `stock`
+    #   BURNISH_FAKE_FLAKY   perturb every call, so the determinism check fails
+    prompt = opt.get("prompt", "")
+    seed = int(opt.get("seed", 0))
+    impl = opt.get("impl", "stock")
+    h = int(hashlib.sha256(f"{prompt}:{seed}".encode()).hexdigest()[:8], 16)
+    rng = np.random.default_rng(h)
+    latent = rng.standard_normal((1, 4, 16, 16)).astype(np.float32)
+    if impl != "stock":
+        drift = float(os.environ.get("BURNISH_FAKE_DRIFT", "0.0"))
+        latent = latent + drift * np.linalg.norm(latent) / latent.size * rng.standard_normal(
+            latent.shape).astype(np.float32)
+    if os.environ.get("BURNISH_FAKE_FLAKY"):
+        latent = latent + np.float32(1e-3) * np.random.default_rng().standard_normal(
+            latent.shape).astype(np.float32)
+    out = opt.get("dump-latents")
+    if out:
+        np.save(out, latent)
+    print("BURNISH_JSON: " + json.dumps({
+        "metrics": {"latency_s": 0.5, "peak_vram_bytes": 11_000_000_000},
+        "effective": {"impl": impl, "seed": str(seed)},
+        "output_stats": {"latent_mean": float(latent.mean()),
+                         "latent_std": float(latent.std()),
+                         "latent_absmax": float(np.abs(latent).max())},
+    }))
     sys.exit(0)
 
 if os.environ.get("BURNISH_FAKE_NO_JSON"):

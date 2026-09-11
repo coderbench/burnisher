@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from burnscore import cells as C
 from burnscore.floor import measure_floor, resolution_gate
 from bench import measure
+from paths import add_argument as add_cells_root_arg, generation_path
 from runner import GpuLock, device_fingerprint, interleave, require_idle_device
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -43,6 +44,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--binary", required=True)
     ap.add_argument("--generation", default="BG-1")
+    add_cells_root_arg(ap)
     ap.add_argument("--impl", default="stock", help="the base implementation, run as both arms")
     ap.add_argument("--repeats", type=int, default=9,
                     help="paired control-vs-control repeats. Nine, not three: a floor estimated "
@@ -56,7 +58,7 @@ def main():
     ap.add_argument("--output")
     args = ap.parse_args()
 
-    gpath = ROOT / "eval" / "cells" / args.generation / "generation.json"
+    gpath = generation_path(args.generation, args.cells_root)
     generation = C.load(gpath)
     cells = [generation.cell(c) for c in args.cells] if args.cells \
         else [c for c in generation.cells.values() if c.implemented]

@@ -37,6 +37,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from burnscore import cells as C
+from paths import add_argument as add_cells_root_arg, cells_root, generation_path
 from runner import (GpuLock, RunnerError, device_fingerprint, parse_result,
                     require_idle_device, require_not_degenerate, run_once)
 
@@ -89,6 +90,7 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--binary", required=True)
     ap.add_argument("--generation", default="BG-1")
+    add_cells_root_arg(ap)
     ap.add_argument("--impl", default="stock")
     ap.add_argument("--repeats", type=int, default=10,
                     help="determinism replays. Byte-identical is the bar.")
@@ -101,9 +103,9 @@ def main():
     ap.add_argument("--output")
     args = ap.parse_args()
 
-    generation = C.load(ROOT / "eval" / "cells" / args.generation / "generation.json")
+    generation = C.load(generation_path(args.generation, args.cells_root))
     prompts_path = Path(args.prompts) if args.prompts else (
-        ROOT / "eval" / "cells" / args.generation / "prompts.json")
+        cells_root(args.cells_root) / args.generation / "prompts.json")
     prompts = json.loads(prompts_path.read_text())
     seed = prompts["seed"]
     work = Path(args.work_dir)
@@ -163,7 +165,7 @@ def main():
 
         # --- 2. against the pinned reference ---
         ref_dir = Path(args.reference) if args.reference else (
-            ROOT / "eval" / "cells" / generation.name / "reference-latents")
+            cells_root(args.cells_root) / generation.name / "reference-latents")
         if not ref_dir.is_dir():
             print(f"!! no pinned reference latents at {ref_dir}.\n"
                   f"   The reference is the oracle for everything else and it cannot be "

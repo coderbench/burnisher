@@ -35,6 +35,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "eval"))
 
+from paths import cells_root, generation_path  # noqa: E402
+
 EXIT_NO_DEVICE = 3
 
 
@@ -118,7 +120,7 @@ def cmd_generation(args, rest):
         return subprocess.call([sys.executable, script, "--check"] + rest)
     if args.action == "write":
         return subprocess.call([sys.executable, script, "--write"] + rest)
-    path = ROOT / "eval" / "cells" / args.name / "generation.json"
+    path = generation_path(args.name, args.cells_root)
     if not path.exists():
         print(f"!! no such generation: {path}", file=sys.stderr)
         return 2
@@ -136,7 +138,7 @@ def cmd_generation(args, rest):
 
 def cmd_score(args, rest):
     from burnscore import cells as C, compute as CP, receipt as R, ledger as L
-    gen = C.load(ROOT / "eval" / "cells" / args.generation / "generation.json")
+    gen = C.load(generation_path(args.generation, args.cells_root))
     records = json.loads(Path(args.results).read_text())
     if isinstance(records, dict):
         held = records.get("held_out") or None
@@ -202,7 +204,7 @@ def cmd_receipt(args, rest):
         _print_receipt_summary(doc)
         return 0
     gen = None
-    gpath = ROOT / "eval" / "cells" / doc.get("benchmark_generation", "") / "generation.json"
+    gpath = generation_path(doc.get("benchmark_generation", ""), args.cells_root)
     if gpath.exists():
         gen = C.load(gpath)
     try:
@@ -217,11 +219,11 @@ def cmd_receipt(args, rest):
 
 def cmd_ledger(args, rest):
     from burnscore import cells as C, ledger as L
-    root = args.root or (ROOT / "eval" / "cells")
+    root = args.root or cells_root(args.cells_root)
     if args.action == "show":
         print(json.dumps(L.show(root, args.generation), indent=1, sort_keys=True))
         return 0
-    gpath = ROOT / "eval" / "cells" / args.generation / "generation.json"
+    gpath = generation_path(args.generation, args.cells_root)
     gen = C.load(gpath) if gpath.exists() else None
     report = L.audit(root, args.generation, gen)
     print(json.dumps(report, indent=1, sort_keys=True))
@@ -286,6 +288,7 @@ def build_parser():
     p = sub.add_parser("generation", help="inspect or check a frozen generation")
     p.add_argument("action", choices=["show", "check", "write"])
     p.add_argument("--name", default="BG-1")
+    p.add_argument("--cells-root")
     p.set_defaults(fn=cmd_generation)
 
     p = sub.add_parser("score", help="raw measurements -> a scored receipt")
@@ -297,17 +300,20 @@ def build_parser():
     p.add_argument("--allow-partial", action="store_true",
                    help="score an incomplete matrix; the receipt will say PARTIAL and credit "
                         "nothing")
+    p.add_argument("--cells-root")
     p.set_defaults(fn=cmd_score)
 
     p = sub.add_parser("receipt", help="verify or show a receipt")
     p.add_argument("action", choices=["verify", "show"])
     p.add_argument("path")
+    p.add_argument("--cells-root")
     p.set_defaults(fn=cmd_receipt)
 
     p = sub.add_parser("ledger", help="the append-only receipt history")
     p.add_argument("action", choices=["show", "audit"])
     p.add_argument("--generation", default="BG-1")
     p.add_argument("--root")
+    p.add_argument("--cells-root")
     p.set_defaults(fn=cmd_ledger)
 
     for name, fn, helptext in (

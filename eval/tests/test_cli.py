@@ -32,22 +32,11 @@ class TestScoreCli(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self.tmp.name)
-        # A calibrated generation placed inside the tree under its own name, so the real BG-1 --
-        # which is uncalibrated on purpose -- is never touched.
-        src = fixtures.calibrated_generation(self.dir)
         self.gen_name = "BG-TEST"
-        self.gen_dir = ROOT / "eval" / "cells" / self.gen_name
-        self.gen_dir.mkdir(parents=True, exist_ok=True)
-        doc = json.loads(src.read_text())
-        doc["name"] = self.gen_name
-        (self.gen_dir / "generation.json").write_text(json.dumps(doc, indent=1, sort_keys=True))
-        (self.gen_dir / "reference.json").write_text(
-            (src.parent / "reference.json").read_text())
-        self.gen = C.load(self.gen_dir / "generation.json")
+        self.cells_root, gpath = fixtures.scratch_generation(self.dir, self.gen_name)
+        self.gen = C.load(gpath)
 
     def tearDown(self):
-        import shutil
-        shutil.rmtree(self.gen_dir, ignore_errors=True)
         self.tmp.cleanup()
 
     def _raw(self, **kw):
@@ -63,22 +52,24 @@ class TestScoreCli(unittest.TestCase):
     def test_a_clean_win_scores_and_the_receipt_verifies(self):
         raw = self._raw(speedups={"dit-step/1024/bf16": 1.15})
         out = self.dir / "receipt.json"
-        r = run("score", str(raw), "--generation", self.gen_name, "--output", str(out))
+        r = run("score", str(raw), "--generation", self.gen_name, "--output", str(out),
+                "--cells-root", str(self.cells_root))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("FRONTIER_EXPANDED", r.stdout)
         rec = json.loads(out.read_text())
         self.assertGreater(rec["score"]["credited_gap_closed"], 0)
-        v = run("receipt", "verify", str(out))
+        v = run("receipt", "verify", str(out), "--cells-root", str(self.cells_root))
         self.assertEqual(v.returncode, 0, v.stderr)
 
     def test_a_tampered_receipt_is_refused_by_the_cli(self):
         raw = self._raw(speedups={"dit-step/1024/bf16": 1.15})
         out = self.dir / "receipt.json"
-        run("score", str(raw), "--generation", self.gen_name, "--output", str(out))
+        run("score", str(raw), "--generation", self.gen_name, "--output", str(out),
+            "--cells-root", str(self.cells_root))
         rec = json.loads(out.read_text())
         rec["score"]["gap_closed"] = 0.99
         out.write_text(json.dumps(rec))
-        v = run("receipt", "verify", str(out))
+        v = run("receipt", "verify", str(out), "--cells-root", str(self.cells_root))
         self.assertEqual(v.returncode, 1)
         self.assertIn("digest does not match", v.stderr)
 
@@ -90,7 +81,8 @@ class TestScoreCli(unittest.TestCase):
         p.write_text(json.dumps({"generation": self.gen_name, "records": recs,
                                  "correctness": "PASS",
                                  "provenance": fixtures.provenance()}))
-        r = run("score", str(p), "--generation", self.gen_name)
+        r = run("score", str(p), "--generation", self.gen_name,
+                "--cells-root", str(self.cells_root))
         self.assertEqual(r.returncode, 2)
         self.assertIn("reproduces itself", r.stderr)
 
@@ -98,12 +90,12 @@ class TestScoreCli(unittest.TestCase):
         raw = self._raw(speedups={"dit-step/1024/bf16": 1.15})
         ledger = self.dir / "ledger"
         r1 = run("score", str(raw), "--generation", self.gen_name,
-                 "--ledger", str(ledger), "--pr", "7")
+                 "--cells-root", str(self.cells_root), "--ledger", str(ledger), "--pr", "7")
         self.assertEqual(r1.returncode, 0, r1.stderr)
         # A different result under the same PR id is a rewrite, and a rewrite is refused.
         raw2 = self._raw(speedups={"dit-step/1024/bf16": 1.30})
         r2 = run("score", str(raw2), "--generation", self.gen_name,
-                 "--ledger", str(ledger), "--pr", "7")
+                 "--cells-root", str(self.cells_root), "--ledger", str(ledger), "--pr", "7")
         self.assertNotEqual(r2.returncode, 0)
         self.assertIn("supersedes", r2.stderr + r2.stdout)
 
@@ -112,7 +104,8 @@ class TestScoreCli(unittest.TestCase):
         for pr, speed in ((1, 1.15), (2, 1.10)):
             raw = self._raw(speedups={"dit-step/1024/bf16": speed})
             r = run("score", str(raw), "--generation", self.gen_name,
-                    "--ledger", str(ledger), "--pr", str(pr))
+                    "--cells-root", str(self.cells_root), "--ledger", str(ledger),
+                    "--pr", str(pr))
             self.assertEqual(r.returncode, 0, r.stderr)
         show = run("ledger", "show", "--root", str(ledger), "--generation", self.gen_name)
         doc = json.loads(show.stdout)
@@ -129,11 +122,12 @@ class TestScoreCli(unittest.TestCase):
         p.write_text(json.dumps({"generation": self.gen_name, "records": recs,
                                  "correctness": "PASS", "determinism": True,
                                  "provenance": fixtures.provenance()}))
-        r = run("score", str(p), "--generation", self.gen_name)
+        r = run("score", str(p), "--generation", self.gen_name,
+                "--cells-root", str(self.cells_root))
         self.assertNotEqual(r.returncode, 0)
         out = self.dir / "partial-receipt.json"
         r2 = run("score", str(p), "--generation", self.gen_name, "--allow-partial",
-                 "--output", str(out))
+                 "--cells-root", str(self.cells_root), "--output", str(out))
         self.assertEqual(r2.returncode, 0, r2.stderr)
         rec = json.loads(out.read_text())
         self.assertEqual(rec["status"], "PARTIAL")

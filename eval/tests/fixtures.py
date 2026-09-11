@@ -66,6 +66,31 @@ def records(generation, *, speedups=None, repeats=5, jitter=0.002, vram=11.0e9,
     return out
 
 
+def scratch_generation(tmpdir, name, *, with_prompts=False, **calib):
+    """A calibrated generation under `tmpdir/cells/<name>`, outside the repository.
+
+    Tests must not write into the tree they are scoring. An interrupted run that left a
+    calibrated generation in `eval/cells/` would leave the next `burnish generation show`
+    reporting numbers for a cell nobody measured -- which is the exact confusion this whole
+    repository is built to prevent.
+
+    Returns (cells_root, generation_path).
+    """
+    src = calibrated_generation(Path(tmpdir) / "src", **calib)
+    root = Path(tmpdir) / "cells"
+    gdir = root / name
+    gdir.mkdir(parents=True, exist_ok=True)
+    doc = json.loads(src.read_text())
+    doc["name"] = name
+    (gdir / "generation.json").write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n")
+    (gdir / "reference.json").write_text((src.parent / "reference.json").read_text())
+    if with_prompts:
+        # The frozen prompt set is part of the oracle, so tests use the real one.
+        (gdir / "prompts.json").write_text(
+            (ROOT / "eval" / "cells" / "BG-1" / "prompts.json").read_text())
+    return root, gdir / "generation.json"
+
+
 def provenance(**over):
     p = {"base_commit": "0" * 40, "candidate_commit": "1" * 40,
          "host": "synthetic", "device": "rtx5090", "driver": "n/a",
