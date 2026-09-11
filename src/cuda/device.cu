@@ -1,0 +1,180 @@
+// Device query and the PROBE: measure what this part actually sustains.
+//
+// This file exists because of one line in every roofline the repository publishes:
+// `peak_basis`. A ceiling computed against a vendor peak nobody reaches understates every
+// achieved fraction by the same factor, and the consequence is directional and bad -- it tells a
+// contributor there is more room in a cell than there is. Telling somebody there is 55% left
+// when there is 8% is exactly how a subnet loses a contributor, and it is the failure mode this
+// repository is built to avoid.
+//
+// So `burnish probe` measures two numbers on the part itself and rewrites `peak_basis` to
+// `measured`:
+//
+//   sustained bandwidth   a grid-stride read+write over a working set far larger than L2
+//   achievable GEMM rate  a large, well-shaped bf16 GEMM through cuBLASLt
+//
+// The second is deliberately "what a well-tuned GEMM achieves" rather than "what the ALUs could
+// theoretically issue". A roofline is only useful if a contributor could in principle reach it,
+// and nothing in this pipeline will beat a tuned vendor GEMM on a square problem.
+//
+// NOT COMPILED. There was no CUDA toolkit and no Blackwell device available when this was
+// written. docs/STATUS.md says so in those words and the CI job `cuda-compile` exists to make it
+// stop being true. Treat every line here as unverified until that job is green.
+#include <cuda_runtime.h>
+#include <cublas_v2.h>
+#include <cuda_bf16.h>
+
+#include <cstdio>
+#include <string>
+#include <vector>
+
+namespace burnisher {
+namespace {
+
+#define CU_CHECK(expr)                                                              \
+    do {                                                                            \
+        cudaError_t _e = (expr);                                                    \
+        if (_e != cudaSuccess) {                                                    \
+            std::fprintf(stderr, "!! %s:%d %s -> %s\n", __FILE__, __LINE__, #expr,  \
+                         cudaGetErrorString(_e));                                   \
+            return 1;                                                               \
+        }                                                                           \
+    } while (0)
+
+// Read one array and write another, grid-stride. float4 so a warp's access is a full 128-byte
+// transaction; anything narrower measures the addressing rather than the memory system.
+__global__ void stream_copy(const float4* __restrict__ src, float4* __restrict__ dst,
+                            size_t n) {
+    const size_t stride = static_cast<size_t>(blockDim.x) * gridDim.x;
+    for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += stride) {
+        dst[i] = src[i];
+    }
+}
+
+double time_kernel(void (*launch)(void*), void* arg, int iters) {
+    cudaEvent_t a, b;
+    cudaEventCreate(&a);
+    cudaEventCreate(&b);
+    launch(arg);                       // warm up: the first launch pays for module load
+    cudaDeviceSynchronize();
+    cudaEventRecord(a);
+    for (int i = 0; i < iters; ++i) launch(arg);
+    cudaEventRecord(b);
+    cudaEventSynchronize(b);
+    float ms = 0.0f;
+    cudaEventElapsedTime(&ms, a, b);
+    cudaEventDestroy(a);
+    cudaEventDestroy(b);
+    return static_cast<double>(ms) / 1000.0 / iters;
+}
+
+struct CopyArgs {
+    const float4* src;
+    float4* dst;
+    size_t n4;
+    int blocks, threads;
+};
+
+void launch_copy(void* p) {
+    CopyArgs* a = static_cast<CopyArgs*>(p);
+    stream_copy<<<a->blocks, a->threads>>>(a->src, a->dst, a->n4);
+}
+
+}  // namespace
+
+int probe_device_main() {
+    int device = 0;
+    CU_CHECK(cudaGetDevice(&device));
+    cudaDeviceProp prop{};
+    CU_CHECK(cudaGetDeviceProperties(&prop, device));
+
+    // The working set has to be much larger than L2, or this measures the cache. 1 GiB per
+    // buffer is comfortably past 96 MiB and still fits beside a model on a 32 GB part.
+    const size_t bytes = 1ull << 30;
+    const size_t n4 = bytes / sizeof(float4);
+    float4 *src = nullptr, *dst = nullptr;
+    CU_CHECK(cudaMalloc(&src, bytes));
+    CU_CHECK(cudaMalloc(&dst, bytes));
+    CU_CHECK(cudaMemset(src, 1, bytes));
+
+    CopyArgs args{src, dst, n4, 0, 256};
+    args.blocks = prop.multiProcessorCount * 32;
+    const double copy_s = time_kernel(launch_copy, &args, 20);
+    // Read one buffer and write the other: two bytes of traffic per byte copied.
+    const double bandwidth = (2.0 * bytes) / copy_s;
+
+    CU_CHECK(cudaFree(src));
+    CU_CHECK(cudaFree(dst));
+
+    // A large square bf16 GEMM with fp32 accumulate -- the accumulate mode a diffusion GEMM
+    // actually uses, and the one the published bf16 peak in configs/devices.json claims. Getting
+    // the mode wrong makes the roofline wrong by 2x on the same silicon.
+    const int N = 8192;
+    __nv_bfloat16 *A = nullptr, *B = nullptr;
+    float* C = nullptr;
+    CU_CHECK(cudaMalloc(&A, sizeof(__nv_bfloat16) * N * N));
+    CU_CHECK(cudaMalloc(&B, sizeof(__nv_bfloat16) * N * N));
+    CU_CHECK(cudaMalloc(&C, sizeof(float) * N * N));
+    CU_CHECK(cudaMemset(A, 0, sizeof(__nv_bfloat16) * N * N));
+    CU_CHECK(cudaMemset(B, 0, sizeof(__nv_bfloat16) * N * N));
+
+    cublasHandle_t handle;
+    if (cublasCreate(&handle) != CUBLAS_STATUS_SUCCESS) {
+        std::fprintf(stderr, "!! cublasCreate failed\n");
+        return 1;
+    }
+    cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH);
+    const float alpha = 1.0f, beta = 0.0f;
+    const auto gemm_once = [&]() {
+        cublasGemmEx(handle, CUBLAS_OP_N, CUBLAS_OP_N, N, N, N, &alpha,
+                     A, CUDA_R_16BF, N, B, CUDA_R_16BF, N, &beta,
+                     C, CUDA_R_32F, N, CUBLAS_COMPUTE_32F, CUBLAS_GEMM_DEFAULT);
+    };
+    gemm_once();
+    cudaDeviceSynchronize();
+    cudaEvent_t ga, gb;
+    cudaEventCreate(&ga);
+    cudaEventCreate(&gb);
+    cudaEventRecord(ga);
+    const int gemm_iters = 20;
+    for (int i = 0; i < gemm_iters; ++i) gemm_once();
+    cudaEventRecord(gb);
+    cudaEventSynchronize(gb);
+    float gms = 0.0f;
+    cudaEventElapsedTime(&gms, ga, gb);
+    const double gemm_s = static_cast<double>(gms) / 1000.0 / gemm_iters;
+    const double flops = 2.0 * static_cast<double>(N) * N * N / gemm_s;
+
+    cublasDestroy(handle);
+    CU_CHECK(cudaFree(A));
+    CU_CHECK(cudaFree(B));
+    CU_CHECK(cudaFree(C));
+    cudaEventDestroy(ga);
+    cudaEventDestroy(gb);
+
+    // One BURNISH_JSON line, like every other measurement command. `basis` is "measured"
+    // because a run produced it -- which is the one thing that entitles a number to that word.
+    std::printf(
+        "BURNISH_JSON: {\"basis\":\"measured\",\"device\":{\"name\":\"%s\",\"sm\":%d,"
+        "\"cc\":\"%d.%d\",\"vram_bytes\":%zu,\"l2_bytes\":%d,"
+        "\"persisting_l2_bytes\":%zu,\"clock_khz\":%d},"
+        "\"measured\":{\"memory_bandwidth_gbs\":%.3f,\"bf16_tensor_tflops\":%.3f,"
+        "\"gemm_shape\":%d,\"bandwidth_working_set_bytes\":%zu},"
+        "\"_note\":\"bandwidth is a grid-stride read+write over a working set far larger than "
+        "L2; the GEMM rate is a square bf16 GEMM with fp32 accumulate through cuBLAS -- what a "
+        "well-tuned kernel achieves, not what the ALUs could issue. A roofline is only useful "
+        "if a contributor could in principle reach it.\"}\n",
+        prop.name, prop.multiProcessorCount, prop.major, prop.minor,
+        prop.totalGlobalMem, prop.l2CacheSize,
+        static_cast<size_t>(prop.accessPolicyMaxWindowSize), prop.clockRate,
+        bandwidth / 1e9, flops / 1e12, N, bytes);
+
+    std::fprintf(stderr,
+        "\n>> Copy these into configs/devices.json with source \"measured\", then re-run\n"
+        "   `burnish roofline`. Until you do, every achieved fraction in the published table\n"
+        "   is computed against a VENDOR peak and is a LOWER bound on how done each cell is --\n"
+        "   the real remaining room is smaller than the table implies, not larger.\n");
+    return 0;
+}
+
+}  // namespace burnisher

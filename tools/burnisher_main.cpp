@@ -32,6 +32,12 @@
 
 using namespace burnisher;
 
+#ifdef BURNISHER_CUDA
+namespace burnisher {
+int probe_device_main();
+}
+#endif
+
 namespace {
 
 const char* kUsage = R"(burnisher -- a native C++/CUDA image generation runtime for Blackwell

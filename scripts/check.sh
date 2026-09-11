@@ -20,6 +20,18 @@ python3 -m unittest discover -s eval -t eval -p 'test_*.py' || fail=1
 step "the frozen generation still matches configs/"
 python3 eval/make_generation.py --check || fail=1
 
+step "the generated documents are regenerable"
+# docs/ROOFLINE.md, docs/SCREEN.md and issues/ are all GENERATED from configs/. A number typed
+# into any of them by hand would contradict the generation, which is the file the scorer reads.
+python3 eval/screen.py --markdown /tmp/burnish-screen.md >/dev/null
+diff -q /tmp/burnish-screen.md docs/SCREEN.md >/dev/null || {
+  echo "!! docs/SCREEN.md is stale: python3 eval/screen.py --markdown docs/SCREEN.md"; fail=1; }
+tmpissues=$(mktemp -d)
+python3 scripts/make_issues.py --write --out "$tmpissues" >/dev/null
+diff -r -q "$tmpissues" issues >/dev/null || {
+  echo "!! issues/ is stale: python3 scripts/make_issues.py --write"; fail=1; }
+rm -rf "$tmpissues"
+
 step "the published roofline table is regenerable"
 python3 eval/roofline_table.py --markdown /tmp/burnish-roofline.md >/dev/null
 diff -q /tmp/burnish-roofline.md docs/ROOFLINE.md >/dev/null || {
