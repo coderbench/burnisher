@@ -33,6 +33,7 @@ def build(name, candidate_key, device_key, *, resolution, steps, caption_len, cf
     cands = json.loads((ROOT / "configs" / "candidates.json").read_text())["candidates"]
     devices = json.loads((ROOT / "configs" / "devices.json").read_text())
     axes = json.loads((ROOT / "configs" / "axes.json").read_text())
+    tolerance = json.loads((ROOT / "configs" / "tolerance.json").read_text())[name]
     cand = cands[candidate_key]
     device = devices[device_key]
 
@@ -158,42 +159,12 @@ def build(name, candidate_key, device_key, *, resolution, steps, caption_len, cf
         "bootstrap_resamples": 20000,
         "bootstrap_seed": 20260911,
         "repeats": axes["receipt_shape"]["repeats"],
-        "tolerance": {
-            "latent_l2_relative": 0.02,
-            "latent_max_abs": 0.05,
-            "determinism_replays": 10,
-            "determinism_rule": "byte-identical latents across replays of the same build",
-            "_justification": (
-                "The bf16 pipeline is compared against an fp32 reference of the same graph, so "
-                "the tolerance has to admit bf16 rounding accumulated over the whole denoise "
-                "loop and admit nothing else."),
-            "_measured_floor": {
-                "dit_step_fp32_vs_reference_relative_l2": 0.00073,
-                "vae_decode_fp32_vs_reference_relative_l2": 0.0000069,
-                "method": "scripts/differential_test.py, one forward pass, 64px, fp32 on both "
-                          "sides, real weights at the pinned revisions",
-                "_what_it_establishes": (
-                    "A LOWER bound on any workable tolerance, measured rather than argued. Two "
-                    "correct fp32 implementations of this DiT already differ by 7.3e-4 relative "
-                    "L2 after one forward pass, because their reduction orders differ and "
-                    "twenty-eight residual blocks amplify it. Truncating the block stack on both "
-                    "sides shows the amplification directly: 1.3e-6 at one layer, 3.2e-6 at "
-                    "four, 3.1e-5 at eight, 6.6e-5 at sixteen, 7.3e-4 at twenty-eight. Per "
-                    "layer the two agree to fp32 epsilon; the growth is the network, not the "
-                    "arithmetic."),
-                "_what_it_does_not_establish": (
-                    "The tolerance itself. This is ONE forward pass in fp32; the scored path is "
-                    "twenty DPM-Solver++ steps in bf16, where both the rounding and the "
-                    "accumulation are larger. 2% is still a stated threshold rather than a "
-                    "measured one, and it is expected to move once when "
-                    "`burnish gate --calibrate-tolerance` first runs on hardware. What the "
-                    "measurement rules out is a tolerance BELOW about 1e-3, which would reject "
-                    "a correct implementation."),
-            },
-            "_determinism_is_not_a_tolerance": (
-                "The same build must reproduce ITSELF exactly, or it cannot be a reference for "
-                "anything. Only the comparison against the reference has a tolerance."),
-        },
+        # Read from configs/tolerance.json, never typed here. It is set by
+        # `scripts/apply_tolerance.py` from a `burnish gate --calibrate-tolerance` run at the
+        # dtype the cells are scored in -- because a gate that compares across dtypes measures
+        # the dtype rather than the implementation, which is what BG-1 did first and what
+        # eval/cells/BG-1/dtype-cost.json now records the cost of.
+        "tolerance": tolerance,
         "held_out": axes["held_out"],
         "cells": cells,
         "_cells_note": (

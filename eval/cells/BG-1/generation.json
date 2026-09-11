@@ -243,18 +243,26 @@
  ],
  "repeats": 5,
  "tolerance": {
-  "_determinism_is_not_a_tolerance": "The same build must reproduce ITSELF exactly, or it cannot be a reference for anything. Only the comparison against the reference has a tolerance.",
-  "_justification": "The bf16 pipeline is compared against an fp32 reference of the same graph, so the tolerance has to admit bf16 rounding accumulated over the whole denoise loop and admit nothing else.",
-  "_measured_floor": {
-   "_what_it_does_not_establish": "The tolerance itself. This is ONE forward pass in fp32; the scored path is twenty DPM-Solver++ steps in bf16, where both the rounding and the accumulation are larger. 2% is still a stated threshold rather than a measured one, and it is expected to move once when `burnish gate --calibrate-tolerance` first runs on hardware. What the measurement rules out is a tolerance BELOW about 1e-3, which would reject a correct implementation.",
-   "_what_it_establishes": "A LOWER bound on any workable tolerance, measured rather than argued. Two correct fp32 implementations of this DiT already differ by 7.3e-4 relative L2 after one forward pass, because their reduction orders differ and twenty-eight residual blocks amplify it. Truncating the block stack on both sides shows the amplification directly: 1.3e-6 at one layer, 3.2e-6 at four, 3.1e-5 at eight, 6.6e-5 at sixteen, 7.3e-4 at twenty-eight. Per layer the two agree to fp32 epsilon; the growth is the network, not the arithmetic.",
-   "dit_step_fp32_vs_reference_relative_l2": 0.00073,
-   "method": "scripts/differential_test.py, one forward pass, 64px, fp32 on both sides, real weights at the pinned revisions",
-   "vae_decode_fp32_vs_reference_relative_l2": 6.9e-06
-  },
+  "_basis_note": "ARGUED, not measured, and known to be wrong in at least one place: a CORRECT fp32 implementation measured max-abs 0.0654 against the fp32 oracle, over this 0.05 threshold, while its relative L2 was 0.0005 -- fifty times inside the L2 bound. A single outlying element in a 65536-element latent fails a max-abs gate that a whole-tensor norm passes comfortably. Replace both with `scripts/apply_tolerance.py` once `burnish gate --calibrate-tolerance` has run at the scored dtype.",
+  "_determinism_is_not_a_tolerance": "The same build must reproduce ITSELF exactly or it cannot be a reference for anything. Only the comparison against the oracle has a tolerance.",
+  "basis": "argued",
   "determinism_replays": 10,
   "determinism_rule": "byte-identical latents across replays of the same build",
   "latent_l2_relative": 0.02,
-  "latent_max_abs": 0.05
+  "latent_max_abs": 0.05,
+  "measured": {
+   "_bf16_note": "NOT YET MEASURED. It is the number that sets the real threshold, because it is the only one that isolates implementation error at the dtype the cells are scored in. Until it exists the thresholds above stay `argued` and the gate is known to be miscalibrated.",
+   "bf16_vs_bf16_oracle": null,
+   "fp32_vs_fp32_oracle": {
+    "_what": "This runtime in fp32 against the fp32 reference latents, same pinned noise. It is the evidence that the PIPELINE IS CORRECT: four stages that each agree to 1e-5 assemble into a generation that reproduces the reference to 5e-4.",
+    "worst_max_abs": 0.06539362668991089,
+    "worst_relative_l2": 0.0005004137624701084
+   },
+   "reference_fp32_vs_reference_bf16": {
+    "_what": "The reference against itself at two dtypes. No implementation difference at all. This is the cost of bf16 over twenty classifier-free-guided steps at 1024px, and it is the floor under any cross-dtype tolerance.",
+    "worst_max_abs": 3.8679,
+    "worst_relative_l2": 0.3713
+   }
+  }
  }
 }
