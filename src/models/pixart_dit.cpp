@@ -218,10 +218,7 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
         gemm(GemmArgs{&ctx, &wo, &bo, &proj, M, d, d, true});
         // out = x + gate * attn_out. Expressed through the modulate op with a unit scale so the
         // gated residual is one kernel a contributor can fuse, rather than two loops here.
-        {
-            Tensor zero({B, d}, dtype_, impls.device);
-            modulate(ModulateArgs{&proj, &zero, &zero, &x, B, N, d, &x, &gate});
-        }
+        modulate(ModulateArgs{&proj, &zero, &zero, &x, B, N, d, &x, &gate});
 
         // 2. cross-attention. ORACLE: PixArt does NOT normalise before attn2 -- the block feeds
         // `hidden_states` in directly. Adding the norm that every other DiT has here is the most
@@ -255,10 +252,7 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
         Tensor b2 = w_.require(blk(layer, "ff.net.2.bias"));
         gemm(GemmArgs{&modded, &w0, &b0, &ff0, M, dff, d, true, Epilogue::Gelu});
         gemm(GemmArgs{&ff0, &w2, &b2, &proj, M, d, dff, true});
-        {
-            Tensor zero({B, d}, dtype_, impls.device);
-            modulate(ModulateArgs{&proj, &zero, &zero, &x, B, N, d, &x, &gate});
-        }
+        modulate(ModulateArgs{&proj, &zero, &zero, &x, B, N, d, &x, &gate});
     }
 
     // --- output: norm, modulate from the OUTPUT table, project, unpatchify ---

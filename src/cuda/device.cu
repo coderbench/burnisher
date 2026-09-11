@@ -48,8 +48,12 @@ size_t g_live = 0;
 size_t g_peak = 0;
 
 std::map<void*, size_t>& size_table() {
-    static std::map<void*, size_t> t;
-    return t;
+    // Deliberately leaked. `release` runs from a shared_ptr deleter, and a tensor can outlive
+    // static destruction -- at which point a function-local static map has already been
+    // destroyed and the erase corrupts the heap. The symptom is "corrupted double-linked list"
+    // during teardown, which looks like a kernel bug and is not one.
+    static std::map<void*, size_t>* t = new std::map<void*, size_t>();
+    return *t;
 }
 
 void check(cudaError_t e, const char* what) {
@@ -68,6 +72,14 @@ bool available() {
 void* alloc(size_t bytes) {
     void* p = nullptr;
     check(cudaMalloc(&p, bytes), "cudaMalloc");
+    // ZEROED, to match the host allocator.
+    //
+    // `cudaMalloc` does not zero and `calloc` does, so without this the same code produces zeros
+    // on the CPU and garbage on the GPU -- and only where something relied on the initial value,
+    // which is the hardest possible thing to find. It costs a memset per intermediate and buying
+    // that back (by not allocating per call at all) is a real optimisation, not a correctness
+    // question.
+    check(cudaMemset(p, 0, bytes), "cudaMemset");
     std::lock_guard<std::mutex> lock(g_mutex);
     g_live += bytes;
     g_peak = std::max(g_peak, g_live);
