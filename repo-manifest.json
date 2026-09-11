@@ -1,7 +1,7 @@
 {
  "checks": {
   "_note": "Counted from the suites' own output by scripts/manifest.py --write --with-checks. These used to be typed, and they drifted.",
-  "cpp_assertions": 4819,
+  "cpp_assertions": 4843,
   "cpp_pass": true,
   "cpp_suites": [
    "test_tensor",
@@ -49,6 +49,11 @@
   "eval/cells/BG-1/generation.json",
   "eval/cells/BG-1/prompts.json",
   "eval/cells/BG-1/reference.json",
+  "eval/cells/BG-1/token-ids-dense-detail.txt",
+  "eval/cells/BG-1/token-ids-flat-graphic.txt",
+  "eval/cells/BG-1/token-ids-long-caption.txt",
+  "eval/cells/BG-1/token-ids-short-caption.txt",
+  "eval/cells/BG-1/token-ids.json",
   "eval/gate.py",
   "eval/make_generation.py",
   "eval/paths.py",
@@ -95,6 +100,7 @@
   "scripts/check.sh",
   "scripts/make_issues.py",
   "scripts/manifest.py",
+  "scripts/tokenize_prompts.py",
   "scripts/verify_checkpoint_layout.py",
   "src/core/impl_select.cpp",
   "src/core/pipeline.cpp",

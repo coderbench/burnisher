@@ -23,7 +23,9 @@ std::string blk(int i, const std::string& tail) {
 // T5's relative position bucketing, bidirectional. Reproduced rather than approximated: the
 // bias enters every layer's scores, so a bucketing that is off by one shifts every attention
 // distribution slightly and shows up only as a failed latent comparison.
-int relative_bucket(int relative_position, int num_buckets, int max_distance) {
+}  // namespace
+
+int t5_relative_bucket(int relative_position, int num_buckets, int max_distance) {
     int ret = 0;
     int n = relative_position;
     num_buckets /= 2;
@@ -39,6 +41,7 @@ int relative_bucket(int relative_position, int num_buckets, int max_distance) {
     return ret + large;
 }
 
+namespace {
 }  // namespace
 
 T5Encoder::T5Encoder(T5Config cfg, const WeightSource& w, DType compute)
@@ -75,7 +78,7 @@ Tensor T5Encoder::forward(const Tensor& token_ids, const ImplSelection& impls) c
         const int buckets = static_cast<int>(rel.dim(0));
         for (int64_t q = 0; q < S; ++q) {
             for (int64_t k = 0; k < S; ++k) {
-                const int b = relative_bucket(static_cast<int>(k - q), buckets, 128);
+                const int b = t5_relative_bucket(static_cast<int>(k - q), buckets, 128);
                 for (int h = 0; h < cfg_.num_heads; ++h) {
                     bias.set((h * S + q) * S + k, rel.get(b * cfg_.num_heads + h));
                 }

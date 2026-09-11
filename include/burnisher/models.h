@@ -163,6 +163,22 @@ void declare_pixart_shapes(SyntheticWeights& w, const T5Config& t5, const DiTCon
 
 // Shape helpers shared by the models and by the tests.
 Tensor sinusoidal_timestep_embedding(double t, int dim, DType dtype);
+
+// The DiT's 2D sin/cos position embedding, [grid*grid, dim], row-major over (y, x).
+//
+// Exposed for testing rather than kept private, because it is one of the intricate ORACLE
+// details -- sin-then-cos here while the timestep embedding is cos-then-sin, a meshgrid whose
+// first axis is x, and an interpolation scale that is part of the checkpoint pin. None of that is
+// checkable from the outside of a whole forward pass.
+std::vector<double> dit_position_embedding(int dim, int grid, int base_size,
+                                           double interpolation_scale);
+
+// T5's bidirectional relative-position bucketing. `relative_position` is key minus query.
+//
+// Exposed for the same reason as the position embedding: it enters every layer's attention
+// scores, a bucketing that is off by one shifts every attention distribution slightly, and that
+// is invisible in anything short of a comparison against the reference.
+int t5_relative_bucket(int relative_position, int num_buckets, int max_distance);
 Tensor patchify(const Tensor& x, int patch, DType dtype);
 Tensor unpatchify(const Tensor& x, int batch, int channels, int grid, int patch, DType dtype);
 

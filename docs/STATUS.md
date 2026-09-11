@@ -85,6 +85,19 @@ Neither would have survived the correctness gate against a reference. Both survi
 this repository could check without one, which is the argument for getting the reference latents
 made.
 
+**What was done about the rest of that class.** The remaining intricate oracle details are now
+differential-tested against independent implementations written from the reference's published
+algorithms rather than from this code, with the expected values committed as golden fixtures in
+`tests/test_models.cpp`:
+
+| detail | why it is a trap | agreement |
+|:--|:--|:--|
+| 2D position embedding | sin-then-cos, meshgrid with x as the first axis, interpolation scale pinned to the checkpoint | to 1e-9 |
+| timestep embedding | cos-then-sin — the *opposite* order, in the same model, because of `flip_sin_to_cos` | to 1e-6 |
+| T5 relative-position bucketing | enters every layer's scores; off by one shifts every attention distribution | exact, across every boundary |
+
+Two conventions in one model is not a design, it is history, and matching it is not optional.
+
 ### On "exercised against a fake device"
 
 `eval/tests/fakes/` holds a stub `nvidia-smi` and a stub runtime that speaks the `BURNISH_JSON`

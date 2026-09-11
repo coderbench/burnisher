@@ -39,10 +39,13 @@ void sincos_1d(int dim, const std::vector<double>& pos, std::vector<double>* out
     }
 }
 
+}  // namespace
+
 // ORACLE: the 2D grid. meshgrid(w, h) in 'xy' order, then the FIRST mesh feeds the first half of
 // the channels. diffusers names those halves `emb_h`/`emb_w` the other way round; the behaviour
 // is what has to match, not the naming.
-std::vector<double> sincos_2d(int dim, int grid, int base_size, double interpolation_scale) {
+std::vector<double> dit_position_embedding(int dim, int grid, int base_size,
+                                           double interpolation_scale) {
     std::vector<double> axis(grid);
     for (int i = 0; i < grid; ++i) {
         axis[i] = static_cast<double>(i) /
@@ -67,6 +70,7 @@ std::vector<double> sincos_2d(int dim, int grid, int base_size, double interpola
     return out;
 }
 
+namespace {
 }  // namespace
 
 PixArtDiT::PixArtDiT(DiTConfig cfg, const WeightSource& w, DType compute)
@@ -103,8 +107,8 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
         gemm(GemmArgs{&flat, &pw, &pb, &x, M, d, cfg_.in_channels * patch * patch, true});
         const int base = cfg_.sample_size / static_cast<int>(patch);
         // ORACLE: interpolation_scale is 2 for the 1024px checkpoint and is part of the pin.
-        std::vector<double> pe = sincos_2d(static_cast<int>(d), static_cast<int>(grid),
-                                           base, 2.0);
+        std::vector<double> pe = dit_position_embedding(
+            static_cast<int>(d), static_cast<int>(grid), base, 2.0);
         for (int64_t b = 0; b < B; ++b) {
             for (int64_t t = 0; t < N; ++t) {
                 for (int64_t c = 0; c < d; ++c) {

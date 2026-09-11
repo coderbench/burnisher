@@ -78,6 +78,111 @@ int main() {
         CHECK_THROWS(sinusoidal_timestep_embedding(0.0, 7, DType::F32));
     }
 
+    // --- the ORACLE details, against an independent implementation ---
+    //
+    // These numbers were produced in numpy from the reference's published algorithm, not from
+    // this code. Differential testing is the only leverage available on details that are
+    // arbitrary by nature: sin-then-cos here while the timestep embedding is cos-then-sin, a
+    // meshgrid whose first axis is x, an interpolation scale that is part of the checkpoint pin.
+    // A whole-forward-pass test cannot see any of it, and the failure mode is a plausible image.
+    {
+        const double kPosEmbed[] = {
+        0.000000000, 0.000000000, 1.000000000, 1.000000000,
+        0.000000000, 0.000000000, 1.000000000, 1.000000000,
+        0.479425539, 0.004999979, 0.877582562, 0.999987500,
+        0.000000000, 0.000000000, 1.000000000, 1.000000000,
+        0.841470985, 0.009999833, 0.540302306, 0.999950000,
+        0.000000000, 0.000000000, 1.000000000, 1.000000000,
+        0.997494987, 0.014999438, 0.070737202, 0.999887502,
+        0.000000000, 0.000000000, 1.000000000, 1.000000000,
+        0.000000000, 0.000000000, 1.000000000, 1.000000000,
+        0.479425539, 0.004999979, 0.877582562, 0.999987500,
+        0.479425539, 0.004999979, 0.877582562, 0.999987500,
+        0.479425539, 0.004999979, 0.877582562, 0.999987500,
+        0.841470985, 0.009999833, 0.540302306, 0.999950000,
+        0.479425539, 0.004999979, 0.877582562, 0.999987500,
+        0.997494987, 0.014999438, 0.070737202, 0.999887502,
+        0.479425539, 0.004999979, 0.877582562, 0.999987500,
+        0.000000000, 0.000000000, 1.000000000, 1.000000000,
+        0.841470985, 0.009999833, 0.540302306, 0.999950000,
+        0.479425539, 0.004999979, 0.877582562, 0.999987500,
+        0.841470985, 0.009999833, 0.540302306, 0.999950000,
+        0.841470985, 0.009999833, 0.540302306, 0.999950000,
+        0.841470985, 0.009999833, 0.540302306, 0.999950000,
+        0.997494987, 0.014999438, 0.070737202, 0.999887502,
+        0.841470985, 0.009999833, 0.540302306, 0.999950000,
+        0.000000000, 0.000000000, 1.000000000, 1.000000000,
+        0.997494987, 0.014999438, 0.070737202, 0.999887502,
+        0.479425539, 0.004999979, 0.877582562, 0.999987500,
+        0.997494987, 0.014999438, 0.070737202, 0.999887502,
+        0.841470985, 0.009999833, 0.540302306, 0.999950000,
+        0.997494987, 0.014999438, 0.070737202, 0.999887502,
+        0.997494987, 0.014999438, 0.070737202, 0.999887502,
+        0.997494987, 0.014999438, 0.070737202, 0.999887502
+        };
+        std::vector<double> got = dit_position_embedding(8, 4, 4, 2.0);
+        CHECK(got.size() == sizeof(kPosEmbed) / sizeof(kPosEmbed[0]));
+        double worst = 0.0;
+        for (size_t i = 0; i < got.size(); ++i) {
+            worst = std::max(worst, std::fabs(got[i] - kPosEmbed[i]));
+        }
+        CHECK_MSG(worst < 1e-9,
+                  "the 2D position embedding disagrees with an independent implementation by " +
+                  std::to_string(worst) + "; check the sin/cos order and the meshgrid axis order");
+    }
+    {
+        const double kTimestep[] = {
+        -0.883849273, 0.964966028, 0.283662185, 0.877582562,
+        -0.467771805, -0.262374854, -0.958924275, 0.479425539
+        };
+        Tensor e = sinusoidal_timestep_embedding(500.0, 8, DType::F32);
+        double worst = 0.0;
+        for (int i = 0; i < 8; ++i) {
+            worst = std::max(worst, std::fabs(static_cast<double>(e.get(i)) - kTimestep[i]));
+        }
+        CHECK_MSG(worst < 1e-6,
+                  "the timestep embedding disagrees with an independent implementation by " +
+                  std::to_string(worst) + "; it is COS first (flip_sin_to_cos), unlike the "
+                  "position embedding in the same model");
+    }
+
+    {
+        // T5's bidirectional relative-position bucketing, against an independent implementation.
+        // It enters every layer's attention scores; off by one shifts every distribution
+        // slightly and is invisible in anything short of a reference comparison. The probes
+        // straddle every boundary the algorithm has: the sign split, `max_exact`, and the
+        // saturation at `max_distance`.
+        const struct { int rp; int bucket; } kBuckets[] = {
+            {-300, 15},
+            {-129, 15},
+            {-128, 15},
+            {-127, 15},
+            {-64, 14},
+            {-16, 10},
+            {-9, 8},
+            {-8, 8},
+            {-7, 7},
+            {-1, 1},
+            {0, 0},
+            {1, 17},
+            {7, 23},
+            {8, 24},
+            {9, 24},
+            {16, 26},
+            {64, 30},
+            {127, 31},
+            {128, 31},
+            {129, 31},
+            {300, 31}
+        };
+        for (const auto& c : kBuckets) {
+            const int got = t5_relative_bucket(c.rp, 32, 128);
+            CHECK_MSG(got == c.bucket,
+                      "relative position " + std::to_string(c.rp) + " bucketed to " +
+                      std::to_string(got) + ", reference gives " + std::to_string(c.bucket));
+        }
+    }
+
     // --- each model reproduces itself exactly ---
     {
         T5Encoder enc(t5, *w, DType::F32);
