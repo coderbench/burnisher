@@ -125,7 +125,57 @@ struct Conv2dArgs {
     int64_t batch, c_in, h_in, w_in, c_out, k, pad;
 };
 
+// out[i] = a[i] + scale * b[...], where b is either the same shape or one row broadcast over
+// `outer`. This is the residual add and the position-embedding add.
+//
+// It is an OP rather than a loop in the model for one reason: a loop over `Tensor::get` is host
+// code, and host code cannot touch device memory. Every piece of glue in a model graph has to be
+// an op or the model cannot run on a GPU at all -- which is a thing that is easy to discover far
+// too late.
+struct AddArgs {
+    const Tensor* a;
+    const Tensor* b;
+    Tensor* out;
+    int64_t outer;          // rows
+    int64_t inner;          // elements per row
+    float scale = 1.0f;
+    bool broadcast_b = false;   // b is one row of `inner`, reused for every row
+};
+
+// out[b, c] = modulation[b, chunk * channels + c] + table[chunk * channels + c]
+//
+// AdaLN-single's six chunks: shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp, in
+// that order. The per-layer `scale_shift_table` is ADDED to the shared modulation before the
+// chunking, and reordering them is invisible in a diff and fatal to the image.
+struct ChunkArgs {
+    const Tensor* modulation;   // [batch, chunks * channels]
+    const Tensor* table;        // [table_chunks, channels]
+    Tensor* out;                // [batch, channels]
+    int64_t batch, channels, chunks, chunk;
+    // The table row, when it differs from the modulation chunk. The output head needs it: there
+    // the modulation is a single [batch, channels] timestep embedding added to BOTH rows of a
+    // 2-row table, so the same modulation chunk pairs with two different table rows.
+    int64_t table_chunk = -1;
+};
+
+// [B, C, H, W] <-> [B, (H/p)*(W/p), C*p*p].
+//
+// The two directions do NOT use the same ordering, and that is the reference's doing rather than
+// a choice: the patch embedding is a Conv2d, so the forward direction is (channel, row, col) with
+// column fastest; the output projection is a Linear followed by an einsum, so the inverse is
+// (row, col, channel) with channel fastest. They are not inverses of each other and a round-trip
+// test passes with both wrong.
+struct PatchArgs {
+    const Tensor* in;
+    Tensor* out;
+    int64_t batch, channels, grid, patch;
+    bool inverse = false;
+};
+
 using GemmRegistry = OpRegistry<GemmArgs>;
+using AddRegistry = OpRegistry<AddArgs>;
+using ChunkRegistry = OpRegistry<ChunkArgs>;
+using PatchRegistry = OpRegistry<PatchArgs>;
 using AttentionRegistry = OpRegistry<AttentionArgs>;
 using NormRegistry = OpRegistry<NormArgs>;
 using ModulateRegistry = OpRegistry<ModulateArgs>;
@@ -142,6 +192,9 @@ struct ImplSelection {
     std::string modulate = "stock";
     std::string activation = "stock";
     std::string conv2d = "stock";
+    std::string add = "stock";
+    std::string chunk = "stock";
+    std::string patch = "stock";
     static ImplSelection from_request(const std::string& requested);
     std::map<std::string, std::string> as_map() const;
 };

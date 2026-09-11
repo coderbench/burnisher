@@ -42,7 +42,7 @@ def versions():
             "transformers": transformers.__version__}
 
 
-def encode_prompts(weights, ids_doc, prompt_ids, dtype):
+def encode_prompts(weights, ids_doc, prompt_ids, dtype, device="cpu"):
     """T5 hidden states for each (negative, positive) pair, with the attention mask."""
     import torch
     from transformers import T5EncoderModel
@@ -51,29 +51,33 @@ def encode_prompts(weights, ids_doc, prompt_ids, dtype):
     t0 = time.time()
     enc = T5EncoderModel.from_pretrained(str(Path(weights) / "text_encoder"),
                                          torch_dtype=dtype, low_cpu_mem_usage=True)
-    enc.eval()
+    enc.eval().to(device)
     print(f"   loaded in {time.time() - t0:.0f}s", flush=True)
 
     out = {}
-    neg = torch.tensor([ids_doc["negative"]["ids"]], dtype=torch.long)
+    neg = torch.tensor([ids_doc["negative"]["ids"]], dtype=torch.long, device=device)
     for pid in prompt_ids:
-        pos = torch.tensor([ids_doc["prompts"][pid]["ids"]], dtype=torch.long)
+        pos = torch.tensor([ids_doc["prompts"][pid]["ids"]], dtype=torch.long, device=device)
         ids = torch.cat([neg, pos], dim=0)
         # The mask is derived from the ids, never passed alongside them.
         mask = (ids != ids_doc["pad_id"]).long()
         t0 = time.time()
         with torch.no_grad():
             h = enc(input_ids=ids, attention_mask=mask).last_hidden_state
-        out[pid] = (h.clone(), mask.clone())
+        out[pid] = (h.detach().cpu().clone(), mask.detach().cpu().clone())
         print(f"   {pid:16s} encoded in {time.time() - t0:.0f}s  "
               f"{tuple(h.shape)}  real tokens {int(mask[1].sum())}", flush=True)
 
     del enc
     gc.collect()
+    if device != "cpu":
+        # Freed before the denoiser is loaded. 19 GB of encoder and 2.4 GB of denoiser both
+        # resident is avoidable and, at 32 GB, eventually not survivable at higher resolutions.
+        torch.cuda.empty_cache()
     return out
 
 
-def denoise(weights, embeds, noise, steps, guidance, dtype, out_dir=None):
+def denoise(weights, embeds, noise, steps, guidance, dtype, out_dir=None, device="cpu"):
     """The reference denoise loop: the reference transformer and the reference scheduler."""
     import torch
     from diffusers import Transformer2DModel, DPMSolverMultistepScheduler
@@ -81,7 +85,7 @@ def denoise(weights, embeds, noise, steps, guidance, dtype, out_dir=None):
     print(">> loading the transformer", flush=True)
     model = Transformer2DModel.from_pretrained(str(Path(weights) / "transformer"),
                                                torch_dtype=dtype, low_cpu_mem_usage=True)
-    model.eval()
+    model.eval().to(device)
     sched_cfg = json.loads((ROOT / "configs" / "candidates.json").read_text())
     sched_cfg = sched_cfg["candidates"]["pixart-sigma-xl2-1024"]["scheduler"]
     scheduler = DPMSolverMultistepScheduler(
@@ -96,15 +100,15 @@ def denoise(weights, embeds, noise, steps, guidance, dtype, out_dir=None):
     out = {}
     for pid, (h, mask) in embeds.items():
         scheduler.set_timesteps(steps)
-        latent = torch.from_numpy(noise.copy()).to(dtype)
+        latent = torch.from_numpy(noise.copy()).to(dtype).to(device)
         t0 = time.time()
         for i, t in enumerate(scheduler.timesteps):
             batched = torch.cat([latent, latent], dim=0)
             with torch.no_grad():
                 pred = model(batched,
-                             encoder_hidden_states=h.to(dtype),
-                             encoder_attention_mask=mask,
-                             timestep=t.expand(2),
+                             encoder_hidden_states=h.to(dtype).to(device),
+                             encoder_attention_mask=mask.to(device),
+                             timestep=t.to(device).expand(2),
                              added_cond_kwargs={"resolution": None, "aspect_ratio": None},
                              return_dict=False)[0]
             # The model predicts 2*in_channels: epsilon and a learned variance. The sampler is
@@ -113,11 +117,11 @@ def denoise(weights, embeds, noise, steps, guidance, dtype, out_dir=None):
             eps = pred.chunk(2, dim=1)[0]
             uncond, cond = eps.chunk(2, dim=0)
             eps = uncond + guidance * (cond - uncond)
-            latent = scheduler.step(eps, t, latent, return_dict=False)[0]
+            latent = scheduler.step(eps, t.to(device), latent, return_dict=False)[0]
             if i == 0 or (i + 1) % 5 == 0:
                 print(f"   {pid:16s} step {i + 1}/{steps}  "
                       f"{(time.time() - t0) / (i + 1):.1f}s/step", flush=True)
-        out[pid] = latent.float().numpy()
+        out[pid] = latent.float().cpu().numpy()
         if out_dir is not None:
             # Written as each one finishes, not at the end. A five-hour job that loses everything
             # to an interruption is a five-hour job nobody runs twice.
@@ -141,6 +145,9 @@ def main():
     ap.add_argument("--guidance", type=float, default=4.5)
     ap.add_argument("--prompts", nargs="*", help="subset, for a smoke run")
     ap.add_argument("--dtype", default="float32")
+    ap.add_argument("--device", default="cpu",
+                    help="cuda makes this minutes instead of hours. The REFERENCE may run "
+                         "wherever it likes -- it is the oracle, not the thing being timed.")
     ap.add_argument("--write", action="store_true")
     args = ap.parse_args()
 
@@ -164,12 +171,13 @@ def main():
 
     print(f"reference: {json.dumps(versions())}")
     print(f"checkpoint: {gen['model']['repo']} @ {gen['model']['revision'][:12]}")
-    print(f"noise: {noise.shape}, steps {steps}, guidance {args.guidance}, dtype {args.dtype}\n")
+    print(f"noise: {noise.shape}, steps {steps}, guidance {args.guidance}, "
+          f"dtype {args.dtype}, device {args.device}\n")
 
     out_dir = gdir / "reference-latents"
-    embeds = encode_prompts(args.weights, ids_doc, prompt_ids, dtype)
+    embeds = encode_prompts(args.weights, ids_doc, prompt_ids, dtype, args.device)
     latents = denoise(args.weights, embeds, noise, steps, args.guidance, dtype,
-                      out_dir if args.write else None)
+                      out_dir if args.write else None, args.device)
     manifest = {
         "_what": "The pinned reference latents: the oracle the correctness gate compares "
                  "against. Produced by the REFERENCE implementation, never by this runtime -- a "
@@ -182,6 +190,11 @@ def main():
         "token_ids_digest": hashlib.sha256((gdir / "token-ids.json").read_bytes()).hexdigest(),
         "noise_sha256": hashlib.sha256(Path(args.noise).read_bytes()).hexdigest(),
         "steps": steps, "guidance_scale": args.guidance, "dtype": args.dtype,
+        "device": args.device,
+        "_device_note": "Where the REFERENCE ran. It is the oracle, not the thing being timed, "
+                        "so it may run anywhere -- but fp32 on a GPU and fp32 on a CPU are not "
+                        "bit-identical, and a receipt should be able to say which produced its "
+                        "oracle.",
         "_pin_note": "A moved reference version, checkpoint revision, token-id set or noise "
                      "tensor is a CHANGED ORACLE and therefore a new generation, never an edit.",
         "latents": {},

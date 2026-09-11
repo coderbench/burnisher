@@ -300,6 +300,54 @@ void conv2d_cpu(const Conv2dArgs& a) {
     }
 }
 
+void add_cpu(const AddArgs& a) {
+    for (int64_t r = 0; r < a.outer; ++r) {
+        for (int64_t i = 0; i < a.inner; ++i) {
+            const int64_t at = r * a.inner + i;
+            const int64_t bt = a.broadcast_b ? i : at;
+            a.out->set(at, a.a->get(at) + a.scale * a.b->get(bt));
+        }
+    }
+}
+
+void chunk_cpu(const ChunkArgs& a) {
+    const int64_t trow = (a.table_chunk >= 0) ? a.table_chunk : a.chunk;
+    for (int64_t b = 0; b < a.batch; ++b) {
+        for (int64_t c = 0; c < a.channels; ++c) {
+            a.out->set(b * a.channels + c,
+                       a.modulation->get(b * a.chunks * a.channels + a.chunk * a.channels + c) +
+                       a.table->get(trow * a.channels + c));
+        }
+    }
+}
+
+void patch_cpu(const PatchArgs& a) {
+    const int64_t P = a.patch, G = a.grid, C = a.channels, H = G * P;
+    const int64_t per_token = C * P * P;
+    for (int64_t b = 0; b < a.batch; ++b) {
+        for (int64_t ty = 0; ty < G; ++ty) {
+            for (int64_t tx = 0; tx < G; ++tx) {
+                const int64_t token = ty * G + tx;
+                for (int64_t c = 0; c < C; ++c) {
+                    for (int64_t ky = 0; ky < P; ++ky) {
+                        for (int64_t kx = 0; kx < P; ++kx) {
+                            const int64_t img =
+                                ((b * C + c) * H + ty * P + ky) * H + tx * P + kx;
+                            // Forward: (channel, row, col) -- a conv weight's layout.
+                            // Inverse: (row, col, channel) -- the reference's output einsum.
+                            const int64_t tok = (b * G * G + token) * per_token +
+                                                (a.inverse ? ((ky * P + kx) * C + c)
+                                                           : ((c * P + ky) * P + kx));
+                            if (a.inverse) a.out->set(img, a.in->get(tok));
+                            else           a.out->set(tok, a.in->get(img));
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 }  // namespace
 
 void register_builtin_cpu_ops() {
@@ -322,6 +370,13 @@ void register_builtin_cpu_ops() {
                                   "gelu-tanh / silu / gated-gelu, elementwise");
     register_impl<Conv2dArgs>("conv2d", "stock", conv2d_cpu,
                               "direct convolution, NCHW, stride 1");
+    register_impl<AddArgs>("add", "stock", add_cpu,
+                           "residual and broadcast add; glue, but glue that has to be an op to "
+                           "reach device memory");
+    register_impl<ChunkArgs>("chunk", "stock", chunk_cpu,
+                             "AdaLN-single's six modulation chunks plus the per-layer table");
+    register_impl<PatchArgs>("patch", "stock", patch_cpu,
+                             "patchify and unpatchify; the two orderings differ, see ops.h");
 }
 
 std::vector<OpListing> list_all_impls() {
@@ -332,6 +387,9 @@ std::vector<OpListing> list_all_impls() {
         {ModulateRegistry::instance().op_name(), ModulateRegistry::instance().list()},
         {ActivationRegistry::instance().op_name(), ActivationRegistry::instance().list()},
         {Conv2dRegistry::instance().op_name(), Conv2dRegistry::instance().list()},
+        {AddRegistry::instance().op_name(), AddRegistry::instance().list()},
+        {ChunkRegistry::instance().op_name(), ChunkRegistry::instance().list()},
+        {PatchRegistry::instance().op_name(), PatchRegistry::instance().list()},
     };
 }
 

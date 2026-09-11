@@ -310,12 +310,16 @@ ImplSelection ImplSelection::from_request(const std::string& requested) {
     s.modulate = resolve_impl("modulate", requested);
     s.activation = resolve_impl("activation", requested);
     s.conv2d = resolve_impl("conv2d", requested);
+    s.add = resolve_impl("add", requested);
+    s.chunk = resolve_impl("chunk", requested);
+    s.patch = resolve_impl("patch", requested);
     return s;
 }
 
 std::map<std::string, std::string> ImplSelection::as_map() const {
     return {{"gemm", gemm}, {"attention", attention}, {"norm", norm},
-            {"modulate", modulate}, {"activation", activation}, {"conv2d", conv2d}};
+            {"modulate", modulate}, {"activation", activation}, {"conv2d", conv2d},
+            {"add", add}, {"chunk", chunk}, {"patch", patch}};
 }
 
 }  // namespace burnisher

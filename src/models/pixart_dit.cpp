@@ -83,6 +83,9 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
     const auto& norm = NormRegistry::instance().get(impls.norm);
     const auto& modulate = ModulateRegistry::instance().get(impls.modulate);
     const auto& act = ActivationRegistry::instance().get(impls.activation);
+    const auto& add = AddRegistry::instance().get(impls.add);
+    const auto& chunk = ChunkRegistry::instance().get(impls.chunk);
+    const auto& patch_op = PatchRegistry::instance().get(impls.patch);
 
     const int64_t B = latent.dim(0), H = latent.dim(2);
     const int64_t d = cfg_.d(), dff = cfg_.d_ff();
@@ -94,7 +97,9 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
     const int64_t Mcap = B * cap_len;
 
     // --- patch embedding ---
-    Tensor patches = patchify(latent, static_cast<int>(patch), dtype_);
+    Tensor patches({B, N, cfg_.in_channels * patch * patch}, dtype_);
+    patch_op(PatchArgs{&latent, &patches, B, cfg_.in_channels,
+                       static_cast<int64_t>(grid), patch, false});
     Tensor x({M, d}, dtype_);
     {
         // [d, C, p, p] in the checkpoint. Read as a [d, C*p*p] matrix: contiguously those are
@@ -109,14 +114,11 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
         // ORACLE: interpolation_scale is 2 for the 1024px checkpoint and is part of the pin.
         std::vector<double> pe = dit_position_embedding(
             static_cast<int>(d), static_cast<int>(grid), base, 2.0);
-        for (int64_t b = 0; b < B; ++b) {
-            for (int64_t t = 0; t < N; ++t) {
-                for (int64_t c = 0; c < d; ++c) {
-                    const int64_t i = (b * N + t) * d + c;
-                    x.set(i, x.get(i) + static_cast<float>(pe[t * d + c]));
-                }
-            }
-        }
+        // Computed on the host once per forward -- it depends only on the shape -- then added
+        // through the op, broadcast over the batch. The table is [N, d] and x is [B*N, d].
+        Tensor pos({N, d}, dtype_);
+        for (int64_t i = 0; i < N * d; ++i) pos.set(i, static_cast<float>(pe[i]));
+        add(AddArgs{&x, &pos, &x, B, N * d, 1.0f, true});
     }
 
     // --- AdaLN-single: ONE modulation projection per forward, not per layer ---
@@ -179,13 +181,8 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
     // ORACLE: the six chunks are (shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp,
     // gate_mlp), in that order, and the per-layer scale_shift_table is ADDED to the shared
     // modulation before chunking. Reordering them is invisible in a diff and fatal to the image.
-    const auto take = [&](int chunk, const Tensor& table, Tensor* dst) {
-        for (int64_t b = 0; b < B; ++b) {
-            for (int64_t c = 0; c < d; ++c) {
-                dst->set(b * d + c,
-                         modulation.get(b * 6 * d + chunk * d + c) + table.get(chunk * d + c));
-            }
-        }
+    const auto take = [&](int which, const Tensor& table, Tensor* dst) {
+        chunk(ChunkArgs{&modulation, &table, dst, B, d, 6, which, which});
     };
 
     for (int layer = 0; layer < cfg_.num_layers; ++layer) {
@@ -217,9 +214,8 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
         // gated residual is one kernel a contributor can fuse, rather than two loops here.
         {
             Tensor zero({B, d}, dtype_);
-            modulate(ModulateArgs{&proj, &zero, &zero, &proj, B, N, d, &x, &gate});
+            modulate(ModulateArgs{&proj, &zero, &zero, &x, B, N, d, &x, &gate});
         }
-        for (int64_t i = 0; i < M * d; ++i) x.set(i, proj.get(i));
 
         // 2. cross-attention. ORACLE: PixArt does NOT normalise before attn2 -- the block feeds
         // `hidden_states` in directly. Adding the norm that every other DiT has here is the most
@@ -238,7 +234,7 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
         attn(AttentionArgs{&q, &kc, &vc, &ctx, B, cfg_.num_heads, N, cap_len, cfg_.head_dim,
                            0.0f, nullptr, &caption_mask});
         gemm(GemmArgs{&ctx, &wo2, &bo2, &proj, M, d, d, true});
-        for (int64_t i = 0; i < M * d; ++i) x.set(i, x.get(i) + proj.get(i));
+        add(AddArgs{&x, &proj, &x, M, d, 1.0f, false});
 
         // 3. feed-forward, modulated
         norm(NormArgs{&x, nullptr, nullptr, &normed, M, d,
@@ -255,19 +251,17 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
         gemm(GemmArgs{&ff0, &w2, &b2, &proj, M, d, dff, true});
         {
             Tensor zero({B, d}, dtype_);
-            modulate(ModulateArgs{&proj, &zero, &zero, &proj, B, N, d, &x, &gate});
+            modulate(ModulateArgs{&proj, &zero, &zero, &x, B, N, d, &x, &gate});
         }
-        for (int64_t i = 0; i < M * d; ++i) x.set(i, proj.get(i));
     }
 
     // --- output: norm, modulate from the OUTPUT table, project, unpatchify ---
+    // ORACLE: shift = table[0] + embedded_t, scale = table[1] + embedded_t. The SAME timestep
+    // embedding is added to both, which is what `(table[None] + embedded[:, None]).chunk(2)`
+    // does; adding different halves of anything would be the natural-looking mistake.
     Tensor out_table = w_.require("scale_shift_table");   // [2, d]
-    for (int64_t b = 0; b < B; ++b) {
-        for (int64_t c = 0; c < d; ++c) {
-            shift.set(b * d + c, out_table.get(c) + embedded_t.get(b * d + c));
-            scale.set(b * d + c, out_table.get(d + c) + embedded_t.get(b * d + c));
-        }
-    }
+    chunk(ChunkArgs{&embedded_t, &out_table, &shift, B, d, 1, 0, 0});
+    chunk(ChunkArgs{&embedded_t, &out_table, &scale, B, d, 1, 0, 1});
     norm(NormArgs{&x, nullptr, nullptr, &normed, M, d, static_cast<float>(cfg_.eps), false, 0});
     modulate(ModulateArgs{&normed, &scale, &shift, &modded, B, N, d, nullptr, nullptr});
     const int64_t out_per_token = patch * patch * cfg_.out_channels;
@@ -275,9 +269,10 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
     Tensor wp = w_.require("proj_out.weight");
     Tensor bp = w_.require("proj_out.bias");
     gemm(GemmArgs{&modded, &wp, &bp, &tokens, M, out_per_token, d, true});
-    return unpatchify(tokens.reshape({B, N, out_per_token}), static_cast<int>(B),
-                      cfg_.out_channels, static_cast<int>(grid), static_cast<int>(patch),
-                      dtype_);
+    Tensor image({B, cfg_.out_channels, grid * patch, grid * patch}, dtype_);
+    patch_op(PatchArgs{&tokens, &image, B, cfg_.out_channels,
+                       static_cast<int64_t>(grid), patch, true});
+    return image;
 }
 
 }  // namespace burnisher
