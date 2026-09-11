@@ -25,6 +25,7 @@
 #include <string>
 #include <vector>
 
+#include "burnisher/device.h"
 #include "burnisher/models.h"
 #include "burnisher/ops.h"
 #include "burnisher/pipeline.h"
@@ -59,6 +60,8 @@ usage: burnisher <command> [options]
 
 common options:
   --impl NAME               registered implementation to use (default: stock)
+  --device cpu|cuda         where tensors live (default: cpu). A CUDA kernel over host
+                            tensors is a fault, not a slow path, so the two must agree.
   --dtype bf16|fp32         compute dtype (default: bf16)
   --resolution N            image side in pixels (default: 1024)
   --steps N                 denoise steps (default: 20)
@@ -225,6 +228,26 @@ size_t peak_rss_bytes() {
         }
     }
     return 0;
+}
+
+void device_sync_if(Device d) {
+    if (d == Device::CUDA) device::synchronize();
+}
+
+Device device_arg(const Args& a) {
+    const std::string d = a.get("device", "cpu");
+    if (d == "cpu") return Device::CPU;
+    if (d == "cuda") return Device::CUDA;
+    throw std::runtime_error("--device must be cpu or cuda, not '" + d + "'");
+}
+
+// Weights on the device the model will run on. The host source stays alive because the device
+// copy is made from it lazily, per tensor, on first use.
+std::shared_ptr<WeightSource> place(std::shared_ptr<WeightSource> host, Device dev, DType dt,
+                                    std::shared_ptr<WeightSource>* keep_alive) {
+    if (dev != Device::CUDA) return host;
+    *keep_alive = host;
+    return std::make_shared<DeviceWeights>(*host, dt);
 }
 
 DType dtype_arg(const Args& a) {
@@ -584,32 +607,43 @@ int cmd_decode(const Args& a) {
     }
     VaeConfig vae;
     const DType dt = dtype_arg(a);
+    const Device dev = device_arg(a);
     Tensor latent = read_npy(in);
     if (latent.rank() != 4 || latent.dim(1) != vae.latent_channels) {
         throw std::runtime_error("decode: expected [1, " +
                                  std::to_string(vae.latent_channels) + ", h, w], got " +
                                  latent.describe());
     }
-    auto w = std::make_shared<CheckpointWeights>(CheckpointWeights::component(dir, "vae"));
+    std::shared_ptr<WeightSource> host =
+        std::make_shared<CheckpointWeights>(CheckpointWeights::component(dir, "vae"));
+    std::shared_ptr<WeightSource> keep;
+    auto w = place(host, dev, dt, &keep);
     VaeDecoder dec(vae, *w, dt);
-    const ImplSelection impls = ImplSelection::from_request(a.get("impl", "stock"));
+    const ImplSelection impls = ImplSelection::from_request(a.get("impl", "stock"), dev);
 
     // The scaling divide belongs to the PIPELINE, not the decoder, and the reference's
     // `vae.decode()` does not do it either. Applying it here would make the comparison off by
     // 1/0.13025 and look like a catastrophic disagreement.
     Tensor x = latent.to(dt);
+    if (dev == Device::CUDA) x = x.to_device();
+    device_sync_if(dev);
     const auto t0 = std::chrono::steady_clock::now();
     Tensor pixels = dec.forward(x, impls);
+    // Timed AFTER a synchronise, or a CUDA measurement times the launch queue rather than the
+    // work -- which reads as a spectacular and entirely fictional speedup.
+    device_sync_if(dev);
     const double secs = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - t0).count();
-    write_npy(out, pixels);
-    const OutputStats st = OutputStats::of(pixels);
+    Tensor host_pixels = (dev == Device::CUDA) ? pixels.to_host() : pixels;
+    write_npy(out, host_pixels);
+    const OutputStats st = OutputStats::of(host_pixels);
     std::ostringstream os;
     os.precision(12);
     os << "BURNISH_JSON: {\"metrics\":{\"latency_s\":" << secs
        << ",\"peak_vram_bytes\":" << peak_rss_bytes() << "},\"effective\":"
        << json_map({{"stage", "vae-decode"}, {"dtype", dtype_name(dt)},
-                    {"impl", a.get("impl", "stock")}, {"weights", "checkpoint"}})
+                    {"impl", a.get("impl", "stock")}, {"weights", "checkpoint"},
+                    {"device", a.get("device", "cpu")}})
        << ",\"output_stats\":" << stats_json(st) << "}";
     std::cout << os.str() << "\n";
     return 0;
@@ -635,25 +669,41 @@ int cmd_dit_step(const Args& a) {
     // a bug in it.
     if (a.has("layers")) dit.num_layers = static_cast<int>(a.num("layers", dit.num_layers));
     const DType dt = dtype_arg(a);
+    const Device dev = device_arg(a);
     Tensor latent = read_npy(a.get("latent")).to(dt);
     Tensor caption = read_npy(a.get("caption")).to(dt);
     Tensor mask = read_npy(a.get("mask")).to(dt);
-    auto w = std::make_shared<CheckpointWeights>(
+    if (dev == Device::CUDA) {
+        latent = latent.to_device();
+        caption = caption.to_device();
+        mask = mask.to_device();
+    }
+    std::shared_ptr<WeightSource> host = std::make_shared<CheckpointWeights>(
         CheckpointWeights::component(dir, "transformer"));
+    std::shared_ptr<WeightSource> keep;
+    auto w = place(host, dev, dt, &keep);
     PixArtDiT model(dit, *w, dt);
-    const ImplSelection impls = ImplSelection::from_request(a.get("impl", "stock"));
+    const ImplSelection impls = ImplSelection::from_request(a.get("impl", "stock"), dev);
+    // One untimed warm-up: the first call uploads every weight and instantiates every kernel,
+    // and timing that measures the loader.
+    if (a.num("warmup", 1) > 0) model.forward(latent, a.real("timestep", 500.0), caption, mask,
+                                              impls);
+    device_sync_if(dev);
     const auto t0 = std::chrono::steady_clock::now();
     Tensor out = model.forward(latent, a.real("timestep", 500.0), caption, mask, impls);
+    device_sync_if(dev);
     const double secs = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - t0).count();
-    write_npy(a.get("out"), out);
-    const OutputStats st = OutputStats::of(out);
+    Tensor host_out = (dev == Device::CUDA) ? out.to_host() : out;
+    write_npy(a.get("out"), host_out);
+    const OutputStats st = OutputStats::of(host_out);
     std::ostringstream os;
     os.precision(12);
     os << "BURNISH_JSON: {\"metrics\":{\"latency_s\":" << secs
        << ",\"peak_vram_bytes\":" << peak_rss_bytes() << "},\"effective\":"
        << json_map({{"stage", "dit-step"}, {"dtype", dtype_name(dt)},
-                    {"impl", a.get("impl", "stock")}, {"weights", "checkpoint"}})
+                    {"impl", a.get("impl", "stock")}, {"weights", "checkpoint"},
+                    {"device", a.get("device", "cpu")}})
        << ",\"output_stats\":" << stats_json(st) << "}";
     std::cout << os.str() << "\n";
     return 0;
@@ -693,22 +743,30 @@ int cmd_encode(const Args& a) {
     }
     T5Config t5;
     const DType dt = dtype_arg(a);
-    auto w = std::make_shared<CheckpointWeights>(
+    const Device dev = device_arg(a);
+    if (dev == Device::CUDA) ids = ids.to_device();
+    std::shared_ptr<WeightSource> host = std::make_shared<CheckpointWeights>(
         CheckpointWeights::component(dir, "text_encoder"));
+    std::shared_ptr<WeightSource> keep;
+    auto w = place(host, dev, dt, &keep);
     T5Encoder enc(t5, *w, dt);
-    const ImplSelection impls = ImplSelection::from_request(a.get("impl", "stock"));
+    const ImplSelection impls = ImplSelection::from_request(a.get("impl", "stock"), dev);
+    device_sync_if(dev);
     const auto t0 = std::chrono::steady_clock::now();
     Tensor h = enc.forward(ids, impls);
+    device_sync_if(dev);
     const double secs = std::chrono::duration<double>(
         std::chrono::steady_clock::now() - t0).count();
-    write_npy(a.get("out"), h);
-    const OutputStats st = OutputStats::of(h);
+    Tensor host_h = (dev == Device::CUDA) ? h.to_host() : h;
+    write_npy(a.get("out"), host_h);
+    const OutputStats st = OutputStats::of(host_h);
     std::ostringstream os;
     os.precision(12);
     os << "BURNISH_JSON: {\"metrics\":{\"latency_s\":" << secs
        << ",\"peak_vram_bytes\":" << peak_rss_bytes() << "},\"effective\":"
        << json_map({{"stage", "t5-encode"}, {"dtype", dtype_name(dt)},
-                    {"impl", a.get("impl", "stock")}, {"weights", "checkpoint"}})
+                    {"impl", a.get("impl", "stock")}, {"weights", "checkpoint"},
+                    {"device", a.get("device", "cpu")}})
        << ",\"output_stats\":" << stats_json(st) << "}";
     std::cout << os.str() << "\n";
     return 0;

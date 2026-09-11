@@ -338,6 +338,8 @@ ImplSelection ImplSelection::from_request(const std::string& requested, Device d
     s.add = resolve_impl("add", requested);
     s.chunk = resolve_impl("chunk", requested);
     s.patch = resolve_impl("patch", requested);
+    s.upsample = resolve_impl("upsample", requested);
+    s.transpose = resolve_impl("transpose", requested);
     s.device = device;
     return s;
 }
@@ -346,6 +348,7 @@ std::map<std::string, std::string> ImplSelection::as_map() const {
     return {{"gemm", gemm}, {"attention", attention}, {"norm", norm},
             {"modulate", modulate}, {"activation", activation}, {"conv2d", conv2d},
             {"add", add}, {"chunk", chunk}, {"patch", patch},
+            {"upsample", upsample}, {"transpose", transpose},
             {"device", device == Device::CUDA ? "cuda" : "cpu"}};
 }
 

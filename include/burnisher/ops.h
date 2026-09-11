@@ -172,7 +172,27 @@ struct PatchArgs {
     bool inverse = false;
 };
 
+// Nearest-neighbour integer upsample, NCHW. The VAE's up-blocks interpolate before convolving,
+// and the convolution then runs at the NEW resolution -- doing it the other way round is four
+// times cheaper and a different model.
+struct UpsampleArgs {
+    const Tensor* in;
+    Tensor* out;
+    int64_t batch, channels, h_in, w_in, factor;
+};
+
+// [batch, channels, spatial] <-> [batch, spatial, channels]. The VAE's spatial attention needs
+// tokens-major and everything around it is channels-major.
+struct TransposeArgs {
+    const Tensor* in;
+    Tensor* out;
+    int64_t batch, channels, spatial;
+    bool to_channels_first;   // false: [C, S] -> [S, C]; true: the inverse
+};
+
 using GemmRegistry = OpRegistry<GemmArgs>;
+using UpsampleRegistry = OpRegistry<UpsampleArgs>;
+using TransposeRegistry = OpRegistry<TransposeArgs>;
 using AddRegistry = OpRegistry<AddArgs>;
 using ChunkRegistry = OpRegistry<ChunkArgs>;
 using PatchRegistry = OpRegistry<PatchArgs>;
@@ -195,6 +215,8 @@ struct ImplSelection {
     std::string add = "stock";
     std::string chunk = "stock";
     std::string patch = "stock";
+    std::string upsample = "stock";
+    std::string transpose = "stock";
     // Where the model's intermediate tensors are allocated. Carried with the implementation
     // selection because the two cannot disagree: a CUDA kernel over host tensors is a fault, and
     // a host kernel over device tensors is a worse one.

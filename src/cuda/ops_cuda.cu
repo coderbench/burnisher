@@ -582,6 +582,59 @@ void conv2d_cuda(const Conv2dArgs& a) {
     check_launch("conv2d");
 }
 
+template <typename T>
+__global__ void k_upsample(const T* in, T* out, int64_t batch, int64_t channels, int64_t h_in,
+                           int64_t w_in, int64_t factor) {
+    const int64_t H = h_in * factor, W = w_in * factor;
+    const int64_t n = batch * channels * H * W;
+    for (int64_t i = blockIdx.x * (int64_t)blockDim.x + threadIdx.x; i < n;
+         i += (int64_t)gridDim.x * blockDim.x) {
+        const int64_t x = i % W;
+        const int64_t y = (i / W) % H;
+        const int64_t c = (i / (W * H)) % channels;
+        const int64_t b = i / (W * H * channels);
+        st(out, i, ld(in, ((b * channels + c) * h_in + y / factor) * w_in + x / factor));
+    }
+}
+
+void upsample_cuda(const UpsampleArgs& a) {
+    require_device(*a.in, "upsample");
+    const int64_t H = a.h_in * a.factor, W = a.w_in * a.factor;
+    const int64_t n = a.batch * a.channels * H * W;
+    const int grid = (int)std::min<int64_t>(65535, (n + kBlock - 1) / kBlock);
+    DISPATCH(*a.in, T,
+             k_upsample<T><<<grid, kBlock>>>((const T*)a.in->data(), (T*)a.out->data(),
+                                             a.batch, a.channels, a.h_in, a.w_in, a.factor));
+    check_launch("upsample");
+}
+
+template <typename T>
+__global__ void k_transpose(const T* in, T* out, int64_t batch, int64_t channels,
+                            int64_t spatial, bool to_channels_first) {
+    const int64_t n = batch * channels * spatial;
+    for (int64_t i = blockIdx.x * (int64_t)blockDim.x + threadIdx.x; i < n;
+         i += (int64_t)gridDim.x * blockDim.x) {
+        const int64_t s = i % spatial;
+        const int64_t c = (i / spatial) % channels;
+        const int64_t b = i / (spatial * channels);
+        const int64_t cf = (b * channels + c) * spatial + s;
+        const int64_t sf = (b * spatial + s) * channels + c;
+        if (to_channels_first) st(out, cf, ld(in, sf));
+        else                   st(out, sf, ld(in, cf));
+    }
+}
+
+void transpose_cuda(const TransposeArgs& a) {
+    require_device(*a.in, "transpose");
+    const int64_t n = a.batch * a.channels * a.spatial;
+    const int grid = (int)std::min<int64_t>(65535, (n + kBlock - 1) / kBlock);
+    DISPATCH(*a.in, T,
+             k_transpose<T><<<grid, kBlock>>>((const T*)a.in->data(), (T*)a.out->data(),
+                                              a.batch, a.channels, a.spatial,
+                                              a.to_channels_first));
+    check_launch("transpose");
+}
+
 }  // namespace
 
 void register_cuda_ops() {
@@ -606,6 +659,9 @@ void register_cuda_ops() {
     register_impl<AddArgs>("add", "cuda", add_cuda, "residual and broadcast add");
     register_impl<ChunkArgs>("chunk", "cuda", chunk_cuda, "AdaLN-single modulation chunks");
     register_impl<PatchArgs>("patch", "cuda", patch_cuda, "patchify and unpatchify");
+    register_impl<UpsampleArgs>("upsample", "cuda", upsample_cuda, "nearest 2x, NCHW");
+    register_impl<TransposeArgs>("transpose", "cuda", transpose_cuda,
+                                 "channels-major <-> tokens-major");
 }
 
 }  // namespace burnisher

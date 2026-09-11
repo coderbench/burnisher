@@ -35,7 +35,7 @@ Tensor conv(const Ctx& c, const Tensor& x, const std::string& name, int64_t c_in
     Tensor wt = c.w->require(name + ".weight");
     Tensor bs = c.w->require(name + ".bias");
     const int64_t h_out = h + 2 * pad - k + 1;
-    Tensor out({1, c_out, h_out, h_out}, c.dtype);
+    Tensor out({1, c_out, h_out, h_out}, c.dtype, c.impls->device);
     fn(Conv2dArgs{&x, &wt, &bs, &out, 1, c_in, h, h, c_out, k, pad});
     return out;
 }
@@ -45,7 +45,7 @@ Tensor group_norm(const Ctx& c, const Tensor& x, const std::string& name, int64_
     const auto& fn = NormRegistry::instance().get(c.impls->norm);
     Tensor wt = c.w->require(name + ".weight");
     Tensor bs = c.w->require(name + ".bias");
-    Tensor out(x.shape(), c.dtype);
+    Tensor out(x.shape(), c.dtype, c.impls->device);
     NormArgs a{&x, &wt, &bs, &out, 1, ch * h * h, static_cast<float>(c.eps), false,
                static_cast<int64_t>(c.groups), ch};
     fn(a);
@@ -54,7 +54,7 @@ Tensor group_norm(const Ctx& c, const Tensor& x, const std::string& name, int64_
 
 Tensor silu(const Ctx& c, const Tensor& x) {
     const auto& fn = ActivationRegistry::instance().get(c.impls->activation);
-    Tensor out(x.shape(), c.dtype);
+    Tensor out(x.shape(), c.dtype, c.impls->device);
     fn(ActivationArgs{&x, &out, x.numel(), Epilogue::Silu, nullptr});
     return out;
 }
@@ -71,7 +71,7 @@ Tensor resnet(const Ctx& c, const Tensor& x, const std::string& name, int64_t c_
     if (c_in != c_out) {
         skip = conv(c, x, name + ".conv_shortcut", c_in, c_out, h, 1, 0);
     }
-    Tensor out({1, c_out, h, h}, c.dtype);
+    Tensor out({1, c_out, h, h}, c.dtype, c.impls->device);
     for (int64_t i = 0; i < out.numel(); ++i) out.set(i, skip.get(i) + t.get(i));
     return out;
 }
@@ -87,11 +87,14 @@ Tensor spatial_attention(const Ctx& c, const Tensor& x, const std::string& name,
     Tensor normed = group_norm(c, x, name + ".group_norm", ch, h);
     // NCHW -> [tokens, channels]. The transpose is real traffic and is part of what the fused
     // version of this op would remove.
-    Tensor seq({n, ch}, c.dtype);
-    for (int64_t p = 0; p < n; ++p)
-        for (int64_t j = 0; j < ch; ++j) seq.set(p * ch + j, normed.get(j * n + p));
+    // NCHW -> [tokens, channels]. Real traffic, and part of what a fused version of this op
+    // would remove.
+    Tensor seq({n, ch}, c.dtype, c.impls->device);
+    TransposeRegistry::instance().get(c.impls->transpose)(
+        TransposeArgs{&normed, &seq, 1, ch, n, false});
 
-    Tensor q({n, ch}, c.dtype), k({n, ch}, c.dtype), v({n, ch}, c.dtype), o({n, ch}, c.dtype);
+    Tensor q({n, ch}, c.dtype, c.impls->device), k({n, ch}, c.dtype, c.impls->device),
+           v({n, ch}, c.dtype, c.impls->device), o({n, ch}, c.dtype, c.impls->device);
     for (const auto& pr : {std::pair<const char*, Tensor*>{"to_q", &q},
                            {"to_k", &k}, {"to_v", &v}}) {
         Tensor wt = c.w->require(name + "." + pr.first + ".weight");
@@ -99,24 +102,28 @@ Tensor spatial_attention(const Ctx& c, const Tensor& x, const std::string& name,
         gemm(GemmArgs{&seq, &wt, &bs, pr.second, n, ch, ch, true});
     }
     attn(AttentionArgs{&q, &k, &v, &o, 1, 1, n, n, ch, 0.0f, nullptr});
-    Tensor projd({n, ch}, c.dtype);
+    Tensor projd({n, ch}, c.dtype, c.impls->device);
     Tensor wo = c.w->require(name + ".to_out.0.weight");
     Tensor bo = c.w->require(name + ".to_out.0.bias");
     gemm(GemmArgs{&o, &wo, &bo, &projd, n, ch, ch, true});
 
-    Tensor out({1, ch, h, h}, c.dtype);
-    for (int64_t j = 0; j < ch; ++j)
-        for (int64_t p = 0; p < n; ++p) out.set(j * n + p, x.get(j * n + p) + projd.get(p * ch + j));
+    Tensor back({1, ch, h, h}, c.dtype, c.impls->device);
+    TransposeRegistry::instance().get(c.impls->transpose)(
+        TransposeArgs{&projd, &back, 1, ch, n, true});
+    Tensor out({1, ch, h, h}, c.dtype, c.impls->device);
+    AddRegistry::instance().get(c.impls->add)(
+        AddArgs{&x, &back, &out, 1, ch * n, 1.0f, false});
     return out;
 }
 
-Tensor upsample_nearest(const Tensor& x, int64_t ch, int64_t h, DType dtype) {
+// Nearest-neighbour 2x upsample, expressed through the patch op: an upsample is a patch
+// scatter with the same value repeated, and reusing the op keeps it on whatever device the rest
+// of the stage is on. A host loop here is what made the whole decoder host-only.
+Tensor upsample_nearest(const Ctx& c, const Tensor& x, int64_t ch, int64_t h) {
     const int64_t h2 = h * 2;
-    Tensor out({1, ch, h2, h2}, dtype);
-    for (int64_t j = 0; j < ch; ++j)
-        for (int64_t y = 0; y < h2; ++y)
-            for (int64_t xx = 0; xx < h2; ++xx)
-                out.set((j * h2 + y) * h2 + xx, x.get((j * h + y / 2) * h + xx / 2));
+    Tensor out({1, ch, h2, h2}, c.dtype, c.impls->device);
+    UpsampleArgs a{&x, &out, 1, ch, h, h, 2};
+    UpsampleRegistry::instance().get(c.impls->upsample)(a);
     return out;
 }
 
@@ -155,7 +162,7 @@ Tensor VaeDecoder::forward(const Tensor& latent, const ImplSelection& impls) con
         }
         prev = cout;
         if (!is_final) {
-            x = upsample_nearest(x, cout, h, dtype_);
+            x = upsample_nearest(c, x, cout, h);
             h *= 2;
             // ORACLE: the upsampler's convolution runs at the NEW resolution, after the
             // interpolation. Running it before would be four times cheaper and a different model.

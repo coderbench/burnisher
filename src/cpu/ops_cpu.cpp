@@ -348,6 +348,34 @@ void patch_cpu(const PatchArgs& a) {
     }
 }
 
+void upsample_cpu(const UpsampleArgs& a) {
+    const int64_t H = a.h_in * a.factor, W = a.w_in * a.factor;
+    for (int64_t b = 0; b < a.batch; ++b) {
+        for (int64_t c = 0; c < a.channels; ++c) {
+            for (int64_t y = 0; y < H; ++y) {
+                for (int64_t x = 0; x < W; ++x) {
+                    a.out->set(((b * a.channels + c) * H + y) * W + x,
+                               a.in->get(((b * a.channels + c) * a.h_in + y / a.factor) *
+                                         a.w_in + x / a.factor));
+                }
+            }
+        }
+    }
+}
+
+void transpose_cpu(const TransposeArgs& a) {
+    for (int64_t b = 0; b < a.batch; ++b) {
+        for (int64_t c = 0; c < a.channels; ++c) {
+            for (int64_t s = 0; s < a.spatial; ++s) {
+                const int64_t cf = (b * a.channels + c) * a.spatial + s;
+                const int64_t sf = (b * a.spatial + s) * a.channels + c;
+                if (a.to_channels_first) a.out->set(cf, a.in->get(sf));
+                else                     a.out->set(sf, a.in->get(cf));
+            }
+        }
+    }
+}
+
 }  // namespace
 
 void register_builtin_cpu_ops() {
@@ -375,6 +403,11 @@ void register_builtin_cpu_ops() {
                            "reach device memory");
     register_impl<ChunkArgs>("chunk", "stock", chunk_cpu,
                              "AdaLN-single's six modulation chunks plus the per-layer table");
+    register_impl<UpsampleArgs>("upsample", "stock", upsample_cpu,
+                                "nearest-neighbour integer upsample, NCHW");
+    register_impl<TransposeArgs>("transpose", "stock", transpose_cpu,
+                                 "channels-major <-> tokens-major for the VAE's spatial "
+                                 "attention");
     register_impl<PatchArgs>("patch", "stock", patch_cpu,
                              "patchify and unpatchify; the two orderings differ, see ops.h");
 }
@@ -390,6 +423,8 @@ std::vector<OpListing> list_all_impls() {
         {AddRegistry::instance().op_name(), AddRegistry::instance().list()},
         {ChunkRegistry::instance().op_name(), ChunkRegistry::instance().list()},
         {PatchRegistry::instance().op_name(), PatchRegistry::instance().list()},
+        {UpsampleRegistry::instance().op_name(), UpsampleRegistry::instance().list()},
+        {TransposeRegistry::instance().op_name(), TransposeRegistry::instance().list()},
     };
 }
 
