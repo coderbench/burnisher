@@ -178,7 +178,12 @@ def main():
     print(f"noise: {noise.shape}, steps {steps}, guidance {args.guidance}, "
           f"dtype {args.dtype}, device {args.device}\n")
 
-    out_dir = gdir / "reference-latents"
+    # One directory per dtype. The gate compares at the dtype the cell is SCORED in, because a
+    # bf16 run against an fp32 oracle measures the dtype rather than the implementation -- which
+    # this repository found the expensive way: every stage agreed with the reference to 1e-5 and
+    # the assembled bf16 pipeline came out at 1.19 relative L2, a completely different image.
+    out_dir = gdir / ("reference-latents" if args.dtype == "float32"
+                      else f"reference-latents-{args.dtype}")
     embeds = encode_prompts(args.weights, ids_doc, prompt_ids, dtype, args.device)
     latents = denoise(args.weights, embeds, noise, steps, args.guidance, dtype,
                       out_dir if args.write else None, args.device)
