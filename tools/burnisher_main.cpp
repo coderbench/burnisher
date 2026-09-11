@@ -890,14 +890,21 @@ int cmd_generate(const Args& a) {
         }
     }
 
-    auto text = std::make_shared<CheckpointWeights>(
+    std::shared_ptr<CheckpointWeights> text_host = std::make_shared<CheckpointWeights>(
         CheckpointWeights::component(dir, "text_encoder"));
-    auto den = std::make_shared<CheckpointWeights>(
+    std::shared_ptr<CheckpointWeights> den_host = std::make_shared<CheckpointWeights>(
         CheckpointWeights::component(dir, "transformer"));
-    auto dec = std::make_shared<CheckpointWeights>(
+    std::shared_ptr<CheckpointWeights> dec_host = std::make_shared<CheckpointWeights>(
         CheckpointWeights::component(dir, "vae"));
-    std::cerr << ">> mapped " << (text->total_bytes() + den->total_bytes() +
-                                  dec->total_bytes()) / 1000000 << " MB of checkpoint\n";
+    std::cerr << ">> mapped " << (text_host->total_bytes() + den_host->total_bytes() +
+                                  dec_host->total_bytes()) / 1000000
+              << " MB of checkpoint\n";
+    // Placed on the device the pipeline will run on. The host sources are kept alive because the
+    // device copies are made from them lazily, per tensor, on first use.
+    std::shared_ptr<WeightSource> k1, k2, k3;
+    auto text = place(text_host, cfg.device, cfg.compute, &k1);
+    auto den = place(den_host, cfg.device, cfg.compute, &k2);
+    auto dec = place(dec_host, cfg.device, cfg.compute, &k3);
 
     Pipeline p(cfg, text, den, dec, t5, dit, vae, sched);
     StageTimings t{};

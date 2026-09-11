@@ -35,6 +35,11 @@ namespace {
 
 constexpr int kBlock = 256;
 
+// Keys per tile in the attention kernel. Fixed rather than sized to kv_len so that shared memory
+// does not scale with the sequence: the VAE mid-block attends over 16384 positions at 1024px and
+// a full-length score buffer there would be 64 kB.
+constexpr int kAttnTile = 256;
+
 #define CU_OK(expr)                                                                  \
     do {                                                                             \
         cudaError_t _e = (expr);                                                     \
@@ -361,64 +366,103 @@ template <typename T>
 __global__ void k_attention(const T* q, const T* k, const T* v, const T* bias,
                             const T* key_mask, T* out, int64_t heads, int64_t q_len,
                             int64_t kv_len, int64_t head_dim, float scale) {
-    const int64_t row = blockIdx.x;                 // flattened (batch, head, query)
+    // One block per (batch, head, query row). Tiled online softmax, DETERMINISTIC.
+    //
+    // The first version of this kernel accumulated the weighted values with `atomicAdd` into
+    // shared memory. Every contribution was correct and the SET of contributions was fixed, but
+    // the ORDER was not -- and float addition is not associative, so two runs of the same build
+    // produced different last bits. `burnish gate --determinism` requires byte-identical
+    // replays, and a runtime that cannot reproduce itself cannot be a reference for anything.
+    //
+    // So: each tile of keys is scored into shared memory, and then each thread owns a fixed set
+    // of head_dim channels and walks the tile in a fixed order. No atomics, no race, one
+    // summation order. It is also faster, because atomics on a hot shared-memory address
+    // serialise anyway.
+    const int64_t row = blockIdx.x;
     const int64_t i = row % q_len;
     const int64_t h = (row / q_len) % heads;
     const int64_t b = row / (q_len * heads);
 
     extern __shared__ float shared[];
-    float* acc = shared;                            // head_dim
-    float* red = shared + head_dim;                 // blockDim.x
+    float* scores = shared;                       // kTile
+    float* red = shared + kAttnTile;              // blockDim.x
+    float* acc = shared + kAttnTile + blockDim.x; // head_dim
 
     const int64_t qbase = ((b * q_len + i) * heads + h) * head_dim;
 
-    // Pass one: the row maximum, for a numerically stable softmax.
-    float local_max = -INFINITY;
-    for (int64_t j = threadIdx.x; j < kv_len; j += blockDim.x) {
-        if (key_mask && ld(key_mask, b * kv_len + j) == 0.0f) continue;
-        float s = 0.0f;
-        const int64_t kb = ((b * kv_len + j) * heads + h) * head_dim;
-        for (int64_t d = 0; d < head_dim; ++d) s += ld(q, qbase + d) * ld(k, kb + d);
-        s *= scale;
-        if (bias) s += ld(bias, (h * q_len + i) * kv_len + j);
-        local_max = fmaxf(local_max, s);
-    }
-    red[threadIdx.x] = local_max;
-    __syncthreads();
-    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
-        if (threadIdx.x < s) red[threadIdx.x] = fmaxf(red[threadIdx.x], red[threadIdx.x + s]);
-        __syncthreads();
-    }
-    const float row_max = red[0] == -INFINITY ? 0.0f : red[0];
-    __syncthreads();
-
     for (int64_t d = threadIdx.x; d < head_dim; d += blockDim.x) acc[d] = 0.0f;
+    float run_max = -INFINITY;
+    float run_den = 0.0f;
     __syncthreads();
 
-    // Pass two: weights and the weighted sum. Accumulated into shared memory with atomics on a
-    // fixed-size buffer -- deterministic because every contribution is added in float and the
-    // set of contributions is fixed; the ORDER varies, which is why this kernel must be checked
-    // for determinism rather than assumed (`burnish gate --determinism`).
-    float local_denom = 0.0f;
-    for (int64_t j = threadIdx.x; j < kv_len; j += blockDim.x) {
-        if (key_mask && ld(key_mask, b * kv_len + j) == 0.0f) continue;
-        float s = 0.0f;
-        const int64_t kb = ((b * kv_len + j) * heads + h) * head_dim;
-        for (int64_t d = 0; d < head_dim; ++d) s += ld(q, qbase + d) * ld(k, kb + d);
-        s *= scale;
-        if (bias) s += ld(bias, (h * q_len + i) * kv_len + j);
-        const float w = __expf(s - row_max);
-        local_denom += w;
-        for (int64_t d = 0; d < head_dim; ++d) atomicAdd(&acc[d], w * ld(v, kb + d));
-    }
-    red[threadIdx.x] = local_denom;
-    __syncthreads();
-    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
-        if (threadIdx.x < s) red[threadIdx.x] += red[threadIdx.x + s];
+    for (int64_t base = 0; base < kv_len; base += kAttnTile) {
+        const int64_t tile = min((int64_t)kAttnTile, kv_len - base);
+
+        for (int64_t t = threadIdx.x; t < tile; t += blockDim.x) {
+            const int64_t j = base + t;
+            if (key_mask && ld(key_mask, b * kv_len + j) == 0.0f) {
+                scores[t] = -INFINITY;
+                continue;
+            }
+            float s = 0.0f;
+            const int64_t kb = ((b * kv_len + j) * heads + h) * head_dim;
+            for (int64_t d = 0; d < head_dim; ++d) s += ld(q, qbase + d) * ld(k, kb + d);
+            s *= scale;
+            if (bias) s += ld(bias, (h * q_len + i) * kv_len + j);
+            scores[t] = s;
+        }
+        __syncthreads();
+
+        // Tile maximum, by a fixed reduction tree.
+        float local = -INFINITY;
+        for (int64_t t = threadIdx.x; t < tile; t += blockDim.x) local = fmaxf(local, scores[t]);
+        red[threadIdx.x] = local;
+        __syncthreads();
+        for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+            if (threadIdx.x < s) red[threadIdx.x] = fmaxf(red[threadIdx.x], red[threadIdx.x + s]);
+            __syncthreads();
+        }
+        const float tile_max = red[0];
+        __syncthreads();
+
+        const float new_max = fmaxf(run_max, tile_max);
+        const float rescale = (run_max == -INFINITY) ? 0.0f : __expf(run_max - new_max);
+
+        // Weights for this tile, written back over the scores.
+        for (int64_t t = threadIdx.x; t < tile; t += blockDim.x) {
+            scores[t] = (scores[t] == -INFINITY) ? 0.0f : __expf(scores[t] - new_max);
+        }
+        __syncthreads();
+
+        float local_den = 0.0f;
+        for (int64_t t = threadIdx.x; t < tile; t += blockDim.x) local_den += scores[t];
+        red[threadIdx.x] = local_den;
+        __syncthreads();
+        for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+            if (threadIdx.x < s) red[threadIdx.x] += red[threadIdx.x + s];
+            __syncthreads();
+        }
+        const float tile_den = red[0];
+        __syncthreads();
+
+        // Each thread owns a fixed set of channels and walks the tile in index order. This is
+        // the part that makes the kernel reproducible.
+        for (int64_t d = threadIdx.x; d < head_dim; d += blockDim.x) {
+            float a_d = acc[d] * rescale;
+            for (int64_t t = 0; t < tile; ++t) {
+                const float w = scores[t];
+                if (w == 0.0f) continue;
+                const int64_t kb = ((b * kv_len + base + t) * heads + h) * head_dim;
+                a_d += w * ld(v, kb + d);
+            }
+            acc[d] = a_d;
+        }
+        run_den = run_den * rescale + tile_den;
+        run_max = new_max;
         __syncthreads();
     }
-    const float denom = red[0] > 0.0f ? red[0] : 1.0f;
-    __syncthreads();
+
+    const float denom = run_den > 0.0f ? run_den : 1.0f;
     for (int64_t d = threadIdx.x; d < head_dim; d += blockDim.x) {
         st(out, qbase + d, acc[d] / denom);
     }
@@ -430,7 +474,9 @@ void attention_cuda(const AttentionArgs& a) {
     const int threads = 128;
     const int64_t rows = a.batch * a.heads * a.q_len;
     if (rows > 2147483647LL) throw std::runtime_error("cuda attention: too many rows");
-    const size_t shmem = (a.head_dim + threads) * sizeof(float);
+    // scores tile + reduction scratch + the accumulator. Fixed, so a 16384-key VAE mid-block
+    // needs no more shared memory than a 300-key cross-attention.
+    const size_t shmem = (kAttnTile + threads + a.head_dim) * sizeof(float);
     DISPATCH(*a.q, T,
              k_attention<T><<<(int)rows, threads, shmem>>>(
                  (const T*)a.q->data(), (const T*)a.k->data(), (const T*)a.v->data(),
