@@ -466,8 +466,8 @@ The CI job `cuda-compile` compiles `device.cu` for sm_120 on a runner with a too
 def _(f):
     n_tensors = f["checkpoint_tensors_verified"]
     return f"""
-`burnisher generate --weights DIR` currently exits 4 and explains why. Three things stood between
-this repository and its first real number. One is now done; two remain.
+`burnisher generate --weights DIR --token-ids FILE` is wired and loads a real checkpoint. Three
+things stood between this repository and its first real number. One and a half are now done.
 
 **1. The checkpoint layout mapping — DONE, and verified.** `SafeTensors` maps a file and resolves
 tensors by name, and `declare_pixart_shapes()` enumerates every name the three models ask for.
@@ -486,9 +486,11 @@ order, so the runtime would have worked; the declaration was still wrong, and a 
 gets wrong is a shape nothing else can catch.
 
 **2. Pre-tokenized prompt ids.** The T5 tokenizer is a SentencePiece model. Vendoring one would
-put a second oracle in the repository, so the pipeline takes token ids directly and
-docs/CORRECTNESS.md has the procedure for producing them and pinning their digest. The frozen
-prompt set is `eval/cells/BG-1/prompts.json`; its four prompts need their ids committed.
+put a second oracle in the repository, so `burnisher generate --token-ids FILE` takes ids
+directly — one prompt per line, negative first under classifier-free guidance. What is missing is
+the ids themselves: the frozen prompt set is `eval/cells/BG-1/prompts.json` and its four prompts
+need their ids produced with the pinned tokenizer and committed with a digest.
+docs/CORRECTNESS.md has the procedure.
 
 **3. The reference latents.** The gate compares against latents produced by the PINNED reference
 implementation at the PINNED revision. They cannot be produced by this runtime -- that would make

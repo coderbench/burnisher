@@ -31,11 +31,32 @@ toolkit were available when this was built.**
 | CUDA device probe | **written, never compiled** | CI job `cuda-compile` |
 | CUDA op backend | **does not exist** | `issues/cuda-op-backend.md` |
 | Checkpoint tensor names and shapes | verified against the pinned revisions, 962/962 | `scripts/verify_checkpoint_layout.py` |
-| Checkpoint load path | **not wired up** | `issues/checkpoint-load.md` |
+| Checkpoint load path (mmap, shard search, dtypes) | complete, run against real weights | `burnisher check-weights --weights DIR` |
+| `burnisher generate` on a real checkpoint | wired; needs token ids and the 22 GB download | `issues/checkpoint-load.md` |
 | Reference latents for the gate | **do not exist** | `issues/checkpoint-load.md` |
 | Every cell's achieved fraction | **null** | `burnish roofline` |
 | Every cell's noise floor | **null** | `burnish roofline` |
 | Device peaks behind every ceiling | **vendor, not probed** | `configs/devices.json` |
+
+### On "run against real weights"
+
+The DiT and the VAE decoder have both been loaded from the pinned checkpoint and run.
+
+| stage | tensors resolved | bytes mapped | output |
+|:--|--:|--:|:--|
+| `dit-step` at 64px, batch 2 | 603 | 2443 MB | mean +0.005, std 0.616, \|max\| 4.25 |
+| `vae-decode` at 32px | 140 | 334 MB | mean +0.164, std 0.111, \|max\| 0.465 |
+
+Both are what a healthy result looks like. A DiT's epsilon prediction should sit near zero at
+roughly unit scale; a VAE decoder's output should be a bounded image-like tensor. A wrong weight
+mapping generally does not look like either — it gives NaNs, or magnitudes in the thousands, or a
+constant.
+
+That exercises the mmap, the header parse, the offset arithmetic, the dtype mapping, the shard
+search and the two model graphs against real bytes. It does **not** verify the numerics against
+the reference implementation. That is the correctness gate, and it needs reference latents that do
+not exist yet — so "the output is plausible" is the strongest claim available here, and it is
+weaker than "the output is right".
 
 ### On "exercised against a fake device"
 

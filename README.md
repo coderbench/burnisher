@@ -17,8 +17,9 @@ burnish bench ... | burnish score   # a number with an interval on it
 
 ## Read this first
 
-**The instrument is complete and tested. The runtime runs end to end on the CPU and reproduces
-itself byte for byte. Nothing has been measured on a GPU.** No Blackwell device and no CUDA
+**The instrument is complete and tested. The runtime runs end to end on the CPU, reproduces itself
+byte for byte, and loads and runs the real pinned checkpoint. Nothing has been measured on a
+GPU.** No Blackwell device and no CUDA
 toolkit were available when this was built, so every cell's achieved fraction and noise floor is
 `null`, every ceiling stands on a vendor device peak rather than a probed one, and the CUDA op
 backend does not exist yet.

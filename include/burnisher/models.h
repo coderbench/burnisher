@@ -35,6 +35,13 @@ class WeightSource {
 class CheckpointWeights : public WeightSource {
   public:
     explicit CheckpointWeights(std::vector<std::string> paths);
+    // Every .safetensors shard under `dir/component`, sorted.
+    //
+    // Per COMPONENT rather than per checkpoint, and that is not tidiness. The VAE file contains
+    // `encoder.*` for its own encoder and the T5 file contains `encoder.*` for its transformer
+    // blocks. Pooling every shard into one namespace puts two unrelated `encoder.` trees in the
+    // same map, where the first match wins and the model loads silently wrong weights.
+    static CheckpointWeights component(const std::string& dir, const std::string& component);
     bool has(const std::string& name) const override;
     Tensor get(const std::string& name) const override;
     size_t total_bytes() const;

@@ -1,5 +1,7 @@
+#include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 #include <sstream>
 #include <stdexcept>
 
@@ -17,6 +19,29 @@ Tensor WeightSource::require(const std::string& name) const {
     Tensor t = get(name);
     if (!t.defined()) throw std::runtime_error("weights: '" + name + "' resolved to nothing");
     return t;
+}
+
+CheckpointWeights CheckpointWeights::component(const std::string& dir,
+                                               const std::string& name) {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::path(dir) / name;
+    if (!fs::is_directory(root)) {
+        throw std::runtime_error(
+            "weights: no directory " + root.string() + ". A checkpoint is expected in the "
+            "reference layout -- transformer/, vae/, text_encoder/ -- because that is what the "
+            "pinned revision publishes and a flattened copy loses which `encoder.` is which.");
+    }
+    std::vector<std::string> shards;
+    for (const auto& e : fs::directory_iterator(root)) {
+        if (e.is_regular_file() && e.path().extension() == ".safetensors") {
+            shards.push_back(e.path().string());
+        }
+    }
+    std::sort(shards.begin(), shards.end());
+    if (shards.empty()) {
+        throw std::runtime_error("weights: no .safetensors under " + root.string());
+    }
+    return CheckpointWeights(std::move(shards));
 }
 
 CheckpointWeights::CheckpointWeights(std::vector<std::string> paths) {

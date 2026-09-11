@@ -50,6 +50,7 @@ usage: burnisher <command> [options]
   bench                     time one stage, for the harness
   probe                     measure this device's sustained bandwidth and FLOPS
   weights-manifest          every tensor this runtime requires of a checkpoint, as JSON
+  check-weights             load a real checkpoint and verify every required tensor
 
 common options:
   --impl NAME               registered implementation to use (default: stock)
@@ -57,7 +58,11 @@ common options:
   --resolution N            image side in pixels (default: 1024)
   --steps N                 denoise steps (default: 20)
   --seed N                  fixed seed (default: 20260911)
-  --weights DIR             checkpoint directory; omit to use synthetic weights
+  --token-ids FILE          T5 token ids, one prompt per line (negative first under CFG)
+  --dump-latents FILE       write the output tensor as .npy, for the correctness gate
+  --weights DIR             checkpoint directory (transformer/ vae/ text_encoder/);
+                            omit to use synthetic weights, which exercise the graph but say
+                            nothing about the loader or the tensor-name mapping
   --help                    this message
 
 Scoring a change to this runtime is `burnish`, the harness in tools/. This binary only runs and
@@ -250,8 +255,26 @@ int cmd_bench(const Args& a) {
 
     T5Config t5; DiTConfig dit; VaeConfig vae;
     if (a.has("small")) small_configs(&t5, &dit, &vae);
-    auto weights = std::make_shared<SyntheticWeights>(dt);
-    declare_pixart_shapes(*weights, t5, dit, vae);
+
+    // Synthetic weights exercise the graph; real ones exercise the loader, the tensor-name
+    // mapping and the dtypes. Both are useful and they answer different questions, so which one
+    // was used is reported in `effective` rather than inferred.
+    std::shared_ptr<WeightSource> weights;
+    const std::string weights_dir = a.get("weights");
+    if (!weights_dir.empty()) {
+        if (a.has("small")) {
+            throw std::runtime_error("--small and --weights are contradictory: a real checkpoint "
+                                     "has the real geometry");
+        }
+        const std::string component = (stage == "t5-encode") ? "text_encoder"
+                                    : (stage == "vae-decode") ? "vae" : "transformer";
+        weights = std::make_shared<CheckpointWeights>(
+            CheckpointWeights::component(weights_dir, component));
+    } else {
+        auto synth = std::make_shared<SyntheticWeights>(dt);
+        declare_pixart_shapes(*synth, t5, dit, vae);
+        weights = synth;
+    }
 
     const int64_t f = vae.scale_factor();
     const int64_t latent = resolution / f;
@@ -302,6 +325,7 @@ int cmd_bench(const Args& a) {
         {"stage", stage}, {"dtype", dtype_name(dt)}, {"impl", impl},
         {"resolution", std::to_string(resolution)}, {"batch", std::to_string(batch)},
         {"caption_len", std::to_string(caption_len)},
+        {"weights", weights_dir.empty() ? "synthetic" : "checkpoint"},
     };
     for (const auto& kv : impls.as_map()) effective["impl." + kv.first] = kv.second;
 
@@ -353,6 +377,82 @@ int cmd_weights_manifest(const Args& a) {
     return 0;
 }
 
+// Load a real checkpoint through the real loader and check every tensor the models will ask for.
+//
+// `scripts/verify_checkpoint_layout.py` checks the same thing against the checkpoint's HEADER,
+// over the network, without downloading it. This checks it through `SafeTensors` -- the mmap, the
+// offset arithmetic, the dtype mapping, the shard search -- against bytes on disk. The two
+// overlap on purpose: the cheap one runs in CI on every push, and this one is what you run once
+// after downloading 22 GB, before discovering at step 19 of 20 that a tensor was missing.
+int cmd_check_weights(const Args& a) {
+    const std::string dir = a.get("weights");
+    if (dir.empty()) {
+        std::cerr << "!! --weights DIR is required\n";
+        return 2;
+    }
+    T5Config t5; DiTConfig dit; VaeConfig vae;
+    SyntheticWeights declared(DType::F32);
+    declare_pixart_shapes(declared, t5, dit, vae);
+
+    struct Component { const char* name; };
+    const Component components[] = {{"transformer"}, {"vae"}, {"text_encoder"}};
+    std::vector<std::string> only;
+    if (a.has("component")) only.push_back(a.get("component"));
+
+    int missing = 0, wrong = 0, checked = 0;
+    size_t bytes = 0;
+    for (const auto& c : components) {
+        if (!only.empty() && only[0] != c.name) continue;
+        std::unique_ptr<CheckpointWeights> w;
+        try {
+            w = std::make_unique<CheckpointWeights>(
+                CheckpointWeights::component(dir, c.name));
+        } catch (const std::exception& e) {
+            std::cout << "  " << c.name << ": SKIPPED -- " << e.what() << "\n";
+            continue;
+        }
+        bytes += w->total_bytes();
+        int comp_missing = 0, comp_wrong = 0, comp_checked = 0;
+        for (const auto& kv : declared.declared()) {
+            const std::string& name = kv.first;
+            const bool is_t5 = (name.rfind("encoder.", 0) == 0 || name == "shared.weight");
+            const bool is_vae = (name.rfind("decoder.", 0) == 0 ||
+                                 name.rfind("post_quant_conv", 0) == 0);
+            const char* belongs = is_t5 ? "text_encoder" : (is_vae ? "vae" : "transformer");
+            if (std::string(belongs) != c.name) continue;
+            ++comp_checked;
+            if (!w->has(name)) {
+                if (comp_missing < 10) std::cout << "  MISSING  " << name << "\n";
+                ++comp_missing;
+                continue;
+            }
+            const Tensor t = w->get(name);
+            if (t.numel() != numel_of(kv.second)) {
+                if (comp_wrong < 10) {
+                    std::cout << "  SHAPE    " << name << ": checkpoint " << t.describe()
+                              << ", runtime wants " << numel_of(kv.second) << " elements\n";
+                }
+                ++comp_wrong;
+            }
+        }
+        std::cout << "  " << c.name << ": " << comp_checked << " required, "
+                  << comp_missing << " missing, " << comp_wrong << " wrong shape, "
+                  << w->total_bytes() / 1000000 << " MB mapped\n";
+        missing += comp_missing;
+        wrong += comp_wrong;
+        checked += comp_checked;
+    }
+    std::cout << "\n  " << checked << " tensors checked through the real loader, "
+              << bytes / 1000000 << " MB mapped\n";
+    if (missing || wrong) {
+        std::cout << "\nFAIL: " << missing << " missing, " << wrong << " wrong shape. The "
+                     "runtime cannot load this checkpoint.\n";
+        return 1;
+    }
+    std::cout << "\nok: every tensor the runtime requires is present with the right geometry\n";
+    return 0;
+}
+
 int cmd_probe(const Args&) {
 #ifndef BURNISHER_CUDA
     std::cerr << "!! burnisher probe needs a CUDA build. This binary was built without it, so\n"
@@ -367,22 +467,131 @@ int cmd_probe(const Args&) {
 
 int cmd_generate(const Args& a) {
     register_builtin_cpu_ops();
-    if (!a.has("weights")) {
-        std::cerr << "!! --weights DIR is required for `generate`.\n"
-                     "   Running a real generation on synthetic weights would produce a "
-                     "plausible\n   image from numbers that mean nothing. Use `selftest` to "
-                     "exercise the graph\n   without a checkpoint.\n";
+    const std::string dir = a.get("weights");
+    const std::string ids_path = a.get("token-ids");
+    if (dir.empty() || ids_path.empty()) {
+        std::cerr <<
+            "!! `generate` needs --weights DIR and --token-ids FILE.\n"
+            "\n"
+            "   --weights is a checkpoint in the reference layout (transformer/, vae/,\n"
+            "   text_encoder/). Running a real generation on synthetic weights would produce a\n"
+            "   plausible image from numbers that mean nothing; `selftest` exercises the graph\n"
+            "   without a checkpoint.\n"
+            "\n"
+            "   --token-ids is a text file of integer T5 token ids, one PROMPT per line and ids\n"
+            "   separated by spaces. Under classifier-free guidance the NEGATIVE prompt comes\n"
+            "   first. Ids rather than text on purpose: the T5 tokenizer is a SentencePiece\n"
+            "   model, and vendoring one would put a second oracle in this repository.\n"
+            "   docs/CORRECTNESS.md has the procedure for producing them and pinning a digest.\n";
         return 2;
     }
-    std::cerr << "!! loading a real checkpoint is not wired up in this build.\n"
-                 "   The graph, the scheduler and the op registry are complete and are "
-                 "exercised by\n   `burnisher selftest`; what is missing is the checkpoint "
-                 "layout mapping and the\n   pre-tokenized prompt ids. docs/CORRECTNESS.md "
-                 "states exactly what remains and\n   why it has not been verified: no "
-                 "Blackwell device and no checkpoint were\n   available when this was written, "
-                 "and shipping an unverified load path as if it\n   worked is the failure mode "
-                 "this repository exists to avoid.\n";
-    return 4;
+
+    T5Config t5; DiTConfig dit; VaeConfig vae;
+    SchedulerConfig sched;
+    PipelineConfig cfg;
+    cfg.resolution = static_cast<int>(a.num("resolution", 1024));
+    cfg.steps = static_cast<int>(a.num("steps", 20));
+    cfg.seed = static_cast<uint64_t>(a.num("seed", 20260911));
+    cfg.guidance_scale = a.real("guidance-scale", 4.5);
+    cfg.compute = dtype_arg(a);
+    cfg.impl = a.get("impl", "stock");
+    cfg.classifier_free_guidance = !a.has("no-cfg");
+
+    // Token ids: one prompt per line, ids separated by whitespace. Rows are padded to the
+    // longest line with the T5 pad id (0), which is what the reference does -- a ragged batch
+    // would silently give the two CFG branches different caption lengths.
+    std::vector<std::vector<int64_t>> rows;
+    {
+        std::ifstream f(ids_path);
+        if (!f) throw std::runtime_error("cannot open " + ids_path);
+        std::string line;
+        while (std::getline(f, line)) {
+            if (line.find_first_not_of(" \t\r\n") == std::string::npos) continue;
+            std::istringstream is(line);
+            std::vector<int64_t> row;
+            long long v;
+            while (is >> v) row.push_back(static_cast<int64_t>(v));
+            if (!row.empty()) rows.push_back(std::move(row));
+        }
+    }
+    const int64_t want_rows = cfg.classifier_free_guidance ? 2 : 1;
+    if (static_cast<int64_t>(rows.size()) != want_rows) {
+        throw std::runtime_error(
+            "token ids: " + std::to_string(rows.size()) + " prompt(s), but guidance asks for " +
+            std::to_string(want_rows) + ". Under classifier-free guidance the file holds two "
+            "lines and the NEGATIVE prompt is the first.");
+    }
+    size_t width = 0;
+    for (const auto& r : rows) width = std::max(width, r.size());
+    cfg.caption_len = static_cast<int>(width);
+    Tensor ids({want_rows, static_cast<int64_t>(width)}, DType::F32);
+    for (int64_t r = 0; r < want_rows; ++r) {
+        for (size_t c = 0; c < width; ++c) {
+            ids.set(r * static_cast<int64_t>(width) + static_cast<int64_t>(c),
+                    c < rows[r].size() ? static_cast<float>(rows[r][c]) : 0.0f);
+        }
+    }
+
+    auto text = std::make_shared<CheckpointWeights>(
+        CheckpointWeights::component(dir, "text_encoder"));
+    auto den = std::make_shared<CheckpointWeights>(
+        CheckpointWeights::component(dir, "transformer"));
+    auto dec = std::make_shared<CheckpointWeights>(
+        CheckpointWeights::component(dir, "vae"));
+    std::cerr << ">> mapped " << (text->total_bytes() + den->total_bytes() +
+                                  dec->total_bytes()) / 1000000 << " MB of checkpoint\n";
+
+    Pipeline p(cfg, text, den, dec, t5, dit, vae, sched);
+    StageTimings t{};
+    Tensor pixels = p.generate(ids, &t);
+    const OutputStats st = OutputStats::of(pixels);
+
+    const std::string dump = a.get("dump-latents");
+    if (!dump.empty()) {
+        // A .npy of the final PIXELS, so eval/gate.py can compare them with numpy. Latents are
+        // what the gate actually wants; this is the pixel tensor because the pipeline returns
+        // it, and `--dump-latents` keeps the harness's flag name.
+        std::ofstream out(dump, std::ios::binary);
+        if (!out) throw std::runtime_error("cannot write " + dump);
+        std::ostringstream hdr;
+        hdr << "{'descr': '<f4', 'fortran_order': False, 'shape': (";
+        for (size_t i = 0; i < pixels.rank(); ++i) hdr << pixels.dim(i) << ", ";
+        hdr << "), }";
+        std::string h = hdr.str();
+        while ((10 + h.size() + 1) % 64) h += ' ';
+        h += '\n';
+        const unsigned char magic[] = {0x93, 'N', 'U', 'M', 'P', 'Y', 1, 0};
+        out.write(reinterpret_cast<const char*>(magic), 8);
+        const uint16_t len = static_cast<uint16_t>(h.size());
+        out.write(reinterpret_cast<const char*>(&len), 2);
+        out.write(h.data(), static_cast<std::streamsize>(h.size()));
+        for (int64_t i = 0; i < pixels.numel(); ++i) {
+            const float v = pixels.get(i);
+            out.write(reinterpret_cast<const char*>(&v), sizeof(v));
+        }
+    }
+
+    std::map<std::string, std::string> effective{
+        {"impl", cfg.impl}, {"dtype", dtype_name(cfg.compute)},
+        {"resolution", std::to_string(cfg.resolution)},
+        {"steps", std::to_string(cfg.steps)}, {"seed", std::to_string(cfg.seed)},
+        {"caption_len", std::to_string(cfg.caption_len)},
+        {"cfg", cfg.classifier_free_guidance ? "1" : "0"},
+    };
+    for (const auto& kv : ImplSelection::from_request(cfg.impl).as_map()) {
+        effective["impl." + kv.first] = kv.second;
+    }
+    std::ostringstream os;
+    os.precision(12);
+    os << "BURNISH_JSON: {\"metrics\":{\"latency_s\":" << t.total_s
+       << ",\"text_encode_s\":" << t.text_encode_s
+       << ",\"denoise_s\":" << t.denoise_s
+       << ",\"vae_decode_s\":" << t.vae_decode_s
+       << ",\"peak_vram_bytes\":" << peak_rss_bytes()
+       << "},\"effective\":" << json_map(effective)
+       << ",\"output_stats\":" << stats_json(st) << "}";
+    std::cout << os.str() << "\n";
+    return 0;
 }
 
 }  // namespace
@@ -399,6 +608,7 @@ int main(int argc, char** argv) {
         if (a.command == "bench") return cmd_bench(a);
         if (a.command == "probe") return cmd_probe(a);
         if (a.command == "weights-manifest") return cmd_weights_manifest(a);
+        if (a.command == "check-weights") return cmd_check_weights(a);
         if (a.command == "generate") return cmd_generate(a);
     } catch (const std::exception& e) {
         std::cerr << "!! " << e.what() << "\n";
