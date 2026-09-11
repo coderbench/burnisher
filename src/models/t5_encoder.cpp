@@ -59,22 +59,32 @@ Tensor T5Encoder::forward(const Tensor& token_ids, const ImplSelection& impls) c
 
     // Embedding gather. The table is `vocab x d` resident and M rows are read; a loader that
     // materialised the whole thing per call would move 263 MB to produce 2.4 MB of output.
-    Tensor embed = w_.require("shared.weight");
-    Tensor x({M, d}, dtype_, impls.device);
+    // The ids are read on the host -- they are a handful of integers and the bounds check is
+    // worth more than the copy -- and the gather itself is an op, because the table is 263 MB
+    // and lives wherever the model does.
+    Tensor ids_host = (token_ids.device() == Device::CUDA) ? token_ids.to_host() : token_ids;
     for (int64_t i = 0; i < M; ++i) {
-        const int64_t id = static_cast<int64_t>(token_ids.get(i));
+        const int64_t id = static_cast<int64_t>(ids_host.get(i));
         if (id < 0 || id >= cfg_.vocab_size) {
             throw std::runtime_error("t5: token id " + std::to_string(id) + " is outside the "
                                      "vocabulary; a tokenizer mismatch is a changed oracle");
         }
-        for (int64_t j = 0; j < d; ++j) x.set(i * d + j, embed.get(id * d + j));
     }
+    Tensor embed = w_.require("shared.weight");
+    Tensor x({M, d}, dtype_, impls.device);
+    GatherRegistry::instance().get(impls.gather)(
+        GatherArgs{&embed, &token_ids, &x, M, d});
 
     // Relative position bias, computed once and added into every layer's scores.
-    Tensor bias({static_cast<int64_t>(cfg_.num_heads), S, S}, dtype_, impls.device);
+    Tensor bias_host({static_cast<int64_t>(cfg_.num_heads), S, S}, dtype_);
     {
-        Tensor rel = w_.require(
+        Tensor& bias = bias_host;
+        // 32 x heads of parameters. Pulled to the host because the bucketing is a scalar
+        // computation over sequence positions and the result is uploaded once for every layer to
+        // share -- doing it per layer on the device would be a kernel for 2 kB of data.
+        Tensor rel_dev = w_.require(
             "encoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight");
+        Tensor rel = (rel_dev.device() == Device::CUDA) ? rel_dev.to_host() : rel_dev;
         const int buckets = static_cast<int>(rel.dim(0));
         for (int64_t q = 0; q < S; ++q) {
             for (int64_t k = 0; k < S; ++k) {
@@ -85,6 +95,7 @@ Tensor T5Encoder::forward(const Tensor& token_ids, const ImplSelection& impls) c
             }
         }
     }
+    Tensor bias = (impls.device == Device::CUDA) ? bias_host.to_device() : bias_host;
 
     // The padding mask, PER BATCH ROW. Not optional and not a detail: a prompt is padded to a
     // fixed 300 tokens, so most of a short caption's sequence is padding, and attending to it
@@ -93,10 +104,11 @@ Tensor T5Encoder::forward(const Tensor& token_ids, const ImplSelection& impls) c
     // By KEY only. Padded query rows still produce output and that output is meaningless; it is
     // masked out downstream by the caption mask in cross-attention, which is what the reference
     // does too.
-    Tensor key_mask({B, S}, dtype_, impls.device);
+    Tensor mask_host({B, S}, dtype_);
     for (int64_t i = 0; i < B * S; ++i) {
-        key_mask.set(i, static_cast<int64_t>(token_ids.get(i)) == kPadTokenId ? 0.0f : 1.0f);
+        mask_host.set(i, static_cast<int64_t>(ids_host.get(i)) == kPadTokenId ? 0.0f : 1.0f);
     }
+    Tensor key_mask = (impls.device == Device::CUDA) ? mask_host.to_device() : mask_host;
 
     Tensor normed({M, d}, dtype_, impls.device);
     Tensor q({M, inner}, dtype_), k({M, inner}, dtype_), v({M, inner}, dtype_);

@@ -190,7 +190,20 @@ struct TransposeArgs {
     bool to_channels_first;   // false: [C, S] -> [S, C]; true: the inverse
 };
 
+// Row gather from an embedding table: out[i, :] = table[ids[i], :].
+//
+// An op rather than a loop because the table is 263 MB and lives wherever the model does, while
+// the ids are a handful of integers. The BOUNDS CHECK stays on the host, where a bad id can be
+// named in the error rather than producing a silent out-of-range read.
+struct GatherArgs {
+    const Tensor* table;
+    const Tensor* ids;      // float-stored integers, `rows` of them
+    Tensor* out;
+    int64_t rows, cols;
+};
+
 using GemmRegistry = OpRegistry<GemmArgs>;
+using GatherRegistry = OpRegistry<GatherArgs>;
 using UpsampleRegistry = OpRegistry<UpsampleArgs>;
 using TransposeRegistry = OpRegistry<TransposeArgs>;
 using AddRegistry = OpRegistry<AddArgs>;
@@ -216,6 +229,7 @@ struct ImplSelection {
     std::string chunk = "stock";
     std::string patch = "stock";
     std::string upsample = "stock";
+    std::string gather = "stock";
     std::string transpose = "stock";
     // Where the model's intermediate tensors are allocated. Carried with the implementation
     // selection because the two cannot disagree: a CUDA kernel over host tensors is a fault, and

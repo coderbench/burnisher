@@ -348,6 +348,15 @@ void patch_cpu(const PatchArgs& a) {
     }
 }
 
+void gather_cpu(const GatherArgs& a) {
+    for (int64_t i = 0; i < a.rows; ++i) {
+        const int64_t id = static_cast<int64_t>(a.ids->get(i));
+        for (int64_t j = 0; j < a.cols; ++j) {
+            a.out->set(i * a.cols + j, a.table->get(id * a.cols + j));
+        }
+    }
+}
+
 void upsample_cpu(const UpsampleArgs& a) {
     const int64_t H = a.h_in * a.factor, W = a.w_in * a.factor;
     for (int64_t b = 0; b < a.batch; ++b) {
@@ -403,6 +412,8 @@ void register_builtin_cpu_ops() {
                            "reach device memory");
     register_impl<ChunkArgs>("chunk", "stock", chunk_cpu,
                              "AdaLN-single's six modulation chunks plus the per-layer table");
+    register_impl<GatherArgs>("gather", "stock", gather_cpu,
+                              "embedding row gather; the table is resident, the rows are read");
     register_impl<UpsampleArgs>("upsample", "stock", upsample_cpu,
                                 "nearest-neighbour integer upsample, NCHW");
     register_impl<TransposeArgs>("transpose", "stock", transpose_cpu,
@@ -423,6 +434,7 @@ std::vector<OpListing> list_all_impls() {
         {AddRegistry::instance().op_name(), AddRegistry::instance().list()},
         {ChunkRegistry::instance().op_name(), ChunkRegistry::instance().list()},
         {PatchRegistry::instance().op_name(), PatchRegistry::instance().list()},
+        {GatherRegistry::instance().op_name(), GatherRegistry::instance().list()},
         {UpsampleRegistry::instance().op_name(), UpsampleRegistry::instance().list()},
         {TransposeRegistry::instance().op_name(), TransposeRegistry::instance().list()},
     };

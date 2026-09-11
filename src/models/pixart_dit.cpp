@@ -116,8 +116,13 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
             static_cast<int>(d), static_cast<int>(grid), base, 2.0);
         // Computed on the host once per forward -- it depends only on the shape -- then added
         // through the op, broadcast over the batch. The table is [N, d] and x is [B*N, d].
-        Tensor pos({N, d}, dtype_, impls.device);
-        for (int64_t i = 0; i < N * d; ++i) pos.set(i, static_cast<float>(pe[i]));
+        // Built on the HOST -- it is a closed-form function of the shape, not of any tensor --
+        // and then uploaded once. Allocating it on the device and filling it with scalar stores
+        // would be a fault, which is the shape of mistake this whole device boundary exists to
+        // make loud rather than subtle.
+        Tensor pos_host({N, d}, dtype_);
+        for (int64_t i = 0; i < N * d; ++i) pos_host.set(i, static_cast<float>(pe[i]));
+        Tensor pos = (impls.device == Device::CUDA) ? pos_host.to_device() : pos_host;
         add(AddArgs{&x, &pos, &x, B, N * d, 1.0f, true});
     }
 
@@ -126,9 +131,10 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
     Tensor modulation({B, 6 * d}, dtype_, impls.device);
     {
         Tensor proj = sinusoidal_timestep_embedding(timestep, 256, dtype_);
-        Tensor broad({B, 256}, dtype_, impls.device);
+        Tensor broad_host({B, 256}, dtype_);
         for (int64_t b = 0; b < B; ++b)
-            for (int64_t i = 0; i < 256; ++i) broad.set(b * 256 + i, proj.get(i));
+            for (int64_t i = 0; i < 256; ++i) broad_host.set(b * 256 + i, proj.get(i));
+        Tensor broad = (impls.device == Device::CUDA) ? broad_host.to_device() : broad_host;
         Tensor w1 = w_.require("adaln_single.emb.timestep_embedder.linear_1.weight");
         Tensor b1 = w_.require("adaln_single.emb.timestep_embedder.linear_1.bias");
         Tensor w2 = w_.require("adaln_single.emb.timestep_embedder.linear_2.weight");

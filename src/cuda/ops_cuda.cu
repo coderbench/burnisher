@@ -583,6 +583,27 @@ void conv2d_cuda(const Conv2dArgs& a) {
 }
 
 template <typename T>
+__global__ void k_gather(const T* table, const T* ids, T* out, int64_t rows, int64_t cols) {
+    const int64_t n = rows * cols;
+    for (int64_t i = blockIdx.x * (int64_t)blockDim.x + threadIdx.x; i < n;
+         i += (int64_t)gridDim.x * blockDim.x) {
+        const int64_t r = i / cols, c = i % cols;
+        const int64_t id = (int64_t)ld(ids, r);
+        st(out, i, ld(table, id * cols + c));
+    }
+}
+
+void gather_cuda(const GatherArgs& a) {
+    require_device(*a.table, "gather");
+    const int64_t n = a.rows * a.cols;
+    const int grid = (int)std::min<int64_t>(65535, (n + kBlock - 1) / kBlock);
+    DISPATCH(*a.table, T,
+             k_gather<T><<<grid, kBlock>>>((const T*)a.table->data(), (const T*)a.ids->data(),
+                                           (T*)a.out->data(), a.rows, a.cols));
+    check_launch("gather");
+}
+
+template <typename T>
 __global__ void k_upsample(const T* in, T* out, int64_t batch, int64_t channels, int64_t h_in,
                            int64_t w_in, int64_t factor) {
     const int64_t H = h_in * factor, W = w_in * factor;
@@ -659,6 +680,7 @@ void register_cuda_ops() {
     register_impl<AddArgs>("add", "cuda", add_cuda, "residual and broadcast add");
     register_impl<ChunkArgs>("chunk", "cuda", chunk_cuda, "AdaLN-single modulation chunks");
     register_impl<PatchArgs>("patch", "cuda", patch_cuda, "patchify and unpatchify");
+    register_impl<GatherArgs>("gather", "cuda", gather_cuda, "embedding row gather");
     register_impl<UpsampleArgs>("upsample", "cuda", upsample_cuda, "nearest 2x, NCHW");
     register_impl<TransposeArgs>("transpose", "cuda", transpose_cuda,
                                  "channels-major <-> tokens-major");
