@@ -62,6 +62,11 @@ rather than to look good:
 | `long-caption` | fills the 300-token T5 window |
 | `short-caption` | almost all padding; the opposite end of the same axis |
 
+The four span **4 to 127 real tokens in a 300-token window**, so padding is the majority of every
+sequence. That is not incidental to the choice: attention masking of padding was broken in this
+runtime and nothing caught it until a test asked about a masked position
+(`docs/STATUS.md`). A prompt set of uniform length would not have exposed it.
+
 The last two matter because cross-attention K/V length is the axis a caching or sparsity change is
 most likely to break, and a prompt set of uniform length would never show it.
 
@@ -114,9 +119,22 @@ The procedure, when it happens:
 2. Pin the checkpoint revision. `configs/candidates.json` already carries
    `e102b3591cc82e97071b8b4cb90d834d0c487207` for the transformer/VAE and
    `2c17b4e85261cd549b4068d086b7c2ba9d468e9f` for the T5 encoder.
-3. Produce token ids for the four frozen prompts with the pinned T5 tokenizer, commit them, and
-   record their digest. The pipeline takes ids directly rather than vendoring a SentencePiece
-   model, because vendoring one would put a second oracle in the repository.
+3. ~~Produce token ids for the four frozen prompts with the pinned T5 tokenizer.~~ **Done.**
+   `scripts/tokenize_prompts.py` produces them with the pinned `spiece.model`;
+   `eval/cells/BG-1/token-ids.json` holds them alongside the prompt-set digest and the
+   tokenizer's own SHA-256, and per-prompt `.txt` files feed `burnisher generate --token-ids`.
+   The runtime takes ids rather than text because vendoring a SentencePiece model into a C++
+   binary would put a second oracle in the repository.
+
+   Two pinned decisions live in that script rather than being inherited as defaults:
+
+   * **`clean_caption` is OFF.** The reference pipeline defaults it ON and silently falls back to
+     OFF when `ftfy` and `BeautifulSoup` are absent — so the reference's behaviour depends on
+     what happens to be installed. A benchmark cannot. The frozen prompts are written
+     already-clean so both branches agree on them, and the pin says which one is meant.
+   * **Truncation happens before the EOS is appended**, at `max_length - 1`, which is what
+     HuggingFace does. The other order drops the EOS on exactly the captions long enough to need
+     truncating — a silent difference that shows up only on the longest prompt.
 4. Generate latents at the fixed seed, in fp32, at the pinned revision, on any device. Commit them
    under `eval/cells/BG-1/reference-latents/` with their digests.
 5. A moved pin is a changed oracle and therefore a **new generation**, never an edit.
