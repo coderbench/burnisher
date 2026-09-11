@@ -77,7 +77,10 @@ Tensor T5Encoder::forward(const Tensor& token_ids, const ImplSelection& impls) c
         GatherArgs{&embed, &token_ids, &x, M, d});
 
     // Relative position bias, computed once and added into every layer's scores.
-    Tensor bias_host({static_cast<int64_t>(cfg_.num_heads), S, S}, dtype_, impls.device);
+    // HOST, as the name says: it is filled by a scalar loop over sequence positions and then
+    // uploaded once. A blanket rewrite that placed every tensor on the device caught this one
+    // too, which is how a variable came to be called `_host` and live on a GPU.
+    Tensor bias_host({static_cast<int64_t>(cfg_.num_heads), S, S}, dtype_);
     {
         Tensor& bias = bias_host;
         // 32 x heads of parameters. Pulled to the host because the bucketing is a scalar
