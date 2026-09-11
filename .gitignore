@@ -8,8 +8,11 @@ weights/
 scratch/
 receipts-local/
 *.safetensors
-# The reference latents ARE committed: they are the oracle, four 256 kB tensors, and a
-# benchmark whose oracle lives only on one box is not reproducible by anyone.
-!eval/cells/*/reference-latents/*.npy
 *.npy
 *.png
+
+# The reference latents ARE committed. They are the oracle -- four 256 kB tensors produced by the
+# reference implementation at the pinned revisions -- and a benchmark whose oracle lives on one
+# box is not reproducible by anyone. The negation must come AFTER `*.npy`; gitignore is ordered,
+# and a negation placed before the pattern it negates does nothing.
+!eval/cells/*/reference-latents/*.npy
