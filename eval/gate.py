@@ -53,7 +53,7 @@ def _git(*a):
 
 
 def generate(binary, generation, token_ids_file, seed, impl, *, out_dir, label, weights,
-             device):
+             device, dtype, noise):
     """One generation, dumping the denoised LATENT.
 
     Token IDS, not a prompt string. The T5 tokenizer is a SentencePiece model and the runtime
@@ -68,6 +68,8 @@ def generate(binary, generation, token_ids_file, seed, impl, *, out_dir, label, 
            "--seed", str(seed),
            "--impl", impl,
            "--device", device,
+           "--dtype", dtype,
+           "--noise", str(noise),
            "--resolution", str(generation.model["resolution"]),
            "--steps", str(generation.model["steps"]),
            "--guidance-scale", str(generation.raw["model"]["guidance_scale"]),
@@ -105,6 +107,13 @@ def main():
     ap.add_argument("--impl", default="stock")
     ap.add_argument("--weights", required=True, help="checkpoint directory")
     ap.add_argument("--device", default="cuda", choices=["cpu", "cuda"])
+    ap.add_argument("--dtype", default="bf16",
+                    help="the compute dtype under test. The reference is fp32; running fp32 here "
+                         "isolates the kernels from the dtype.")
+    ap.add_argument("--noise", required=True,
+                    help="the pinned initial latent, from `burnisher noise`. The SAME file the "
+                         "reference latents were produced from -- see their manifest's "
+                         "noise_sha256.")
     ap.add_argument("--repeats", type=int, default=10,
                     help="determinism replays. Byte-identical is the bar.")
     ap.add_argument("--prompts", help="frozen prompt set (default: the generation's)")
@@ -154,7 +163,7 @@ def main():
         for i in range(args.repeats):
             r = generate(args.binary, generation, det_ids, seed, args.impl,
                          out_dir=work, label=f"det-{i}", weights=args.weights,
-                         device=args.device)
+                         device=args.device, dtype=args.dtype, noise=args.noise)
             digests.append(r["latent_sha256"])
             first = first or r["latent_path"]
             print(f"   replay {i:2d}  {r['latent_sha256'][:16]}")
@@ -206,7 +215,7 @@ def main():
             label = f"gate-{p['id']}"
             r = generate(args.binary, generation, ids_dir / f"token-ids-{p['id']}.txt", seed,
                          args.impl, out_dir=work, label=label, weights=args.weights,
-                         device=args.device)
+                         device=args.device, dtype=args.dtype, noise=args.noise)
             ref = ref_dir / f"{p['id']}.npy"
             if not ref.exists():
                 raise RunnerError(f"the frozen prompt set names {p['id']} and the reference "

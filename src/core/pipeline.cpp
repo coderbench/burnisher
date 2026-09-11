@@ -55,7 +55,7 @@ Tensor Pipeline::initial_latent() const {
 }
 
 Tensor Pipeline::generate(const Tensor& token_ids, StageTimings* timings,
-                          Tensor* final_latent) {
+                          Tensor* final_latent, const Tensor* noise) {
     using clock = std::chrono::steady_clock;
     const auto secs = [](clock::time_point a, clock::time_point b) {
         return std::chrono::duration<double>(b - a).count();
@@ -93,7 +93,7 @@ Tensor Pipeline::generate(const Tensor& token_ids, StageTimings* timings,
     DPMSolverMultistep sched(schedcfg_);
     sched.set_timesteps(cfg_.steps);
 
-    Tensor latent_host = initial_latent();
+    Tensor latent_host = noise ? noise->to(cfg_.compute) : initial_latent();
     Tensor latent = (impls.device == Device::CUDA) ? latent_host.to_device() : latent_host;
     const int64_t per = latent.numel();
     Tensor batched({batch, latent.dim(1), latent.dim(2), latent.dim(3)}, cfg_.compute,

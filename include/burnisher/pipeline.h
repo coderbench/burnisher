@@ -65,8 +65,12 @@ class Pipeline {
     // Latents, not pixels, and the distinction is load-bearing: the VAE decode is itself one of
     // the things under optimization, so comparing images would fold two questions into one and
     // let a decoder change hide a denoiser change.
+    // `noise`, when given, is the starting latent -- an INPUT rather than something the runtime
+    // produces. That is what makes a comparison against a reference a comparison of the
+    // runtimes: two RNGs agreeing bit for bit is not a thing to depend on, and regenerating at
+    // the compute dtype starts a bf16 run and an fp32 reference from different points.
     Tensor generate(const Tensor& token_ids, StageTimings* timings,
-                    Tensor* final_latent = nullptr);
+                    Tensor* final_latent = nullptr, const Tensor* noise = nullptr);
 
     // Deterministic Gaussian noise from the seed. Drawn on the host, in a fixed order, and NOT
     // on the device: a sampler that drew its noise in kernel-launch order would make the whole

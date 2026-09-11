@@ -67,6 +67,9 @@ common options:
   --steps N                 denoise steps (default: 20)
   --seed N                  fixed seed (default: 20260911)
   --token-ids FILE          T5 token ids, one prompt per line (negative first under CFG)
+  --noise FILE              the pinned initial latent (from `burnisher noise`). REQUIRED for a
+                            gate run: regenerating it at the compute dtype starts the two sides
+                            from different points and the comparison then measures the noise.
   --dump-latents FILE       write the denoised LATENT as .npy -- what the gate compares
   --dump-pixels FILE        write the decoded image as .npy
   --weights DIR             checkpoint directory (transformer/ vae/ text_encoder/);
@@ -915,7 +918,25 @@ int cmd_generate(const Args& a) {
     Pipeline p(cfg, text, den, dec, t5, dit, vae, sched);
     StageTimings t{};
     Tensor final_latent;
-    Tensor pixels = p.generate(ids, &t, &final_latent);
+    // The starting noise is an INPUT when one is given.
+    //
+    // Without this the runtime regenerates it from the seed AT THE COMPUTE DTYPE, so a bf16 run
+    // starts from bf16-rounded noise while an fp32 reference starts from fp32 noise. The two
+    // trajectories then differ from step zero and the correctness gate measures the rounding of
+    // a random number rather than the kernels. That is not a small effect: guided diffusion
+    // amplifies a 0.4% difference in the initial latent into a completely different image.
+    Tensor noise;
+    if (!a.get("noise").empty()) {
+        noise = read_npy(a.get("noise"));
+        const int64_t f = vae.scale_factor();
+        const int64_t h = cfg.resolution / f;
+        if (noise.rank() != 4 || noise.dim(2) != h || noise.dim(3) != h) {
+            throw std::runtime_error("--noise is " + noise.describe() + ", expected [1, " +
+                                     std::to_string(vae.latent_channels) + ", " +
+                                     std::to_string(h) + ", " + std::to_string(h) + "]");
+        }
+    }
+    Tensor pixels = p.generate(ids, &t, &final_latent, noise.defined() ? &noise : nullptr);
     // The gate's statistics are about the LATENT, because the latent is what the gate compares.
     const OutputStats st = OutputStats::of(final_latent);
 
@@ -932,6 +953,7 @@ int cmd_generate(const Args& a) {
         {"caption_len", std::to_string(cfg.caption_len)},
         {"cfg", cfg.classifier_free_guidance ? "1" : "0"},
         {"device", a.get("device", "cpu")},
+        {"noise", a.get("noise").empty() ? "seeded" : "pinned"},
     };
     for (const auto& kv : ImplSelection::from_request(cfg.impl).as_map()) {
         effective["impl." + kv.first] = kv.second;
