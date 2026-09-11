@@ -1,0 +1,99 @@
+name: ci
+on: [push, pull_request]
+
+jobs:
+  cpu:
+    # Everything that can be checked without a GPU -- which is the whole harness, the whole
+    # correctness oracle, and the entire op registry. That is not an accident: the CPU reference
+    # IS the oracle, and an oracle that only builds where the thing it checks builds is not much
+    # of an oracle.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBURNISHER_BUILD_TESTS=ON
+      - run: cmake --build build -j2
+      - name: C++ tests
+        run: ctest --test-dir build --output-on-failure
+      - name: the whole graph, on synthetic weights
+        run: ./build/burnisher selftest
+      - name: a Debug build must test too
+        run: |
+          cmake -S . -B build-debug -DCMAKE_BUILD_TYPE=Debug -DBURNISHER_BUILD_TESTS=ON
+          cmake --build build-debug -j2
+          ctest --test-dir build-debug --output-on-failure
+
+  harness:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: pip install numpy
+      - name: harness tests
+        run: python3 -m unittest discover -s eval -t eval -p 'test_*.py' -v
+      - name: the frozen generation still matches configs/
+        # If a config moved and the generation was not regenerated, the published ceiling and the
+        # scorer disagree -- and the disagreement is invisible until a receipt is wrong.
+        run: python3 eval/make_generation.py --check
+      - name: the published roofline table is regenerable
+        # docs/ROOFLINE.md is generated. A number typed into it by hand would contradict the
+        # generation, which is the file the scorer actually reads.
+        run: |
+          python3 eval/roofline_table.py --markdown /tmp/roofline.md > /dev/null
+          diff -u docs/ROOFLINE.md /tmp/roofline.md
+      - name: the screen runs and answers every arithmetic question
+        run: python3 eval/screen.py --json /tmp/screen.json
+      - name: manifest
+        run: python3 scripts/manifest.py --check
+
+  help:
+    # A --help smoke test on every entry point. The cheapest possible check that a binary is not
+    # simply broken, and the one that catches a bad refactor before a benchmark run does.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: cmake -S . -B build -DBURNISHER_BUILD_TESTS=OFF && cmake --build build -j2
+      - name: native entry points
+        run: |
+          ./build/burnisher --help
+          ./build/burnisher info
+      - name: harness entry points
+        run: |
+          for e in tools/burnish eval/screen.py eval/roofline_table.py \
+                   eval/make_generation.py eval/bench.py eval/calibrate.py eval/gate.py; do
+            echo "--- $e"; python3 "$e" --help > /dev/null
+          done
+          for sub in screen roofline generation score receipt ledger probe calibrate gate bench; do
+            echo "--- burnish $sub"; python3 tools/burnish "$sub" --help > /dev/null
+          done
+      - name: every measurement command refuses to estimate without a device
+        # A command that produces a MEASUREMENT must fail when there is no device. An estimate
+        # printed where a measurement belongs is how an evaluator publishes a confident number
+        # for a run that never happened.
+        run: |
+          for cmd in probe calibrate gate bench; do
+            python3 tools/burnish "$cmd" && { echo "!! $cmd did not refuse"; exit 1; }
+            [ $? -eq 3 ] || true
+          done
+          echo "all four refused"
+
+  cuda-compile:
+    # The CUDA backend has never been compiled -- there was no nvcc and no Blackwell device when
+    # this repository was written, and docs/STATUS.md says so in those words. This job is here so
+    # that stops being true the first time it runs on a runner that has a toolkit. It does not
+    # run anything: compiling is not measuring.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Jimver/cuda-toolkit@v0.2.19
+        id: cuda
+        with: {cuda: '12.8.0', method: 'network', sub-packages: '["nvcc"]'}
+      - name: compile for sm_120
+        run: |
+          cmake -S . -B build-cuda -DBURNISHER_BUILD_CUDA=ON \
+                -DCMAKE_CUDA_ARCHITECTURES=120 -DBURNISHER_BUILD_TESTS=OFF
+          cmake --build build-cuda -j2

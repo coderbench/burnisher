@@ -1,0 +1,27 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "title": "Burnisher roofline row",
+ "description": "One published cell. The ceiling columns are ARITHMETIC and say so; the achieved and floor columns are measurements and are null until a run produces them. The whole point of the schema is that those two kinds of number can never be confused for one another.",
+ "type": "object",
+ "required": ["cell", "stage", "dtype", "ceiling_s", "ceiling_basis", "peak_basis", "achieved",
+              "floor_pct"],
+ "properties": {
+  "cell": {"type": "string"},
+  "ceiling_s": {"type": "number", "exclusiveMinimum": 0},
+  "ceiling_basis": {
+   "const": "model",
+   "description": "Computed from a config file and a device peak. No run produced it, and it is never evidence about a speedup."
+  },
+  "peak_basis": {
+   "enum": ["measured", "vendor", "derived", "unstated"],
+   "description": "Where the device peak behind the ceiling came from. Anything but `measured` means every achieved fraction computed against it is a LOWER bound on how done the cell really is."
+  },
+  "achieved": {
+   "type": ["number", "null"],
+   "exclusiveMinimum": 0, "maximum": 1.000000001,
+   "description": "MEASURED. Null means nobody has measured this cell -- which is a statement, not a gap to be filled with a plausible figure."
+  },
+  "floor_pct": {"type": ["number", "null"], "minimum": 0},
+  "implemented": {"type": "boolean"}
+ }
+}

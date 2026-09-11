@@ -1,0 +1,59 @@
+{
+ "$schema": "http://json-schema.org/draft-07/schema#",
+ "title": "Burnisher Receipt",
+ "description": "The permanent evidence artifact for one scored submission. No letter grades appear anywhere in this schema and none may be added: a status describes evaluation STATE, never impact magnitude.",
+ "type": "object",
+ "required": ["schema_version", "benchmark_generation", "generation_digest", "timestamp_utc",
+              "status", "score", "frontier", "per_cell", "correctness", "determinism",
+              "coverage", "provenance", "content_digest"],
+ "additionalProperties": true,
+ "properties": {
+  "schema_version": {"const": 1},
+  "benchmark_generation": {"type": "string"},
+  "generation_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+  "status": {
+   "enum": ["FRONTIER_EXPANDED", "MOVED_ALONG_FRONTIER", "EXPANDED_OFF_LATENCY", "NO_GAIN",
+            "UNRESOLVED", "CORRECTNESS_FAIL", "DETERMINISM_FAIL", "SHAPE_OVERFIT", "PARTIAL",
+            "BUILD_FAIL", "EVAL_ERROR"],
+   "description": "Evaluation state. Never a magnitude."
+  },
+  "score": {
+   "type": "object",
+   "required": ["gap_closed", "credited_gap_closed", "confidence_interval", "resolved", "basis"],
+   "properties": {
+    "gap_closed": {"type": "number"},
+    "credited_gap_closed": {"type": "number"},
+    "resolved": {"type": "boolean"},
+    "basis": {
+     "const": "measured",
+     "description": "A score is evidence about a speedup, and only a measured run is that. A cost-model figure carries basis 'model' and can never appear here."
+    },
+    "confidence_interval": {
+     "type": "object",
+     "required": ["lower", "upper", "level"],
+     "properties": {"lower": {"type": "number"}, "upper": {"type": "number"},
+                    "level": {"type": "number", "exclusiveMinimum": 0.5, "exclusiveMaximum": 1}}
+    }
+   }
+  },
+  "per_cell": {
+   "type": "object",
+   "additionalProperties": {
+    "type": "object",
+    "required": ["gap_closed", "achieved_base", "achieved_candidate", "floor_pct", "resolved"],
+    "properties": {
+     "achieved_base": {"type": "number", "exclusiveMinimum": 0, "maximum": 1.000000001},
+     "achieved_candidate": {"type": "number", "exclusiveMinimum": 0, "maximum": 1.000000001},
+     "floor_pct": {"type": "number", "minimum": 0},
+     "ceiling_basis": {
+      "const": "model",
+      "description": "A roofline is arithmetic. Calling it measured would make it evidence it is not."
+     }
+    }
+   }
+  },
+  "correctness": {"enum": ["PASS", "FAIL", "BUILD_FAIL", "NOT_RUN", "NO_REFERENCE"]},
+  "determinism": {"type": "boolean"},
+  "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+ }
+}
