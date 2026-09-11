@@ -97,5 +97,49 @@ int main() {
         CHECK_THROWS(DPMSolverMultistep{vpred});
     }
 
+    // --- against the reference scheduler, golden ---
+    //
+    // These trajectories came from diffusers' own DPMSolverMultistepScheduler at the pinned
+    // configuration, not from this code. They exist because the sampler is the one
+    // oracle-critical component with no weights, and because this implementation got it wrong in
+    // a way that produced a perfectly finite, perfectly plausible, entirely different
+    // trajectory: it used the KARRAS sigma ratio as the coefficient on `sample` where the
+    // reference uses the VARIANCE-PRESERVING one. At t=999 those are 157 and 0.99998.
+    //
+    // The selected steps cover all three regimes: step 0 is first-order (no history), step 1 and
+    // step 10 are second-order, and step 19 is first-order again via lower_order_final.
+    {
+        const struct { int step; float expected[4]; } kGolden[] = {
+        {0, {-0.636623f, 0.446139f, 1.087361f, 1.016999f}},
+        {1, {-1.606111f, 0.176379f, 1.302189f, 1.331266f}},
+        {10, {-52.355724f, -10.762326f, 18.087229f, 24.356478f}},
+        {19, {-147.538956f, -29.536594f, 52.469440f, 70.689590f}}
+        };
+        SchedulerConfig cfg;
+        DPMSolverMultistep s2(cfg);
+        s2.set_timesteps(20);
+        Tensor x({4}, DType::F32), e({4}, DType::F32);
+        for (int i = 0; i < 4; ++i) x.set(i, static_cast<float>(std::sin(i * 0.7)));
+        size_t next = 0;
+        for (int i = 0; i < 20; ++i) {
+            for (int j = 0; j < 4; ++j) {
+                e.set(j, static_cast<float>(std::cos(j * 0.3 + i * 0.11)));
+            }
+            s2.step(e, i, x);
+            if (next < sizeof(kGolden) / sizeof(kGolden[0]) && kGolden[next].step == i) {
+                for (int j = 0; j < 4; ++j) {
+                    const double want = kGolden[next].expected[j];
+                    const double got = x.get(j);
+                    CHECK_MSG(std::fabs(got - want) <= 1e-3 * std::max(1.0, std::fabs(want)),
+                              "step " + std::to_string(i) + " element " + std::to_string(j) +
+                              ": got " + std::to_string(got) + ", reference gives " +
+                              std::to_string(want));
+                }
+                ++next;
+            }
+        }
+        CHECK(next == sizeof(kGolden) / sizeof(kGolden[0]));
+    }
+
     return burnisher_test::summary("test_scheduler");
 }

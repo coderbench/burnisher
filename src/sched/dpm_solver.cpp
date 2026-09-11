@@ -102,9 +102,8 @@ DPMSolverMultistep::StepCoefficients DPMSolverMultistep::coefficients(int i) con
     StepCoefficients c{};
     c.sigma_s0 = sigmas_.at(idx);
     c.sigma_t = sigmas_.at(idx + 1);
-    double sig_t, sig_s0;
-    sigma_to_alpha_sigma(c.sigma_t, &c.alpha_t, &sig_t);
-    sigma_to_alpha_sigma(c.sigma_s0, &c.alpha_s0, &sig_s0);
+    sigma_to_alpha_sigma(c.sigma_t, &c.alpha_t, &c.sigma_vp_t);
+    sigma_to_alpha_sigma(c.sigma_s0, &c.alpha_s0, &c.sigma_vp_s0);
     // exp(-h) = sigma_t / sigma_s0, computed as the ratio rather than through lambda.
     // Going via lambda = -log(sigma) puts an infinity in the last step, where sigma_t is
     // exactly zero, and then the arithmetic has to be special-cased anyway -- the ratio is
@@ -136,20 +135,25 @@ void DPMSolverMultistep::step(const Tensor& model_output, int i, Tensor& sample)
     const StepCoefficients c = coefficients(i);
     const Tensor& m0 = history_.back();
 
+    // The coefficient on `sample` is the ratio of the VARIANCE-PRESERVING sigmas, while
+    // exp(-h) is the ratio of the KARRAS sigmas. They are different numbers -- at t=999, 0.99998
+    // against 157 -- and using the Karras ratio in both places produces a trajectory that is
+    // finite, plausible, and not the reference's. That is what this code did until
+    // `scripts/differential_test.py --stage scheduler` compared it.
+    const double sample_coef = (c.sigma_vp_s0 > 0.0) ? (c.sigma_vp_t / c.sigma_vp_s0) : 0.0;
+    const double coef = c.alpha_t * (c.exp_neg_h - 1.0);
     if (c.order == 1) {
         for (int64_t n = 0; n < sample.numel(); ++n) {
-            const double v = (c.sigma_t / (c.sigma_s0 > 0 ? c.sigma_s0 : 1.0)) *
-                                 static_cast<double>(sample.get(n)) -
-                             c.alpha_t * (c.exp_neg_h - 1.0) * m0.get(n);
+            const double v = sample_coef * static_cast<double>(sample.get(n)) -
+                             coef * m0.get(n);
             sample.set(n, static_cast<float>(v));
         }
     } else {
         const Tensor& m1 = history_[history_.size() - 2];
-        const double coef = c.alpha_t * (c.exp_neg_h - 1.0);
         for (int64_t n = 0; n < sample.numel(); ++n) {
             const double d0 = m0.get(n);
             const double d1 = (1.0 / c.r0) * (d0 - m1.get(n));
-            const double v = (c.sigma_t / c.sigma_s0) * static_cast<double>(sample.get(n)) -
+            const double v = sample_coef * static_cast<double>(sample.get(n)) -
                              coef * d0 - 0.5 * coef * d1;
             sample.set(n, static_cast<float>(v));
         }

@@ -51,8 +51,20 @@ class DPMSolverMultistep {
     // reference, and a test that could only check the final image would not localise a mismatch.
     struct StepCoefficients {
         int order;
-        double sigma_s0, sigma_t, alpha_t, alpha_s0;
-        double exp_neg_h;   // sigma_t / sigma_s0
+        // TWO sigmas per endpoint, and conflating them is a real and easy mistake.
+        //
+        //   sigma_*     the Karras-style sigma, sqrt((1 - acp) / acp). Its RATIO is exp(-h),
+        //               because lambda = -log(sigma).
+        //   sigma_vp_*  the variance-preserving sigma, sigma / sqrt(sigma^2 + 1). Its RATIO is
+        //               the coefficient on `sample` in the update.
+        //
+        // At t=999 the first is about 157 and the second about 0.99998, so using one where the
+        // other belongs is not a small error -- and the update still runs, still stays finite,
+        // and still produces an image.
+        double sigma_s0, sigma_t;
+        double sigma_vp_s0, sigma_vp_t;
+        double alpha_t, alpha_s0;
+        double exp_neg_h;   // sigma_t / sigma_s0, the KARRAS ratio
         double r0;          // h_0 / h; 0 for a first-order step
     };
     StepCoefficients coefficients(int i) const;

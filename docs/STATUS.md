@@ -64,7 +64,7 @@ the reference implementation. That is the correctness gate, and it needs referen
 not exist yet — so "the output is plausible" is the strongest claim available here, and it is
 weaker than "the output is right".
 
-### Three correctness defects the runtime had, and how they were found
+### Four correctness defects the runtime had, and how they were found
 
 Both were invisible to every self-consistency check in the repository, which is the point worth
 recording: a deterministic wrong answer passes a determinism test, and two implementations that
@@ -79,6 +79,16 @@ whole-model determinism test passed because the wrongness was deterministic. It 
 when a cross-attention *mask* test asked a question the layout could not answer. The op is now
 head-last and `tests/test_ops.cpp` pins the invariant: H-head attention must equal H independent
 single-head attentions over the corresponding slices.
+
+**The sampler used the wrong sigma.** DPM-Solver++ carries two sigmas per endpoint: the
+Karras-style `sqrt((1-acp)/acp)`, whose ratio is `exp(-h)`, and the variance-preserving
+`sigma/sqrt(sigma^2+1)`, whose ratio is the coefficient on the sample in the update. This code
+used the Karras ratio in both places. At t=999 those two numbers are **157 and 0.99998**, so it
+is not a small error — and the update still ran, still stayed finite, and still produced a
+plausible trajectory. Found by comparing the sampler alone against the reference scheduler, with
+no weights and no model involved: `scripts/differential_test.py --stage scheduler`. It now agrees
+to 1.7e-7 and `tests/test_scheduler.cpp` pins four steps of the reference's own trajectory,
+covering both solver orders and the `lower_order_final` case.
 
 **The output patch ordering was transposed.** The reference lays each token's output vector out
 as (row, column, CHANNEL) — channel varying fastest — and then permutes. The input side is
@@ -112,6 +122,7 @@ question at a scale a CPU can answer, and it is what found the patch-ordering de
 |:--|:--|--:|:--|
 | `vae-decode` | 4x4 latent | **6.9e-06** | agrees to fp32 epsilon |
 | `dit-step` | 64px, batch 2, 28 blocks | **7.3e-04** | agrees; see below |
+| `scheduler` | 20 steps, no weights | **1.7e-07** | agrees to fp32 epsilon |
 
 The DiT figure needed explaining rather than accepting, so the block stack was truncated on both
 sides and the divergence measured against depth:

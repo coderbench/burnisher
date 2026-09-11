@@ -18,8 +18,8 @@ burnish bench ... | burnish score   # a number with an interval on it
 ## Read this first
 
 **The instrument is complete and tested. The runtime runs end to end on the CPU, reproduces itself
-byte for byte, and loads and runs the real pinned checkpoint. Nothing has been measured on a
-GPU.** No Blackwell device and no CUDA
+byte for byte, loads and runs the real pinned checkpoint, and agrees with the reference
+implementation stage by stage. Nothing has been measured on a GPU.** No Blackwell device and no CUDA
 toolkit were available when this was built, so every cell's achieved fraction and noise floor is
 `null`, every ceiling stands on a vendor device peak rather than a probed one, and the CUDA op
 backend does not exist yet.
@@ -169,6 +169,14 @@ burnish roofline          # the published ceiling table
 burnish screen            # why v0 pins what it pins
 ```
 
+Against a real checkpoint, and still without a GPU:
+
+```bash
+burnisher check-weights --weights DIR        # all 962 required tensors, through the real loader
+scripts/verify_checkpoint_layout.py --against-saved   # names and shapes vs the pinned revisions
+scripts/differential_test.py --weights DIR --stage vae-decode   # vs the reference, same weights
+```
+
 Everything above needs no GPU. Everything that produces a **measurement** —
 `burnish probe | calibrate | gate | bench` — refuses to run without a device rather than
 estimating. There is no fallback and there is not supposed to be one.
@@ -229,11 +237,14 @@ Every one was learned by somebody getting it wrong.
   `eval/tests/test_schemas.py` fails if a modelled figure reaches a measured field.
 - **The evaluator is where the bugs are.** A broken evaluator prints a confident number. Never
   remove a guard without knowing which incident it encodes — they are all named where they live.
-  (Writing the tests found six real defects — four in the harness, two in the runtime. The two
-  runtime ones are the instructive pair: attention read `[batch, heads, seq, dim]` over buffers
-  laid out `[batch, seq, heads, dim]`, and padding was never masked. Both are *deterministic*
-  wrong answers, so a determinism test passes them and two implementations wrong the same way
-  agree with each other. See `docs/STATUS.md`.)
+  (Eight real defects so far — four in the harness, four in the runtime. The runtime four are the
+  instructive set: attention read `[batch, heads, seq, dim]` over buffers laid out
+  `[batch, seq, heads, dim]`; padding was never masked; the output patch ordering was transposed;
+  and the sampler used the Karras sigma ratio where the reference uses the variance-preserving
+  one — 157 against 0.99998 at t=999. Every one is a *deterministic* wrong answer, so a
+  determinism test passes it and two implementations wrong the same way agree with each other.
+  The last two were caught only by comparing against the reference implementation. See
+  `docs/STATUS.md`.)
 - **An axis whose spread sits inside its own noise is open, not solved.**
 - **Correctness before speed, always.** A submission failing the gate is rejected, not traded off.
 - **Never type a benchmark number by hand.** Every figure in `docs/ROOFLINE.md`, `docs/SCREEN.md`

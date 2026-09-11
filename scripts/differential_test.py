@@ -68,9 +68,15 @@ def report(name, ours, theirs, tolerance=None):
     print(f"    tolerance   : {tol:.1e}")
     print(f"    -> {'AGREE' if ok else 'DISAGREE'}")
     if not ok:
-        print("    A disagreement well ABOVE the tolerance with an IDENTICAL mean and standard")
-        print("    deviation is the signature of a permutation, not an arithmetic error. That is")
-        print("    how the output patch ordering was found (docs/STATUS.md).")
+        same_moments = (abs(ours.mean() - theirs.mean()) < 1e-4 * max(1.0, abs(theirs.mean()))
+                        and abs(ours.std() - theirs.std()) < 1e-4 * max(1.0, theirs.std()))
+        if same_moments:
+            print("    The moments MATCH and the values do not: that is a permutation, not an")
+            print("    arithmetic error. It is how the output patch ordering was found.")
+        else:
+            print("    The moments differ too, so this is arithmetic rather than layout. Bisect")
+            print("    it: --layers truncates the DiT stack on both sides, and --stage scheduler")
+            print("    isolates the sampler from everything that has weights.")
     return ok
 
 
@@ -211,13 +217,60 @@ def stage_t5(args):
     return report("t5-encode (real tokens only)", ours[keep], ref[keep])
 
 
-STAGES = {"vae-decode": stage_vae, "dit-step": stage_dit, "t5-encode": stage_t5}
+def stage_scheduler(args):
+    """The sampler alone: no weights, no model, identical synthetic inputs on both sides.
+
+    Cheap and worth doing first. A scheduler that differs by one index convention produces a
+    plausible image from the same seed and fails the latent comparison with no clue as to why,
+    and this isolates it from everything that has weights.
+    """
+    import numpy as np
+    import torch
+    from diffusers import DPMSolverMultistepScheduler
+
+    steps, n = args.steps, 16
+    ours_json = subprocess.run(
+        [str(args.binary), "schedule", "--steps", str(steps), "--size", str(n),
+         "--out", "/tmp/diff_sched.npy"], capture_output=True, text=True, check=True)
+    ours = np.load("/tmp/diff_sched.npy")
+    our_ts = json.loads(ours_json.stdout.split("BURNISH_JSON:", 1)[1])["timesteps"]
+
+    cfg = json.loads((ROOT / "configs" / "candidates.json").read_text())
+    cfg = cfg["candidates"]["pixart-sigma-xl2-1024"]["scheduler"]
+    sched = DPMSolverMultistepScheduler(
+        num_train_timesteps=cfg["num_train_timesteps"], beta_start=0.0001, beta_end=0.02,
+        beta_schedule="linear", solver_order=cfg["solver_order"],
+        algorithm_type=cfg["algorithm_type"], solver_type=cfg["solver_type"],
+        prediction_type=cfg["prediction_type"], timestep_spacing="linspace",
+        lower_order_final=True)
+    sched.set_timesteps(steps)
+    ref_ts = [int(t) for t in sched.timesteps]
+    if ref_ts != our_ts:
+        print(f"  timesteps DISAGREE\n    ours      {our_ts}\n    reference {ref_ts}")
+        print("    Off by one here is the likeliest way to match the reference ALMOST, which is")
+        print("    the least useful outcome available.")
+        return False
+    print(f"  timesteps agree ({steps} values, {ref_ts[0]} down to {ref_ts[-1]})")
+
+    sample = torch.tensor([np.sin(i * 0.7) for i in range(n)], dtype=torch.float32)
+    traj = [sample.numpy().copy()]
+    for i, t in enumerate(sched.timesteps):
+        eps = torch.tensor([np.cos(j * 0.3 + i * 0.11) for j in range(n)], dtype=torch.float32)
+        sample = sched.step(eps, t, sample, return_dict=False)[0]
+        traj.append(sample.numpy().copy())
+    ref = np.stack(traj)
+    return report("scheduler", ours, ref, tolerance=1e-5)
+
+
+STAGES = {"scheduler": stage_scheduler, "vae-decode": stage_vae, "dit-step": stage_dit,
+          "t5-encode": stage_t5}
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--weights", required=True)
+    ap.add_argument("--weights", default="", help="checkpoint directory (not needed for "
+                                                  "--stage scheduler)")
     ap.add_argument("--binary", default=str(ROOT / "build" / "burnisher"))
     ap.add_argument("--stage", default="vae-decode", choices=sorted(STAGES))
     ap.add_argument("--resolution", type=int, default=32)
@@ -225,6 +278,7 @@ def main():
     ap.add_argument("--caption-len", type=int, default=16)
     ap.add_argument("--timestep", type=float, default=500.0)
     ap.add_argument("--layers", type=int, help="truncate the DiT block stack on BOTH sides")
+    ap.add_argument("--steps", type=int, default=20)
     args = ap.parse_args()
 
     try:

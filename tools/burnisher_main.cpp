@@ -55,6 +55,7 @@ usage: burnisher <command> [options]
   decode                    run the VAE decoder on a latent from a .npy file
   dit-step                  one denoiser forward pass, from .npy inputs
   encode                    run the text encoder on token ids from a file
+  schedule                  run the sampler on a fixed synthetic trajectory, as .npy
 
 common options:
   --impl NAME               registered implementation to use (default: stock)
@@ -713,6 +714,44 @@ int cmd_encode(const Args& a) {
     return 0;
 }
 
+// The sampler alone, on a synthetic trajectory, so it can be compared against the reference
+// scheduler without weights or a model.
+//
+// The sampler is part of the ORACLE and it is the one oracle-critical component with no weights:
+// a scheduler that differs by one index convention produces a plausible image from the same seed
+// and fails the latent comparison with no clue as to why. The "model output" here is a fixed
+// function of the step index, so both sides see identical inputs and any difference is the
+// solver.
+int cmd_schedule(const Args& a) {
+    const int steps = static_cast<int>(a.num("steps", 20));
+    const int64_t n = a.num("size", 16);
+    SchedulerConfig cfg;
+    DPMSolverMultistep sched(cfg);
+    sched.set_timesteps(steps);
+
+    Tensor sample({n}, DType::F32);
+    for (int64_t i = 0; i < n; ++i) sample.set(i, static_cast<float>(std::sin(i * 0.7)));
+    Tensor eps({n}, DType::F32);
+    // The trajectory, one row per step plus the final state.
+    Tensor traj({steps + 1, n}, DType::F32);
+    for (int64_t i = 0; i < n; ++i) traj.set(i, sample.get(i));
+    for (int i = 0; i < steps; ++i) {
+        for (int64_t j = 0; j < n; ++j) {
+            eps.set(j, static_cast<float>(std::cos(j * 0.3 + i * 0.11)));
+        }
+        sched.step(eps, i, sample);
+        for (int64_t j = 0; j < n; ++j) traj.set((i + 1) * n + j, sample.get(j));
+    }
+    write_npy(a.get("out"), traj);
+
+    std::ostringstream ts;
+    for (int i = 0; i < steps; ++i) ts << (i ? "," : "") << sched.timestep(i);
+    std::cout << "BURNISH_JSON: {\"effective\":{\"steps\":" << steps
+              << ",\"size\":" << n << "},\"timesteps\":[" << ts.str()
+              << "],\"output_stats\":" << stats_json(OutputStats::of(traj)) << "}\n";
+    return 0;
+}
+
 int cmd_probe(const Args&) {
 #ifndef BURNISHER_CUDA
     std::cerr << "!! burnisher probe needs a CUDA build. This binary was built without it, so\n"
@@ -856,6 +895,7 @@ int main(int argc, char** argv) {
         if (a.command == "decode") return cmd_decode(a);
         if (a.command == "dit-step") return cmd_dit_step(a);
         if (a.command == "encode") return cmd_encode(a);
+        if (a.command == "schedule") return cmd_schedule(a);
         if (a.command == "generate") return cmd_generate(a);
     } catch (const std::exception& e) {
         std::cerr << "!! " << e.what() << "\n";

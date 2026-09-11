@@ -43,6 +43,19 @@ That runs the C++ tests, the harness tests, the whole graph on synthetic weights
 consistency check, the roofline regeneration check, `--help` on every entry point, and the
 manifest. It needs no GPU.
 
+If you touched anything that computes — a kernel, a graph, a layout — also run the stage-by-stage
+comparison against the reference implementation. It needs a checkpoint but no GPU, and it is the
+only check here that has a second opinion:
+
+```bash
+scripts/differential_test.py --weights DIR --stage vae-decode
+scripts/differential_test.py --weights DIR --stage dit-step --resolution 64
+```
+
+A disagreement far above the tolerance with an **identical mean and standard deviation** is a
+permutation, not an arithmetic error. That is how the output patch ordering was found, and no
+self-consistency test in this repository could see it.
+
 Then, on the pinned hardware:
 
 ```bash
