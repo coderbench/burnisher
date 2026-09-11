@@ -324,6 +324,41 @@ tolerance -- not to show it is fast.
 """
 
 
+@issue("weight-upload", "A single generation is dominated by uploading the weights",
+       ["cuda", "measured", "startup"])
+def _(f):
+    return f"""
+**Measured on the pinned RTX 5090, and it is the largest single cost in a one-shot generation.**
+
+`burnisher generate` maps {f['resident_all_gb']:.1f} GB of checkpoint and uploads it to the
+device on every invocation. At 1024px and 20 steps the whole denoise loop has an arithmetic
+ceiling of {f['shares_20steps']['dit-step'] * f['total_ms_20steps']:.0f} ms, and the upload takes
+tens of seconds. The correctness gate runs seven generations and spends the overwhelming majority
+of its wall time moving weights it already moved six times.
+
+This does NOT affect any scored cell. `burnish bench` loads once and times the stage afterwards,
+and the generation's cells are per-invocation; the arithmetic in `docs/ROOFLINE.md` counts a
+weight read per invocation, not per process. It affects the COST of producing a receipt, which is
+screen question six, and it affects anybody actually using the runtime.
+
+Three directions, in increasing order of effort:
+
+- **Keep the process alive.** The gate and the bench both spawn one process per run so that no
+  state leaks between arms — a deliberate choice — but a resident server with an explicit reset
+  would keep the guarantee and pay the upload once.
+- **Map the checkpoint to the device directly.** The weights are already mmapped on the host and
+  then copied; `cudaHostRegister` on the mapping, or a direct read into device memory, removes
+  one full copy.
+- **Keep less resident.** The text encoder is {f['t5_params_gb']:.2f} GB of the
+  {f['resident_all_gb']:.2f} GB and is idle for the entire denoise loop -- see
+  `issues/offload.md` and `issues/text-encoder.md`.
+
+**The measurement to take first** is the split between map, convert and upload. All three are in
+`DeviceWeights::get`, none of them is separately timed, and guessing which dominates is exactly
+the habit this repository is built against.
+"""
+
+
 @issue("cuda-graphs", "Capture the denoise loop as a CUDA graph", ["cuda", "launch-overhead"])
 def _(f):
     r = f["resolutions"]

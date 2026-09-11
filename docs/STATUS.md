@@ -6,9 +6,23 @@ first one to read and it is deliberately blunt.
 
 ## The one-sentence version
 
-**The instrument is complete and tested. The runtime runs end to end on the CPU and reproduces
-itself exactly. Nothing has been measured on a GPU, because no Blackwell device and no CUDA
-toolkit were available when this was built.**
+**The instrument is complete and tested. The runtime runs end to end on CPU and on an RTX 5090,
+reproduces itself byte for byte on both, and agrees with the reference implementation stage by
+stage. The device peaks are measured. The per-cell achieved fractions and noise floors are the
+remaining gap.**
+
+### Measured on the pinned RTX 5090
+
+| | |
+|:--|--:|
+| sustained bandwidth | **1506.7 GB/s** (84% of the 1792 spec) |
+| bf16 GEMM through cuBLAS | **236.9 TFLOPS** |
+| determinism, 5 replays of the bf16 CUDA pipeline | **byte-identical** |
+| CUDA scheduler vs the reference | 1.7e-07 |
+| CUDA T5 encoder vs the reference | 7.6e-07 |
+| CUDA VAE decoder vs the CPU oracle | 5.8e-06 |
+| CUDA DiT vs the reference | 5.2e-05 |
+| reference latents, 4 prompts at 1024px / 20 steps | **committed** |
 
 ## What has been built and checked
 

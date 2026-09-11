@@ -9,7 +9,7 @@
    "test_scheduler",
    "test_models"
   ],
-  "python_pass": true,
+  "python_pass": false,
   "python_tests": 121
  },
  "files": [
@@ -48,6 +48,11 @@
   "eval/calibrate.py",
   "eval/cells/BG-1/generation.json",
   "eval/cells/BG-1/prompts.json",
+  "eval/cells/BG-1/reference-latents/dense-detail.npy",
+  "eval/cells/BG-1/reference-latents/flat-graphic.npy",
+  "eval/cells/BG-1/reference-latents/long-caption.npy",
+  "eval/cells/BG-1/reference-latents/manifest.json",
+  "eval/cells/BG-1/reference-latents/short-caption.npy",
   "eval/cells/BG-1/reference.json",
   "eval/cells/BG-1/token-ids-dense-detail.txt",
   "eval/cells/BG-1/token-ids-flat-graphic.txt",
@@ -94,6 +99,7 @@
   "issues/vae-decode.md",
   "issues/video-temporal.md",
   "issues/weight-formats.md",
+  "issues/weight-upload.md",
   "repo-manifest.json",
   "schemas/receipt.schema.json",
   "schemas/roofline.schema.json",

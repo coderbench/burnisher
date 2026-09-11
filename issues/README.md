@@ -16,6 +16,7 @@ because nothing in this repository has been measured on the pinned hardware yet.
 | [`fused-adaln`](fused-adaln.md) | Fuse AdaLN modulation into its neighbours | kernel, fusion, dit |
 | [`weight-formats`](weight-formats.md) | NVFP4 and MXFP4 on silicon with no reference tuning | quantization, cuda, cartography |
 | [`step-caching`](step-caching.md) | Step and feature caching: algorithmic, and it must pass the gate | algorithm, scheduler |
+| [`weight-upload`](weight-upload.md) | A single generation is dominated by uploading the weights | cuda, measured, startup |
 | [`cuda-graphs`](cuda-graphs.md) | Capture the denoise loop as a CUDA graph | cuda, launch-overhead |
 | [`offload`](offload.md) | Offload and streaming: video models do not fit | memory, streaming, frontier |
 | [`shape-specialization`](shape-specialization.md) | Per-resolution shape specialization and the held-out guard | kernel, anti-gaming |
