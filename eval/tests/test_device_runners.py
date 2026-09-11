@@ -89,6 +89,7 @@ class DeviceRunnerCase(unittest.TestCase):
                "--gate-result", str(gate),
                "--gate-base-result", str(base_gate),
                "--cells-root", str(self.cells_root),
+               "--device", "cpu",
                "--output", str(self.dir / "raw.json"), *extra]
         return subprocess.run(cmd, capture_output=True, text=True,
                               env=env or fake_env(), cwd=str(ROOT))
@@ -204,6 +205,7 @@ class TestCalibrate(DeviceRunnerCase):
                "--binary", str(FAKES / "burnisher"),
                "--generation", self.gen_name, "--repeats", "5",
                "--cells-root", str(self.cells_root),
+               "--device", "cpu",
                "--output", str(self.dir / "ref.json"), *extra]
         return subprocess.run(cmd, capture_output=True, text=True,
                               env=env or fake_env(), cwd=str(ROOT))

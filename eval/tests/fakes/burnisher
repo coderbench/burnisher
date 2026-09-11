@@ -46,11 +46,19 @@ if args[0] == "info":
     sys.exit(0)
 
 if args[0] == "generate":
-    # A deterministic latent keyed by (prompt, seed, impl), so replays of one build are
-    # byte-identical and two builds differ by a controllable amount.
+    # A deterministic latent keyed by (token ids, noise, seed, impl), so replays of one build are
+    # byte-identical and two builds differ by a controllable amount. Keyed by the IDS and the
+    # NOISE rather than a prompt string, because that is what the real runtime takes -- a fake
+    # that accepted a different interface would let the real one drift away from its harness.
     #   BURNISH_FAKE_DRIFT   how far the candidate impl sits from `stock`
     #   BURNISH_FAKE_FLAKY   perturb every call, so the determinism check fails
-    prompt = opt.get("prompt", "")
+    ids_path = opt.get("token-ids", "")
+    noise_path = opt.get("noise", "")
+    prompt = ""
+    for path in (ids_path, noise_path):
+        if path and os.path.exists(path):
+            with open(path, "rb") as fh:
+                prompt += hashlib.sha256(fh.read()).hexdigest()
     seed = int(opt.get("seed", 0))
     impl = opt.get("impl", "stock")
     h = int(hashlib.sha256(f"{prompt}:{seed}".encode()).hexdigest()[:8], 16)
@@ -119,6 +127,10 @@ print("BURNISH_JSON: " + json.dumps({
     "effective": {"stage": stage, "dtype": opt.get("dtype", "bf16"), "impl": reported,
                   "resolution": opt.get("resolution", "1024"),
                   "batch": opt.get("batch", "2"),
-                  "caption_len": opt.get("caption-len", "300")},
+                  "caption_len": opt.get("caption-len", "300"),
+                  # Echoed because the harness CHECKS it: an arm that ran somewhere other than
+                  # where it was asked to is the same class of fault as one that ran a different
+                  # kernel, and neither is visible from outside the process.
+                  "device": opt.get("device", "cpu")},
     "output_stats": stats,
 }))

@@ -9,8 +9,8 @@
    "test_scheduler",
    "test_models"
   ],
-  "python_pass": false,
-  "python_tests": 121
+  "python_pass": true,
+  "python_tests": 122
  },
  "files": [
   ".github/PULL_REQUEST_TEMPLATE.md",

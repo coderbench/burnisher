@@ -144,8 +144,15 @@ def main():
 
     report = {
         "generation": generation.name, "impl": args.impl,
-        "prompt_set": prompts["name"], "prompt_set_digest": hashlib.sha256(
-            prompts_path.read_bytes()).hexdigest(), "seed": seed,
+        "prompt_set": prompts["name"],
+        "prompt_set_digest": hashlib.sha256(prompts_path.read_bytes()).hexdigest(),
+        "token_ids_digest": hashlib.sha256(ids_doc_path.read_bytes()).hexdigest(),
+        "tokenizer_sha256": ids_doc.get("tokenizer_sha256"),
+        # The starting noise is an INPUT, and its digest belongs in the report: the reference
+        # latents' own manifest records the noise they were grown from, and a gate run against a
+        # different one is comparing two different experiments while looking identical.
+        "noise_sha256": hashlib.sha256(Path(args.noise).read_bytes()).hexdigest(),
+        "device": args.device, "dtype": args.dtype, "seed": seed,
         "base_commit": _git("rev-parse", "HEAD~1"),
         "candidate_commit": _git("rev-parse", "HEAD"),
         "instrument_from": None,

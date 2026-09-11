@@ -38,6 +38,18 @@ class TestGate(unittest.TestCase):
         self.gen_dir = gpath.parent
         self.prompts = json.loads((self.gen_dir / "prompts.json").read_text())
         self.tolerance = json.loads(gpath.read_text())["tolerance"]
+        # The frozen prompt set's token ids, and the pinned starting noise. Both are INPUTS to a
+        # gate run -- the gate compares latents grown from them, so a difference in either is a
+        # difference in the comparison rather than in the runtime.
+        ids_src = ROOT / "eval" / "cells" / "BG-1"
+        for p in self.prompts["prompts"]:
+            src = ids_src / f"token-ids-{p['id']}.txt"
+            if src.exists():
+                (self.gen_dir / f"token-ids-{p['id']}.txt").write_text(src.read_text())
+        (self.gen_dir / "token-ids.json").write_text(
+            (ids_src / "token-ids.json").read_text())
+        self.noise = self.dir / "noise.npy"
+        np.save(self.noise, np.zeros((1, 4, 8, 8), dtype=np.float32))
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -48,6 +60,9 @@ class TestGate(unittest.TestCase):
                "--generation", self.gen_name,
                "--work-dir", str(self.dir / "work"),
                "--cells-root", str(self.cells_root),
+               "--weights", str(self.dir / "fake-weights"),
+               "--noise", str(self.noise),
+               "--device", "cpu",
                "--output", str(self.dir / out), *extra]
         return subprocess.run(cmd, capture_output=True, text=True,
                               env=env or fake_env(), cwd=str(ROOT))
@@ -59,7 +74,9 @@ class TestGate(unittest.TestCase):
         ref.mkdir(exist_ok=True)
         for p in self.prompts["prompts"]:
             subprocess.run([str(FAKES / "burnisher"), "generate",
-                            "--prompt", p["text"], "--seed", str(self.prompts["seed"]),
+                            "--token-ids", str(self.gen_dir / f"token-ids-{p['id']}.txt"),
+                            "--noise", str(self.noise),
+                            "--seed", str(self.prompts["seed"]),
                             "--impl", impl, "--dump-latents", str(ref / f"{p['id']}.npy")],
                            check=True, capture_output=True, env=env or fake_env())
         return ref
@@ -175,6 +192,14 @@ class TestGate(unittest.TestCase):
         r = self.gate("--repeats", "2", "--reference", str(ref))
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("reference directory has no", r.stdout + r.stderr)
+
+    def test_the_noise_digest_is_recorded(self):
+        """The starting noise is an input, and a gate report that did not say WHICH noise could
+        not be checked against the reference latents' own manifest."""
+        self.gate("--determinism-only", "--repeats", "2")
+        doc = json.loads((self.dir / "gate.json").read_text())
+        self.assertEqual(len(doc["noise_sha256"]), 64)
+        self.assertEqual(doc["dtype"], "bf16")
 
     def test_the_prompt_set_digest_is_recorded(self):
         """The prompt set is part of the oracle; changing it would make every comparison against
