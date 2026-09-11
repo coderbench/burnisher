@@ -1,0 +1,34 @@
+{
+ "_how_to_reproduce": "scripts/make_reference_latents.py --dtype float32 --write, then again with --dtype bfloat16 --write, then compare the two directories.",
+ "_what": "The measured cost of bf16 over a 20-step classifier-free-guided generation at 1024px, from the REFERENCE IMPLEMENTATION COMPARED AGAINST ITSELF at two dtypes. There is no implementation difference in this number at all -- it is diffusers against diffusers, same weights, same pinned noise, same token ids.",
+ "_why_it_matters": "It sets a floor under any tolerance that compares a bf16 run against an fp32 oracle, and the floor is far above where this repository first set it. BG-1 originally asked for 2% relative L2; the reference cannot meet that against itself. The consequence is a methodological one rather than a threshold one: the GATE must compare at the dtype the cell is scored in, or it measures the dtype instead of the implementation.",
+ "generation": "BG-1",
+ "guidance_scale": 4.5,
+ "per_prompt": {
+  "dense-detail": {
+   "max_abs": 3.867889881134033,
+   "relative_l2": 0.34686519490096845
+  },
+  "flat-graphic": {
+   "max_abs": 2.92410746216774,
+   "relative_l2": 0.07741547721783969
+  },
+  "long-caption": {
+   "max_abs": 2.3078784942626953,
+   "relative_l2": 0.19045852881561287
+  },
+  "short-caption": {
+   "max_abs": 3.323617458343506,
+   "relative_l2": 0.37128603039127406
+  }
+ },
+ "reference": {
+  "diffusers": "0.35.1",
+  "torch": "2.12.0+cu130",
+  "transformers": "4.57.1"
+ },
+ "resolution": 1024,
+ "steps": 20,
+ "worst_max_abs": 3.867889881134033,
+ "worst_relative_l2": 0.37128603039127406
+}
