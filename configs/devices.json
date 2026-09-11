@@ -1,5 +1,18 @@
 {
  "_probe": {
+  "_box_to_box_spread": {
+   "_what": "Two RTX 5090s, same driver, same probe, same build. The probe repeats to 0.2% WITHIN a box and the two boxes differ by 3% on the achievable bf16 GEMM rate.",
+   "_what_it_does_not_mean": "That the probe is unreliable. It repeats to 0.2%. The spread is between the PARTS, not between the measurements.",
+   "_why_it_matters": "A ceiling is flops/peak, so a 3% difference in the peak is a 3% difference in every achieved fraction computed against it. The ceiling is therefore pinned to ONE probe, and a calibration taken on a box whose peak differs shifts every achieved fraction systematically. The drift guard in eval/burnscore/compute.py catches the consequence -- it refuses a base arm that has moved more than three noise floors from its calibration -- but the cause is worth naming: same part number is not the same peak.",
+   "box_a_bandwidth_gbs": 1506.7,
+   "box_a_bf16_tflops": 236.9,
+   "box_b_bandwidth_gbs": 1509.8,
+   "box_b_bf16_tflops": 243.8,
+   "within_box_spread_pct": {
+    "bandwidth": 0.17,
+    "bf16_gemm": 0.24
+   }
+  },
   "_what_changed": "Every ceiling in eval/cells/*/generation.json is computed from these fields. Regenerate with `eval/make_generation.py --write` and `eval/roofline_table.py --markdown docs/ROOFLINE.md` after applying a probe, or the published table and the scorer disagree.",
   "device": "rtx5090",
   "probed": "NVIDIA GeForce RTX 5090"
@@ -62,27 +75,17 @@
  "rtx5090": {
   "arch": "GB202",
   "bf16_tensor_tflops": {
-   "_direction": "assumed peak was LOW -> room had been understated (conservative)",
    "_note": "What a well-tuned square bf16 GEMM with fp32 accumulate achieves through cuBLAS -- not what the ALUs could issue. A roofline is only useful if a contributor could in principle reach it.",
    "probe_note": "bandwidth is a grid-stride read+write over a working set far larger than L2; the GEMM rate is a square bf16 GEMM with fp32 accumulate through cuBLAS -- what a well-tuned kernel achieves, not what the ALUs could issue. A roofline is only useful if a contributor could in principle reach it.",
    "probed_on": "NVIDIA GeForce RTX 5090",
    "source": "measured",
-   "value": 236.947,
-   "vendor_was": {
-    "source": "vendor",
-    "value": 209.5
-   }
+   "value": 243.931
   },
   "clock_boost_ghz": {
-   "_direction": "(not a ceiling term)",
    "probe_note": "bandwidth is a grid-stride read+write over a working set far larger than L2; the GEMM rate is a square bf16 GEMM with fp32 accumulate through cuBLAS -- what a well-tuned kernel achieves, not what the ALUs could issue. A roofline is only useful if a contributor could in principle reach it.",
    "probed_on": "NVIDIA GeForce RTX 5090",
    "source": "measured",
-   "value": 2.482,
-   "vendor_was": {
-    "source": "vendor",
-    "value": 2.407
-   }
+   "value": 2.452
   },
   "cuda_arch": 120,
   "fp32_tflops": {
@@ -102,27 +105,17 @@
    "value": 419.0
   },
   "l2_bytes": {
-   "_direction": "",
    "probe_note": "bandwidth is a grid-stride read+write over a working set far larger than L2; the GEMM rate is a square bf16 GEMM with fp32 accumulate through cuBLAS -- what a well-tuned kernel achieves, not what the ALUs could issue. A roofline is only useful if a contributor could in principle reach it.",
    "probed_on": "NVIDIA GeForce RTX 5090",
    "source": "measured",
-   "value": 100663296,
-   "vendor_was": {
-    "source": "vendor",
-    "value": 100663296
-   }
+   "value": 100663296
   },
   "memory_bandwidth_gbs": {
-   "_direction": "assumed peak was HIGH -> room had been OVERSTATED (the dangerous direction)",
    "_note": "Sustained read+write over a working set far larger than L2.",
    "probe_note": "bandwidth is a grid-stride read+write over a working set far larger than L2; the GEMM rate is a square bf16 GEMM with fp32 accumulate through cuBLAS -- what a well-tuned kernel achieves, not what the ALUs could issue. A roofline is only useful if a contributor could in principle reach it.",
    "probed_on": "NVIDIA GeForce RTX 5090",
    "source": "measured",
-   "value": 1506.7,
-   "vendor_was": {
-    "source": "vendor",
-    "value": 1792.0
-   }
+   "value": 1510.017
   },
   "name": "NVIDIA GeForce RTX 5090",
   "persisting_l2_bytes": {
@@ -134,27 +127,17 @@
   },
   "sm_arch": "sm_120",
   "sm_count": {
-   "_direction": "",
    "probe_note": "bandwidth is a grid-stride read+write over a working set far larger than L2; the GEMM rate is a square bf16 GEMM with fp32 accumulate through cuBLAS -- what a well-tuned kernel achieves, not what the ALUs could issue. A roofline is only useful if a contributor could in principle reach it.",
    "probed_on": "NVIDIA GeForce RTX 5090",
    "source": "measured",
-   "value": 170,
-   "vendor_was": {
-    "source": "vendor",
-    "value": 170
-   }
+   "value": 170
   },
   "vram_bytes": {
-   "_direction": "(not a ceiling term)",
    "_note": "Usable device memory as the driver reports it, which is less than the marketed capacity.",
    "probe_note": "bandwidth is a grid-stride read+write over a working set far larger than L2; the GEMM rate is a square bf16 GEMM with fp32 accumulate through cuBLAS -- what a well-tuned kernel achieves, not what the ALUs could issue. A roofline is only useful if a contributor could in principle reach it.",
    "probed_on": "NVIDIA GeForce RTX 5090",
    "source": "measured",
-   "value": 33668268032,
-   "vendor_was": {
-    "source": "vendor",
-    "value": 34359738368
-   }
+   "value": 33670758400
   }
  },
  "rtx_pro_6000_blackwell": {
