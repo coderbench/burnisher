@@ -15,4 +15,4 @@ receipts-local/
 # reference implementation at the pinned revisions -- and a benchmark whose oracle lives on one
 # box is not reproducible by anyone. The negation must come AFTER `*.npy`; gitignore is ordered,
 # and a negation placed before the pattern it negates does nothing.
-!eval/cells/*/reference-latents/*.npy
+!eval/cells/*/reference-latents*/*.npy
