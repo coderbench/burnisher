@@ -51,6 +51,7 @@ usage: burnisher <command> [options]
   probe                     measure this device's sustained bandwidth and FLOPS
   weights-manifest          every tensor this runtime requires of a checkpoint, as JSON
   check-weights             load a real checkpoint and verify every required tensor
+  noise                     the pinned initial latent for a seed, as .npy
 
 common options:
   --impl NAME               registered implementation to use (default: stock)
@@ -461,6 +462,54 @@ int cmd_check_weights(const Args& a) {
     return 0;
 }
 
+// The initial latent for a seed, written as .npy.
+//
+// It exists so the starting noise is an INPUT to both this runtime and the reference rather than
+// something each produces for itself. Two RNG implementations agreeing bit for bit is not a
+// thing worth depending on, and if they disagree the latents diverge from step zero and the
+// correctness gate measures the random number generator.
+int cmd_noise(const Args& a) {
+    PipelineConfig cfg;
+    cfg.resolution = static_cast<int>(a.num("resolution", 1024));
+    cfg.seed = static_cast<uint64_t>(a.num("seed", 20260911));
+    cfg.compute = DType::F32;
+    VaeConfig vae;
+    T5Config t5; DiTConfig dit;
+    SchedulerConfig sched;
+    auto none = std::make_shared<SyntheticWeights>(DType::F32);
+    Pipeline p(cfg, none, none, none, t5, dit, vae, sched);
+    Tensor z = p.initial_latent();
+
+    const std::string out = a.get("out");
+    if (out.empty()) {
+        std::cerr << "!! --out FILE is required\n";
+        return 2;
+    }
+    std::ofstream f(out, std::ios::binary);
+    if (!f) throw std::runtime_error("cannot write " + out);
+    std::ostringstream hdr;
+    hdr << "{'descr': '<f4', 'fortran_order': False, 'shape': (";
+    for (size_t i = 0; i < z.rank(); ++i) hdr << z.dim(i) << ", ";
+    hdr << "), }";
+    std::string h = hdr.str();
+    while ((10 + h.size() + 1) % 64) h += ' ';
+    h += '\n';
+    const unsigned char magic[] = {0x93, 'N', 'U', 'M', 'P', 'Y', 1, 0};
+    f.write(reinterpret_cast<const char*>(magic), 8);
+    const uint16_t len = static_cast<uint16_t>(h.size());
+    f.write(reinterpret_cast<const char*>(&len), 2);
+    f.write(h.data(), static_cast<std::streamsize>(h.size()));
+    for (int64_t i = 0; i < z.numel(); ++i) {
+        const float v = z.get(i);
+        f.write(reinterpret_cast<const char*>(&v), sizeof(v));
+    }
+    const OutputStats st = OutputStats::of(z);
+    std::cout << "BURNISH_JSON: {\"effective\":{\"seed\":" << cfg.seed
+              << ",\"resolution\":" << cfg.resolution << "},\"output_stats\":"
+              << stats_json(st) << "}\n";
+    return 0;
+}
+
 int cmd_probe(const Args&) {
 #ifndef BURNISHER_CUDA
     std::cerr << "!! burnisher probe needs a CUDA build. This binary was built without it, so\n"
@@ -617,6 +666,7 @@ int main(int argc, char** argv) {
         if (a.command == "probe") return cmd_probe(a);
         if (a.command == "weights-manifest") return cmd_weights_manifest(a);
         if (a.command == "check-weights") return cmd_check_weights(a);
+        if (a.command == "noise") return cmd_noise(a);
         if (a.command == "generate") return cmd_generate(a);
     } catch (const std::exception& e) {
         std::cerr << "!! " << e.what() << "\n";

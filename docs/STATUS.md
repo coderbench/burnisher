@@ -40,17 +40,23 @@ toolkit were available when this was built.**
 
 ### On "run against real weights"
 
-The DiT and the VAE decoder have both been loaded from the pinned checkpoint and run.
+All three stages have been loaded from the pinned checkpoint and run. All **962** required
+tensors resolve through the real loader — `burnisher check-weights` maps 21.8 GB and finds
+0 missing and 0 wrong shape.
 
-| stage | tensors resolved | bytes mapped | output |
-|:--|--:|--:|:--|
-| `dit-step` at 64px, batch 2 | 603 | 2443 MB | mean +0.005, std 0.616, \|max\| 4.25 |
-| `vae-decode` at 32px | 140 | 334 MB | mean +0.164, std 0.111, \|max\| 0.465 |
+| stage | tensors | mapped | wall (CPU reference) | output |
+|:--|--:|--:|--:|:--|
+| `t5-encode`, 16 tokens | 219 | 19049 MB | 443 s | mean +0.0002, std 0.167, \|max\| 7.64 |
+| `dit-step` at 64px, batch 2 | 603 | 2443 MB | 119 s | mean +0.005, std 0.616, \|max\| 4.25 |
+| `vae-decode` at 32px | 140 | 334 MB | 33 s | mean +0.164, std 0.111, \|max\| 0.465 |
 
-Both are what a healthy result looks like. A DiT's epsilon prediction should sit near zero at
-roughly unit scale; a VAE decoder's output should be a bounded image-like tensor. A wrong weight
-mapping generally does not look like either — it gives NaNs, or magnitudes in the thousands, or a
-constant.
+Each is what a healthy result looks like: a T5 hidden state is small-magnitude with occasional
+outliers, a DiT's epsilon prediction sits near zero at roughly unit scale, a VAE decoder's output
+is a bounded image-like tensor. A wrong weight mapping generally does not look like any of them —
+it gives NaNs, or magnitudes in the thousands, or a constant.
+
+(Those wall times are the deliberately-slow CPU reference doing scalar arithmetic. They are not
+benchmarks of anything and are recorded only to say the runs happened.)
 
 That exercises the mmap, the header parse, the offset arithmetic, the dtype mapping, the shard
 search and the two model graphs against real bytes. It does **not** verify the numerics against
