@@ -28,11 +28,11 @@ ceiling that moved when a contributor fused would not be a ceiling.
 
 | cell | runs | ceiling | bound | ai | fuse | achieved | left | floor | res |
 |---|--:|--:|:--|--:|--:|--:|--:|--:|:--:|
-| `t5-encode/1024/bf16` | 1 | 26.87 ms | compute | 607 | 1.03 | -- | -- | -- | -- |
-| `dit-step/1024/bf16` | 20 | 63.40 ms | compute | 10864 | 1.12 | -- | -- | -- | -- |
-| `vae-decode/1024/bf16` | 1 | 50.06 ms | compute | 99505 | 1.23 | -- | -- | -- | -- |
-| `dit-step/1024/fp8` | 20 | 31.70 ms | compute | 21715 | 1.23 | -- | -- | -- | -- |
-| `dit-step/1024/nvfp4` | 20 | 15.85 ms | compute | 38565 | 1.49 | -- | -- | -- | -- |
+| `t5-encode/1024/bf16` | 1 | 23.76 ms | compute | 607 | 1.04 | -- | -- | -- | -- |
+| `dit-step/1024/bf16` | 20 | 56.05 ms | compute | 10864 | 1.16 | -- | -- | -- | -- |
+| `vae-decode/1024/bf16` | 1 | 44.26 ms | compute | 99505 | 1.31 | -- | -- | -- | -- |
+| `dit-step/1024/fp8` | 20 | 31.70 ms | compute | 21715 | 1.28 | -- | -- | -- | -- |
+| `dit-step/1024/nvfp4` | 20 | 15.85 ms | compute | 38565 | 1.58 | -- | -- | -- | -- |
 
 ## What is not known yet
 
@@ -47,17 +47,19 @@ here to one at 8%.
 burnish calibrate --generation BG-1 --repeats 9 --write
 ```
 
-## The peak these ceilings stand on
+## The peaks these ceilings stand on
 
-`peak_basis: vendor`. The arithmetic peaks in `configs/devices.json` are taken
-from published specifications and carry a `confidence` field. No kernel reaches a vendor peak.
-The consequence is directional and worth stating plainly: **every achieved fraction computed
-against a vendor peak is a lower bound on how done the cell really is**, so the real remaining
-room is *smaller* than this table implies, not larger.
+3 of 5 cells stand on peaks MEASURED on the pinned part by `burnisher probe`.
 
-`burnish probe --device` measures sustained bandwidth and achievable FLOPS on the part and
-rewrites the basis to `measured`. Until it has run, treat this table as an ordering of cells
-rather than as a budget.
+These do not:
+
+- `dit-step/1024/fp8`
+- `dit-step/1024/nvfp4`
+
+For those, the room implied by the ceiling is wrong in an **unknown direction**. An overstated
+peak overstates the room; an understated one understates it. On this hardware the probe found
+one of each — bandwidth was assumed 19% too high, and the bf16 GEMM peak 12% too low — so
+there is no safe default to assume. Measure it.
 
 ## Notes per cell
 

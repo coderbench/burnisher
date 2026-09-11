@@ -28,15 +28,16 @@ toolkit were available when this was built.**
 | End-to-end pipeline, byte-identical replays | complete | `burnisher selftest` |
 | Correctness gate (determinism + reference) | complete, exercised against a fake device | `python3 -m unittest discover -s eval -t eval` |
 | Paired bench and calibration runners | complete, exercised against a fake device | `python3 -m unittest discover -s eval -t eval` |
-| CUDA device probe | **written, never compiled** | CI job `cuda-compile` |
-| CUDA op backend | **does not exist** | `issues/cuda-op-backend.md` |
+| CUDA device probe | compiled for sm_120 and run on the pinned part | `burnisher probe` |
+| CUDA op backend | written and compiled; **not yet verified against the CPU oracle** | `issues/cuda-op-backend.md` |
 | Checkpoint tensor names and shapes | verified against the pinned revisions, 962/962 | `scripts/verify_checkpoint_layout.py` |
 | Checkpoint load path (mmap, shard search, dtypes) | complete, run against real weights | `burnisher check-weights --weights DIR` |
 | `burnisher generate` on a real checkpoint | wired; needs token ids and the 22 GB download | `issues/checkpoint-load.md` |
 | Reference latents for the gate | **do not exist** | `issues/checkpoint-load.md` |
 | Every cell's achieved fraction | **null** | `burnish roofline` |
 | Every cell's noise floor | **null** | `burnish roofline` |
-| Device peaks behind every ceiling | **vendor, not probed** | `configs/devices.json` |
+| Device peaks behind every implemented cell | measured on the pinned 5090 | `configs/devices.json` |
+| Device peaks behind the fp8/NVFP4 cells | **vendor, not probed** | `configs/devices.json` |
 
 ### On "run against real weights"
 
@@ -188,12 +189,24 @@ cell's own measured run-to-run spread. Those spreads are null. Until `burnish ca
 the scorer refuses to produce a receipt at all — it raises rather than substituting a constant,
 because a guessed floor is precisely the mistake this scoring model exists to replace.
 
-**3. Whether the peaks the ceilings stand on are reachable.** `configs/devices.json` carries
-vendor figures with a `confidence` field. No kernel reaches a vendor peak. The direction of the
-error matters: **every achieved fraction computed against a vendor peak is a LOWER bound on how
-done a cell really is, so the real remaining room is smaller than the table implies, not larger.**
-`burnish probe` measures sustained bandwidth and an achievable bf16 GEMM rate on the part and
-rewrites the basis to `measured`.
+**3. ~~Whether the peaks the ceilings stand on are reachable.~~ MEASURED.** `burnish probe` has
+run on the pinned RTX 5090 and the three implemented cells now read `peak_basis: measured`. The
+two declared fp8/NVFP4 cells still read `vendor`, because those peaks were not measured.
+
+**A correction, from the measurement.** This repository previously stated that a vendor peak is
+always optimistic, so every achieved fraction computed against one is a lower bound and the real
+room is smaller. That is a guess about direction, and the probe contradicts half of it. The error
+runs whichever way the assumption was wrong, and it differs *per term*:
+
+| term | assumed | measured on the part | effect on the published room |
+|:--|--:|--:|:--|
+| bf16 GEMM | 209.5 TFLOPS | **236.9** | assumed peak was LOW, so room was **understated** — conservative |
+| bandwidth | 1792 GB/s | **1506.7** | assumed peak was HIGH, so room was **overstated** — the dangerous direction |
+
+Every BG-1 cell is compute-bound, so the first term governed and the published table was
+conservative. That was luck, not design. The general statement is the honest one: **an unmeasured
+peak makes the room wrong in an unknown direction, and only a probe settles it.**
+
 
 **4. Whether the CUDA code compiles.** It has never been near a compiler. `src/cuda/device.cu` is
 the probe and it is the only CUDA in the tree; there is no CUDA implementation of any op, so the

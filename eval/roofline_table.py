@@ -123,13 +123,12 @@ def render_text(generation, rows, device_name):
         w.append("")
     if rows and rows[0]["peak_basis"] != "measured":
         w.append(f"  PEAK BASIS: {rows[0]['peak_basis']}. These ceilings stand on a published "
-                 f"device peak")
-        w.append(f"  rather than one measured on the part. No kernel reaches a vendor peak, so "
-                 f"every")
-        w.append(f"  achieved fraction computed against these is a LOWER bound on how done a "
-                 f"cell is --")
-        w.append(f"  the real number is higher and the real room is smaller. "
-                 f"`burnish probe --device` fixes it.")
+                 f"device peak rather")
+        w.append(f"  than one measured on the part, so the room they imply is wrong in an "
+                 f"UNKNOWN direction:")
+        w.append(f"  an overstated peak overstates the room, an understated one understates it, "
+                 f"and on this")
+        w.append(f"  hardware the probe found one of each. `burnisher probe` settles it.")
         w.append("")
     return "\n".join(w)
 
@@ -188,22 +187,32 @@ def render_markdown(generation, rows, device_name, raw):
               "here to one at 8%.", "",
               "```", f"burnish calibrate --generation {generation.name} --repeats 9 --write",
               "```", ""]
-    if rows and rows[0]["peak_basis"] != "measured":
-        w += ["## The peak these ceilings stand on", "",
-              f"`peak_basis: {rows[0]['peak_basis']}`. The arithmetic peaks in "
-              f"`configs/devices.json` are taken",
-              "from published specifications and carry a `confidence` field. No kernel reaches a "
-              "vendor peak.",
-              "The consequence is directional and worth stating plainly: **every achieved "
-              "fraction computed",
-              "against a vendor peak is a lower bound on how done the cell really is**, so the "
-              "real remaining",
-              "room is *smaller* than this table implies, not larger.", "",
-              "`burnish probe --device` measures sustained bandwidth and achievable FLOPS on the "
-              "part and",
-              "rewrites the basis to `measured`. Until it has run, treat this table as an "
-              "ordering of cells",
-              "rather than as a budget.", ""]
+    unmeasured_peak = [r["cell"] for r in rows if r["peak_basis"] != "measured"]
+    if unmeasured_peak:
+        w += ["## The peaks these ceilings stand on", "",
+              f"{len(rows) - len(unmeasured_peak)} of {len(rows)} cells stand on peaks MEASURED "
+              f"on the pinned part by `burnisher probe`.",
+              "", "These do not:", ""]
+        w += [f"- `{c}`" for c in unmeasured_peak]
+        w += ["",
+              "For those, the room implied by the ceiling is wrong in an **unknown direction**. "
+              "An overstated",
+              "peak overstates the room; an understated one understates it. On this hardware the "
+              "probe found",
+              "one of each — bandwidth was assumed 19% too high, and the bf16 GEMM peak 12% too "
+              "low — so",
+              "there is no safe default to assume. Measure it.", ""]
+    else:
+        w += ["## The peaks these ceilings stand on", "",
+              "All measured on the pinned part by `burnisher probe`: sustained bandwidth from a "
+              "grid-stride",
+              "read+write over a working set far larger than L2, and the GEMM rate from a large "
+              "square bf16",
+              "matmul with fp32 accumulate through cuBLAS — what a well-tuned kernel achieves "
+              "rather than",
+              "what the ALUs could issue, because a roofline is only useful if a contributor "
+              "could in",
+              "principle reach it.", ""]
     w += ["## Notes per cell", ""]
     for r in rows:
         if r["notes"]:

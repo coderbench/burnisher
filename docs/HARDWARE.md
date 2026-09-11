@@ -75,10 +75,14 @@ burnish score raw.json --ledger <outside the worktree>
 
 ## Why the probe matters more than it looks
 
-Until `burnish probe` runs, every ceiling in the repository stands on a **vendor** peak, and no
-kernel reaches a vendor peak. The error is directional: every achieved fraction computed against
-one is a *lower* bound on how done a cell really is, so the real remaining room is **smaller**
-than the published table implies.
+Until `burnish probe` runs, every ceiling stands on a peak nobody checked — and the error runs
+whichever way the guess was wrong. On this part the measurement went both ways at once:
+
+| term | assumed | measured | published room was |
+|:--|--:|--:|:--|
+| bf16 GEMM | 209.5 TFLOPS | 236.9 | understated (conservative) |
+| bandwidth | 1792 GB/s | 1506.7 | overstated (the dangerous direction) |
 
 Telling somebody there is 55% left when there is 8% is how a subnet loses a contributor. The probe
-is twenty lines of measurement that turns the whole table from an ordering into a budget.
+is twenty lines of measurement that turns the whole table from an ordering into a budget, and it
+is the only thing that settles the direction.

@@ -1,48 +1,208 @@
 {
+ "_probe": {
+  "_what_changed": "Every ceiling in eval/cells/*/generation.json is computed from these fields. Regenerate with `eval/make_generation.py --write` and `eval/roofline_table.py --markdown docs/ROOFLINE.md` after applying a probe, or the published table and the scorer disagree.",
+  "device": "rtx5090",
+  "probed": "NVIDIA GeForce RTX 5090"
+ },
  "_what_this_is": "Arithmetic peaks for the target parts. EVERY number carries a `source`, and the roofline tool prints which source it used, because a ceiling computed from a marketing figure is a marketing figure. `vendor` numbers are derived from published specifications and are upper bounds nobody reaches; `derived` numbers are computed from the SM count and clock in this file and the arithmetic is stated; `measured` numbers come from `burnish probe --device` on the part itself and are what a roofline SHOULD be built on. Where a measured value exists, tools/burnish and eval/burnscore prefer it and say so.",
  "_why_measured_is_preferred": "A roofline against an unreachable peak understates every achieved fraction by the same factor, which is harmless for RANKING cells and actively misleading for the question a contributor asks -- 'how much room is left here'. A cell at 45% of a vendor peak may be at 92% of what the part can actually sustain, and telling someone there is 55% left when there is 8% is the failure mode this repository exists to avoid. Until a probe has run on the pinned box, published achieved fractions are marked `peak_basis: vendor` and MUST be read as lower bounds on how done a cell is.",
-
- "rtx5090": {
-  "name": "NVIDIA GeForce RTX 5090",
-  "arch": "GB202", "sm_arch": "sm_120", "cuda_arch": 120,
-  "sm_count": {"value": 170, "source": "vendor"},
-  "clock_boost_ghz": {"value": 2.407, "source": "vendor"},
-  "vram_bytes": {"value": 34359738368, "source": "vendor", "_note": "32 GiB GDDR7."},
-  "memory_bandwidth_gbs": {"value": 1792.0, "source": "vendor", "_note": "512-bit GDDR7 at 28 Gbps. No kernel reaches this; a STREAM-style copy on this class of part lands near 80-85%, which is why `burnish probe` measures it and the probe result wins."},
-  "l2_bytes": {"value": 100663296, "source": "vendor", "_note": "96 MiB."},
-  "persisting_l2_bytes": {"value": 62914560, "source": "measured", "_note": "60 MiB, read off cudaDeviceProp::accessPolicyMaxWindowSize on this part by the RecurLocal engagement's tools/info.cpp. Carried here because it bounds any residency trick a contributor tries in the denoise loop."},
-  "fp32_tflops": {"value": 104.8, "source": "derived", "_arithmetic": "170 SM x 128 fp32 lanes x 2 flop/FMA x 2.407 GHz = 104.8e12"},
-  "bf16_tensor_tflops": {"value": 209.5, "source": "vendor", "_note": "Dense, FP32 accumulate -- the accumulate mode a diffusion GEMM actually uses. NVIDIA's headline '3352 AI TOPS' is FP4 WITH structured sparsity; dividing it down gives 838 dense FP4, 419 dense FP8, 209.5 dense BF16-with-fp32-acc. State the mode or the number means nothing: the same silicon quotes 419 for BF16 with FP16 accumulate, and a roofline built on the wrong one is off by 2x.", "confidence": "medium"},
-  "fp8_tensor_tflops": {"value": 419.0, "source": "vendor", "confidence": "medium"},
-  "fp4_tensor_tflops": {"value": 838.0, "source": "vendor", "confidence": "medium", "_note": "NVFP4/MXFP4 dense. No reference tuning for these formats exists on this silicon, which is why they are in the backlog rather than in the v0 pipeline."}
- },
-
- "rtx_pro_6000_blackwell": {
-  "name": "NVIDIA RTX PRO 6000 Blackwell Workstation",
-  "arch": "GB202", "sm_arch": "sm_120", "cuda_arch": 120,
-  "sm_count": {"value": 188, "source": "vendor"},
-  "clock_boost_ghz": {"value": 2.617, "source": "vendor"},
-  "vram_bytes": {"value": 103079215104, "source": "vendor", "_note": "96 GiB GDDR7 ECC."},
-  "memory_bandwidth_gbs": {"value": 1792.0, "source": "vendor"},
-  "l2_bytes": {"value": 100663296, "source": "vendor"},
-  "fp32_tflops": {"value": 125.9, "source": "derived", "_arithmetic": "188 x 128 x 2 x 2.617 GHz"},
-  "bf16_tensor_tflops": {"value": 251.8, "source": "vendor", "confidence": "medium"},
-  "fp8_tensor_tflops": {"value": 503.6, "source": "vendor", "confidence": "medium"},
-  "fp4_tensor_tflops": {"value": 1007.2, "source": "vendor", "confidence": "medium"},
-  "_why_here": "96 GiB moves the offload/streaming cells from `does not fit` to `fits`, so it is the part that says which of those cells are about the ALGORITHM and which are about the card."
- },
-
  "dgx_spark": {
+  "arch": "GB10",
+  "bf16_tensor_tflops": {
+   "confidence": "low",
+   "source": "vendor",
+   "value": 62.5
+  },
+  "clock_boost_ghz": {
+   "confidence": "low",
+   "source": "vendor",
+   "value": 1.7
+  },
+  "cuda_arch": 121,
+  "fp32_tflops": {
+   "_arithmetic": "48 x 128 x 2 x 1.7 GHz",
+   "confidence": "low",
+   "source": "derived",
+   "value": 20.9
+  },
+  "fp4_tensor_tflops": {
+   "_note": "'1 PFLOP of AI' is quoted for GB10 at FP4 WITH sparsity; dense is a quarter of it.",
+   "confidence": "low",
+   "source": "vendor",
+   "value": 250.0
+  },
+  "fp8_tensor_tflops": {
+   "confidence": "low",
+   "source": "vendor",
+   "value": 125.0
+  },
+  "l2_bytes": {
+   "confidence": "low",
+   "source": "vendor",
+   "value": 33554432
+  },
+  "memory_bandwidth_gbs": {
+   "_note": "Unified LPDDR5X. Six and a half times narrower than a 5090, which inverts which stage dominates: VAE decode and the T5 encoder are bandwidth-bound and get six times worse, while the DiT's GEMMs are compute-bound and get about twice as bad. A cell's ordering is not portable across these two parts and the roofline table is published per device for that reason.",
+   "source": "vendor",
+   "value": 273.0
+  },
   "name": "NVIDIA DGX Spark (GB10)",
-  "arch": "GB10", "sm_arch": "sm_121", "cuda_arch": 121,
-  "sm_count": {"value": 48, "source": "vendor", "confidence": "low"},
-  "clock_boost_ghz": {"value": 1.7, "source": "vendor", "confidence": "low"},
-  "vram_bytes": {"value": 137438953472, "source": "vendor", "_note": "128 GB unified LPDDR5X, shared with the CPU."},
-  "memory_bandwidth_gbs": {"value": 273.0, "source": "vendor", "_note": "Unified LPDDR5X. Six and a half times narrower than a 5090, which inverts which stage dominates: VAE decode and the T5 encoder are bandwidth-bound and get six times worse, while the DiT's GEMMs are compute-bound and get about twice as bad. A cell's ordering is not portable across these two parts and the roofline table is published per device for that reason."},
-  "l2_bytes": {"value": 33554432, "source": "vendor", "confidence": "low"},
-  "fp32_tflops": {"value": 20.9, "source": "derived", "confidence": "low", "_arithmetic": "48 x 128 x 2 x 1.7 GHz"},
-  "bf16_tensor_tflops": {"value": 62.5, "source": "vendor", "confidence": "low"},
-  "fp8_tensor_tflops": {"value": 125.0, "source": "vendor", "confidence": "low"},
-  "fp4_tensor_tflops": {"value": 250.0, "source": "vendor", "confidence": "low", "_note": "'1 PFLOP of AI' is quoted for GB10 at FP4 WITH sparsity; dense is a quarter of it."}
+  "sm_arch": "sm_121",
+  "sm_count": {
+   "confidence": "low",
+   "source": "vendor",
+   "value": 48
+  },
+  "vram_bytes": {
+   "_note": "128 GB unified LPDDR5X, shared with the CPU.",
+   "source": "vendor",
+   "value": 137438953472
+  }
+ },
+ "rtx5090": {
+  "arch": "GB202",
+  "bf16_tensor_tflops": {
+   "_direction": "assumed peak was LOW -> room had been understated (conservative)",
+   "_note": "What a well-tuned square bf16 GEMM with fp32 accumulate achieves through cuBLAS -- not what the ALUs could issue. A roofline is only useful if a contributor could in principle reach it.",
+   "probe_note": "bandwidth is a grid-stride read+write over a working set far larger than L2; the GEMM rate is a square bf16 GEMM with fp32 accumulate through cuBLAS -- what a well-tuned kernel achieves, not what the ALUs could issue. A roofline is only useful if a contributor could in principle reach it.",
+   "probed_on": "NVIDIA GeForce RTX 5090",
+   "source": "measured",
+   "value": 236.947,
+   "vendor_was": {
+    "source": "vendor",
+    "value": 209.5
+   }
+  },
+  "clock_boost_ghz": {
+   "_direction": "(not a ceiling term)",
+   "probe_note": "bandwidth is a grid-stride read+write over a working set far larger than L2; the GEMM rate is a square bf16 GEMM with fp32 accumulate through cuBLAS -- what a well-tuned kernel achieves, not what the ALUs could issue. A roofline is only useful if a contributor could in principle reach it.",
+   "probed_on": "NVIDIA GeForce RTX 5090",
+   "source": "measured",
+   "value": 2.482,
+   "vendor_was": {
+    "source": "vendor",
+    "value": 2.407
+   }
+  },
+  "cuda_arch": 120,
+  "fp32_tflops": {
+   "_arithmetic": "170 SM x 128 fp32 lanes x 2 flop/FMA x 2.407 GHz = 104.8e12",
+   "source": "derived",
+   "value": 104.8
+  },
+  "fp4_tensor_tflops": {
+   "_note": "NVFP4/MXFP4 dense. No reference tuning for these formats exists on this silicon, which is why they are in the backlog rather than in the v0 pipeline.",
+   "confidence": "medium",
+   "source": "vendor",
+   "value": 838.0
+  },
+  "fp8_tensor_tflops": {
+   "confidence": "medium",
+   "source": "vendor",
+   "value": 419.0
+  },
+  "l2_bytes": {
+   "_direction": "",
+   "probe_note": "bandwidth is a grid-stride read+write over a working set far larger than L2; the GEMM rate is a square bf16 GEMM with fp32 accumulate through cuBLAS -- what a well-tuned kernel achieves, not what the ALUs could issue. A roofline is only useful if a contributor could in principle reach it.",
+   "probed_on": "NVIDIA GeForce RTX 5090",
+   "source": "measured",
+   "value": 100663296,
+   "vendor_was": {
+    "source": "vendor",
+    "value": 100663296
+   }
+  },
+  "memory_bandwidth_gbs": {
+   "_direction": "assumed peak was HIGH -> room had been OVERSTATED (the dangerous direction)",
+   "_note": "Sustained read+write over a working set far larger than L2.",
+   "probe_note": "bandwidth is a grid-stride read+write over a working set far larger than L2; the GEMM rate is a square bf16 GEMM with fp32 accumulate through cuBLAS -- what a well-tuned kernel achieves, not what the ALUs could issue. A roofline is only useful if a contributor could in principle reach it.",
+   "probed_on": "NVIDIA GeForce RTX 5090",
+   "source": "measured",
+   "value": 1506.7,
+   "vendor_was": {
+    "source": "vendor",
+    "value": 1792.0
+   }
+  },
+  "name": "NVIDIA GeForce RTX 5090",
+  "persisting_l2_bytes": {
+   "_note": "cudaDeviceProp::accessPolicyMaxWindowSize on this part. Not used by any ceiling here; recorded because it bounds any residency trick in the denoise loop.",
+   "probe_note": "bandwidth is a grid-stride read+write over a working set far larger than L2; the GEMM rate is a square bf16 GEMM with fp32 accumulate through cuBLAS -- what a well-tuned kernel achieves, not what the ALUs could issue. A roofline is only useful if a contributor could in principle reach it.",
+   "probed_on": "NVIDIA GeForce RTX 5090",
+   "source": "measured",
+   "value": 134217728
+  },
+  "sm_arch": "sm_120",
+  "sm_count": {
+   "_direction": "",
+   "probe_note": "bandwidth is a grid-stride read+write over a working set far larger than L2; the GEMM rate is a square bf16 GEMM with fp32 accumulate through cuBLAS -- what a well-tuned kernel achieves, not what the ALUs could issue. A roofline is only useful if a contributor could in principle reach it.",
+   "probed_on": "NVIDIA GeForce RTX 5090",
+   "source": "measured",
+   "value": 170,
+   "vendor_was": {
+    "source": "vendor",
+    "value": 170
+   }
+  },
+  "vram_bytes": {
+   "_direction": "(not a ceiling term)",
+   "_note": "Usable device memory as the driver reports it, which is less than the marketed capacity.",
+   "probe_note": "bandwidth is a grid-stride read+write over a working set far larger than L2; the GEMM rate is a square bf16 GEMM with fp32 accumulate through cuBLAS -- what a well-tuned kernel achieves, not what the ALUs could issue. A roofline is only useful if a contributor could in principle reach it.",
+   "probed_on": "NVIDIA GeForce RTX 5090",
+   "source": "measured",
+   "value": 33668268032,
+   "vendor_was": {
+    "source": "vendor",
+    "value": 34359738368
+   }
+  }
+ },
+ "rtx_pro_6000_blackwell": {
+  "_why_here": "96 GiB moves the offload/streaming cells from `does not fit` to `fits`, so it is the part that says which of those cells are about the ALGORITHM and which are about the card.",
+  "arch": "GB202",
+  "bf16_tensor_tflops": {
+   "confidence": "medium",
+   "source": "vendor",
+   "value": 251.8
+  },
+  "clock_boost_ghz": {
+   "source": "vendor",
+   "value": 2.617
+  },
+  "cuda_arch": 120,
+  "fp32_tflops": {
+   "_arithmetic": "188 x 128 x 2 x 2.617 GHz",
+   "source": "derived",
+   "value": 125.9
+  },
+  "fp4_tensor_tflops": {
+   "confidence": "medium",
+   "source": "vendor",
+   "value": 1007.2
+  },
+  "fp8_tensor_tflops": {
+   "confidence": "medium",
+   "source": "vendor",
+   "value": 503.6
+  },
+  "l2_bytes": {
+   "source": "vendor",
+   "value": 100663296
+  },
+  "memory_bandwidth_gbs": {
+   "source": "vendor",
+   "value": 1792.0
+  },
+  "name": "NVIDIA RTX PRO 6000 Blackwell Workstation",
+  "sm_arch": "sm_120",
+  "sm_count": {
+   "source": "vendor",
+   "value": 188
+  },
+  "vram_bytes": {
+   "_note": "96 GiB GDDR7 ECC.",
+   "source": "vendor",
+   "value": 103079215104
+  }
  }
 }

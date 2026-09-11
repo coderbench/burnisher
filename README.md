@@ -157,6 +157,13 @@ worth before anybody writes a kernel.
 them. A cell at 95% of its ceiling looks identical here to one at 8%. That is stated on the table
 itself, not buried.
 
+The peaks behind those ceilings *are* measured: `burnish probe` has run on the pinned 5090 and
+found **1506.7 GB/s** sustained and **236.9 TFLOPS** on a well-tuned bf16 GEMM. That corrects a
+claim this README used to make — that a vendor peak is always optimistic, so the published room is
+always an overstatement. The bandwidth figure was indeed optimistic (1792 assumed), but the bf16
+figure was *pessimistic* (209.5 assumed against 236.9 achieved). The error runs whichever way the
+assumption was wrong, and only a probe settles it.
+
 ---
 
 ## Quick start
