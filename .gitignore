@@ -8,5 +8,8 @@ weights/
 scratch/
 receipts-local/
 *.safetensors
+# The reference latents ARE committed: they are the oracle, four 256 kB tensors, and a
+# benchmark whose oracle lives only on one box is not reproducible by anyone.
+!eval/cells/*/reference-latents/*.npy
 *.npy
 *.png

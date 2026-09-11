@@ -52,14 +52,25 @@ def _git(*a):
         return None
 
 
-def generate(binary, generation, prompt, seed, impl, *, out_dir, label):
+def generate(binary, generation, token_ids_file, seed, impl, *, out_dir, label, weights,
+             device):
+    """One generation, dumping the denoised LATENT.
+
+    Token IDS, not a prompt string. The T5 tokenizer is a SentencePiece model and the runtime
+    does not carry one -- vendoring it would put a second oracle in the repository. The ids come
+    from `scripts/tokenize_prompts.py` and their digest is recorded in this report, so a changed
+    tokenization is a changed comparison and says so.
+    """
     out = Path(out_dir) / f"{label}.npy"
     cmd = [str(binary), "generate",
-           "--prompt", prompt,
+           "--weights", str(weights),
+           "--token-ids", str(token_ids_file),
            "--seed", str(seed),
            "--impl", impl,
+           "--device", device,
            "--resolution", str(generation.model["resolution"]),
            "--steps", str(generation.model["steps"]),
+           "--guidance-scale", str(generation.raw["model"].get("guidance_scale", 4.5)),
            "--dump-latents", str(out)]
     code, text, _ = run_once(cmd)
     if code != 0:
@@ -92,6 +103,8 @@ def main():
     ap.add_argument("--generation", default="BG-1")
     add_cells_root_arg(ap)
     ap.add_argument("--impl", default="stock")
+    ap.add_argument("--weights", required=True, help="checkpoint directory")
+    ap.add_argument("--device", default="cuda", choices=["cpu", "cuda"])
     ap.add_argument("--repeats", type=int, default=10,
                     help="determinism replays. Byte-identical is the bar.")
     ap.add_argument("--prompts", help="frozen prompt set (default: the generation's)")
@@ -108,6 +121,14 @@ def main():
         cells_root(args.cells_root) / args.generation / "prompts.json")
     prompts = json.loads(prompts_path.read_text())
     seed = prompts["seed"]
+    ids_dir = prompts_path.parent
+    ids_doc_path = ids_dir / "token-ids.json"
+    if not ids_doc_path.exists():
+        print(f"!! {ids_doc_path} does not exist. The gate compares latents generated from "
+              f"TOKEN IDS,\n   and the ids are part of the oracle. Produce them with "
+              f"scripts/tokenize_prompts.py.", file=sys.stderr)
+        return 2
+    ids_doc = json.loads(ids_doc_path.read_text())
     work = Path(args.work_dir)
     work.mkdir(parents=True, exist_ok=True)
     tol = generation.tolerance
@@ -129,9 +150,11 @@ def main():
         # --- 1. self-determinism, first ---
         print(f">> determinism: {args.repeats} replays of {args.impl}, byte-identical required")
         digests, first = [], None
+        det_ids = ids_dir / f"token-ids-{prompts['prompts'][0]['id']}.txt"
         for i in range(args.repeats):
-            r = generate(args.binary, generation, prompts["prompts"][0]["text"], seed,
-                         args.impl, out_dir=work, label=f"det-{i}")
+            r = generate(args.binary, generation, det_ids, seed, args.impl,
+                         out_dir=work, label=f"det-{i}", weights=args.weights,
+                         device=args.device)
             digests.append(r["latent_sha256"])
             first = first or r["latent_path"]
             print(f"   replay {i:2d}  {r['latent_sha256'][:16]}")
@@ -181,8 +204,9 @@ def main():
         per_prompt, worst_l2, worst_abs = [], 0.0, 0.0
         for p in prompts["prompts"]:
             label = f"gate-{p['id']}"
-            r = generate(args.binary, generation, p["text"], seed, args.impl,
-                         out_dir=work, label=label)
+            r = generate(args.binary, generation, ids_dir / f"token-ids-{p['id']}.txt", seed,
+                         args.impl, out_dir=work, label=label, weights=args.weights,
+                         device=args.device)
             ref = ref_dir / f"{p['id']}.npy"
             if not ref.exists():
                 raise RunnerError(f"the frozen prompt set names {p['id']} and the reference "

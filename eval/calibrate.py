@@ -54,6 +54,8 @@ def main():
                     help="significant digits the runtime prints a duration to; sets the "
                          "instrument-resolution term of the floor")
     ap.add_argument("--cells", nargs="*")
+    ap.add_argument("--device", default="cuda", choices=["cpu", "cuda"])
+    ap.add_argument("--weights", help="checkpoint directory; omit for synthetic weights")
     ap.add_argument("--write", action="store_true", help="update reference.json in place")
     ap.add_argument("--output")
     args = ap.parse_args()
@@ -73,7 +75,8 @@ def main():
         for cell in cells:
             arm_a, arm_b, vram = [], [], []
             for repeat, which in interleave(("a", "b"), args.repeats):
-                r = measure(args.binary, generation, cell, args.impl, repeat)
+                r = measure(args.binary, generation, cell, args.impl, repeat,
+                            device=args.device, weights=args.weights)
                 (arm_a if which == "a" else arm_b).append(r["metrics"]["latency_s"])
                 vram.append(r["metrics"]["peak_vram_bytes"])
             floor = measure_floor(cell.id, arm_a, arm_b, reported_digits=args.timer_digits)
@@ -110,6 +113,8 @@ def main():
 
     doc = {
         "generation": generation.name,
+        "device": args.device,
+        "weights": args.weights or "synthetic",
         "_what_this_is": ("Per-cell calibration: the fraction of the arithmetic ceiling "
                           "currently achieved, and the measured run-to-run noise floor. Both "
                           "are measurements."),

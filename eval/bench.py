@@ -46,7 +46,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def measure(binary, generation, cell, impl, repeat, *, shape_override=None, timeout=1800,
-            fidelity=None):
+            fidelity=None, device="cuda", weights=None):
     """One arm, one cell, one repeat."""
     label = f"{cell.id} {impl} r{repeat}"
     shape = dict(cell.shape)
@@ -56,17 +56,19 @@ def measure(binary, generation, cell, impl, repeat, *, shape_override=None, time
            "--stage", cell.stage,
            "--dtype", cell.wdtype,
            "--impl", impl,
+           "--device", device,
            "--resolution", str(shape.get("resolution", generation.model["resolution"])),
            "--caption-len", str(shape.get("caption_len", generation.model["caption_len"])),
            "--batch", str(shape.get("batch", generation.model["batch"])),
            "--seed", str(generation.raw.get("seed", 20260911)),
-           "--warmup", "3", "--iters", "10"]
+           "--warmup", "3", "--iters", "10"] + (["--weights", str(weights)] if weights else [])
     code, out, wall = run_once(cmd, timeout=timeout)
     if code != 0:
         raise RunnerError(f"{label}: the runtime exited {code}\n{out[-4000:]}")
     result = parse_result(out, label)
     require_ran_what_it_claimed(
-        result, {"stage": cell.stage, "dtype": cell.wdtype, "impl": impl}, label)
+        result, {"stage": cell.stage, "dtype": cell.wdtype, "impl": impl, "device": device},
+        label)
     require_not_degenerate(result, label)
     for key in ("latency_s", "peak_vram_bytes"):
         if key not in result.get("metrics", {}):
@@ -92,6 +94,9 @@ def main():
     ap.add_argument("--impl-candidate", required=True,
                     help="the registered implementation this submission adds")
     ap.add_argument("--repeats", type=int, default=5)
+    ap.add_argument("--device", default="cuda", choices=["cpu", "cuda"])
+    ap.add_argument("--weights", help="checkpoint directory; omit for synthetic weights, which "
+                                      "time the same kernels on the same shapes")
     ap.add_argument("--cells", nargs="*", help="restrict to these cells (produces a PARTIAL "
                                                "receipt, which credits nothing)")
     ap.add_argument("--output", required=True)
@@ -183,7 +188,8 @@ def main():
         for cell in cells:
             for repeat, variant in interleave(("base", "candidate"), args.repeats):
                 r = measure(args.binary, generation, cell, arms[variant], repeat,
-                            fidelity=fidelity[variant])
+                            fidelity=fidelity[variant], device=args.device,
+                            weights=args.weights)
                 records.append({"cell": cell.id, "variant": variant, "repeat": repeat,
                                 "config_id": "default", "status": "OK",
                                 "impl": arms[variant], "metrics": r["metrics"],
@@ -195,7 +201,8 @@ def main():
                 for repeat, variant in interleave(("base", "candidate"), max(2, args.repeats // 2)):
                     r = measure(args.binary, generation, cell, arms[variant], repeat,
                                 shape_override={"resolution": held_choice},
-                                fidelity=fidelity[variant])
+                                fidelity=fidelity[variant], device=args.device,
+                                weights=args.weights)
                     held_records.append({"cell": cell.id, "variant": variant, "repeat": repeat,
                                          "config_id": f"held-{held_choice}", "status": "OK",
                                          "metrics": r["metrics"]})
