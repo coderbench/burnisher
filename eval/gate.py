@@ -70,7 +70,7 @@ def generate(binary, generation, token_ids_file, seed, impl, *, out_dir, label, 
            "--device", device,
            "--resolution", str(generation.model["resolution"]),
            "--steps", str(generation.model["steps"]),
-           "--guidance-scale", str(generation.raw["model"].get("guidance_scale", 4.5)),
+           "--guidance-scale", str(generation.raw["model"]["guidance_scale"]),
            "--dump-latents", str(out)]
     code, text, _ = run_once(cmd)
     if code != 0:

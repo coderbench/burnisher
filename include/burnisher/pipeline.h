@@ -18,7 +18,11 @@ namespace burnisher {
 struct PipelineConfig {
     int resolution = 1024;
     int steps = 20;
-    double guidance_scale = 4.5;
+    // No default that means anything: the harness always passes the generation's pinned value,
+    // and a runtime-side default is a fourth place for the oracle to drift. This one is
+    // deliberately NOT 4.5 so that a caller who forgets to pass it gets an obviously wrong
+    // image rather than a subtly right one.
+    double guidance_scale = 0.0;
     bool classifier_free_guidance = true;
     int caption_len = 300;
     uint64_t seed = 20260911;

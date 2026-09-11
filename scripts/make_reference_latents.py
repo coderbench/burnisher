@@ -142,7 +142,9 @@ def main():
     ap.add_argument("--noise", required=True, help="from `burnisher noise`")
     ap.add_argument("--generation", default="BG-1")
     ap.add_argument("--steps", type=int)
-    ap.add_argument("--guidance", type=float, default=4.5)
+    ap.add_argument("--guidance", type=float,
+                    help="defaults to the generation's PINNED guidance_scale; override only to "
+                         "explore, never to produce an oracle")
     ap.add_argument("--prompts", nargs="*", help="subset, for a smoke run")
     ap.add_argument("--dtype", default="float32")
     ap.add_argument("--device", default="cpu",
@@ -165,6 +167,8 @@ def main():
     gen = json.loads((gdir / "generation.json").read_text())
     ids_doc = json.loads((gdir / "token-ids.json").read_text())
     steps = args.steps or gen["model"]["steps"]
+    if args.guidance is None:
+        args.guidance = gen["model"]["guidance_scale"]
     noise = np.load(args.noise)
     prompt_ids = args.prompts or list(ids_doc["prompts"])
     dtype = getattr(torch, args.dtype)

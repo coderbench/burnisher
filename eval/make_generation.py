@@ -117,6 +117,13 @@ def build(name, candidate_key, device_key, *, resolution, steps, caption_len, cf
             "license": cand["license"], "gated": cand["gated"],
             "resolution": resolution, "steps": steps, "caption_len": caption_len,
             "classifier_free_guidance": cfg, "batch": batch,
+            "guidance_scale": 4.5,
+            "_guidance_scale_note": (
+                "PINNED here rather than defaulted. It changes the latents, so it is part of the "
+                "oracle, and it was previously a 4.5 default in three independent places -- the "
+                "gate, the reference-latent generator and the runtime's own PipelineConfig. "
+                "Three defaults that agree today are three defaults that can drift, and the "
+                "symptom would be a correctness failure nobody could explain."),
             "scheduler": cand["scheduler"],
             "_pin_note": ("The revision is pinned because the reference drifts between versions "
                           "and it is the oracle for everything else. A moved revision is a "

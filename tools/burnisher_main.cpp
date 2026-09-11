@@ -849,7 +849,13 @@ int cmd_generate(const Args& a) {
     cfg.resolution = static_cast<int>(a.num("resolution", 1024));
     cfg.steps = static_cast<int>(a.num("steps", 20));
     cfg.seed = static_cast<uint64_t>(a.num("seed", 20260911));
-    cfg.guidance_scale = a.real("guidance-scale", 4.5);
+    cfg.guidance_scale = a.real("guidance-scale", 0.0);
+    if (cfg.classifier_free_guidance && cfg.guidance_scale <= 0.0) {
+        throw std::runtime_error(
+            "--guidance-scale is required under classifier-free guidance. It changes the "
+            "latents, so it is part of the oracle; the harness passes the generation's pinned "
+            "value and there is deliberately no default here for it to drift from.");
+    }
     cfg.compute = dtype_arg(a);
     cfg.impl = a.get("impl", "stock");
     cfg.device = device_arg(a);
