@@ -10,9 +10,10 @@
    "test_models"
   ],
   "python_pass": true,
-  "python_tests": 79
+  "python_tests": 87
  },
  "files": [
+  ".github/PULL_REQUEST_TEMPLATE.md",
   ".github/workflows/ci.yml",
   ".gitignore",
   "CMakeLists.txt",
@@ -22,6 +23,7 @@
   "configs/axes.json",
   "configs/candidates.json",
   "configs/devices.json",
+  "docs/ARCHITECTURE.md",
   "docs/CARTOGRAPHY.md",
   "docs/CORRECTNESS.md",
   "docs/HARDWARE.md",
@@ -54,6 +56,7 @@
   "eval/screen.py",
   "eval/tests/__init__.py",
   "eval/tests/fixtures.py",
+  "eval/tests/test_cli.py",
   "eval/tests/test_runner.py",
   "eval/tests/test_schemas.py",
   "eval/tests/test_scoring.py",
