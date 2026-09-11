@@ -72,7 +72,8 @@ Tensor resnet(const Ctx& c, const Tensor& x, const std::string& name, int64_t c_
         skip = conv(c, x, name + ".conv_shortcut", c_in, c_out, h, 1, 0);
     }
     Tensor out({1, c_out, h, h}, c.dtype, c.impls->device);
-    for (int64_t i = 0; i < out.numel(); ++i) out.set(i, skip.get(i) + t.get(i));
+    AddRegistry::instance().get(c.impls->add)(
+        AddArgs{&skip, &t, &out, 1, c_out * h * h, 1.0f, false});
     return out;
 }
 
