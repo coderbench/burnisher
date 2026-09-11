@@ -52,6 +52,7 @@ Tensor T5Encoder::forward(const Tensor& token_ids, const ImplSelection& impls) c
     const auto& attn = AttentionRegistry::instance().get(impls.attention);
     const auto& norm = NormRegistry::instance().get(impls.norm);
     const auto& act = ActivationRegistry::instance().get(impls.activation);
+    const auto& add = AddRegistry::instance().get(impls.add);
 
     const int64_t B = token_ids.dim(0), S = token_ids.dim(1);
     const int64_t d = cfg_.d_model, inner = static_cast<int64_t>(cfg_.num_heads) * cfg_.d_kv;
@@ -137,7 +138,7 @@ Tensor T5Encoder::forward(const Tensor& token_ids, const ImplSelection& impls) c
                          &key_mask};
         attn(aa);
         gemm(GemmArgs{&ctx, &wo, nullptr, &proj, M, d, inner, true});
-        for (int64_t i = 0; i < M * d; ++i) x.set(i, x.get(i) + proj.get(i));
+        add(AddArgs{&x, &proj, &x, M, d, 1.0f, false});
 
         Tensor ln1 = w_.require(blk(layer, "layer.1.layer_norm.weight"));
         NormArgs nb{&x, &ln1, nullptr, &normed, M, d, static_cast<float>(cfg_.eps), true, 0};
@@ -156,7 +157,7 @@ Tensor T5Encoder::forward(const Tensor& token_ids, const ImplSelection& impls) c
             act(ag);
         }
         gemm(GemmArgs{&hact, &wo2, nullptr, &proj, M, d, cfg_.d_ff, true});
-        for (int64_t i = 0; i < M * d; ++i) x.set(i, x.get(i) + proj.get(i));
+        add(AddArgs{&x, &proj, &x, M, d, 1.0f, false});
     }
 
     Tensor lnf = w_.require("encoder.final_layer_norm.weight");
