@@ -10,7 +10,7 @@
    "test_models"
   ],
   "python_pass": true,
-  "python_tests": 119
+  "python_tests": 121
  },
  "files": [
   ".github/PULL_REQUEST_TEMPLATE.md",
@@ -50,6 +50,7 @@
   "eval/cells/BG-1/reference.json",
   "eval/gate.py",
   "eval/make_generation.py",
+  "eval/paths.py",
   "eval/roofline_table.py",
   "eval/run_from_base.sh",
   "eval/runner.py",

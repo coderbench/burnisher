@@ -33,23 +33,13 @@ class TestGate(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self.tmp.name)
         self.gen_name = "BG-GATE"
-        self.gen_dir = ROOT / "eval" / "cells" / self.gen_name
-        self.gen_dir.mkdir(parents=True, exist_ok=True)
-        src = fixtures.calibrated_generation(self.dir)
-        doc = json.loads(src.read_text())
-        doc["name"] = self.gen_name
-        (self.gen_dir / "generation.json").write_text(json.dumps(doc, indent=1, sort_keys=True))
-        (self.gen_dir / "reference.json").write_text(
-            (src.parent / "reference.json").read_text())
-        # The frozen prompt set is part of the oracle, so the gate reads the real one.
-        (self.gen_dir / "prompts.json").write_text(
-            (ROOT / "eval" / "cells" / "BG-1" / "prompts.json").read_text())
+        self.cells_root, gpath = fixtures.scratch_generation(
+            self.dir, self.gen_name, with_prompts=True)
+        self.gen_dir = gpath.parent
         self.prompts = json.loads((self.gen_dir / "prompts.json").read_text())
-        self.tolerance = doc["tolerance"]
+        self.tolerance = json.loads(gpath.read_text())["tolerance"]
 
     def tearDown(self):
-        import shutil
-        shutil.rmtree(self.gen_dir, ignore_errors=True)
         self.tmp.cleanup()
 
     def gate(self, *extra, env=None, out="gate.json"):
@@ -57,6 +47,7 @@ class TestGate(unittest.TestCase):
                "--binary", str(FAKES / "burnisher"),
                "--generation", self.gen_name,
                "--work-dir", str(self.dir / "work"),
+               "--cells-root", str(self.cells_root),
                "--output", str(self.dir / out), *extra]
         return subprocess.run(cmd, capture_output=True, text=True,
                               env=env or fake_env(), cwd=str(ROOT))
