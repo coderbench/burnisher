@@ -182,8 +182,14 @@ def main():
     # bf16 run against an fp32 oracle measures the dtype rather than the implementation -- which
     # this repository found the expensive way: every stage agreed with the reference to 1e-5 and
     # the assembled bf16 pipeline came out at 1.19 relative L2, a completely different image.
-    out_dir = gdir / ("reference-latents" if args.dtype == "float32"
-                      else f"reference-latents-{args.dtype}")
+    # BURNISH_REF_OUTDIR redirects a run that is EXPLORING rather than producing the oracle --
+    # a step sweep, say. Without it a sweep would silently overwrite the pinned reference
+    # latents, and the gate would then be comparing against whatever the last experiment left.
+    import os
+    override = os.environ.get("BURNISH_REF_OUTDIR")
+    out_dir = (Path(override) if override else
+               gdir / ("reference-latents" if args.dtype == "float32"
+                       else f"reference-latents-{args.dtype}"))
     embeds = encode_prompts(args.weights, ids_doc, prompt_ids, dtype, args.device)
     latents = denoise(args.weights, embeds, noise, steps, args.guidance, dtype,
                       out_dir if args.write else None, args.device)
