@@ -101,5 +101,53 @@ class TestLabelSetupCoversWhatTheBotCanApply(unittest.TestCase):
         self.assertIn("skipped-instrument", script)
 
 
+class TestEveryOutcomeRenders(unittest.TestCase):
+    """The sample document is generated, so it cannot describe a comment nobody would receive.
+
+    `scripts/sample_outcomes.py` renders what a pull request gets back for each outcome, using
+    the same two functions the bot uses. A hand-written version of that document would drift the
+    first time a label or a sentence changed, and the people it misleads are exactly the ones
+    deciding whether to spend a week on a kernel.
+    """
+
+    def test_the_sample_renderer_produces_every_outcome_without_crashing(self):
+        import subprocess
+        r = subprocess.run([sys.executable, str(ROOT / "scripts" / "sample_outcomes.py")],
+                           capture_output=True, text=True, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        for expected in ("burnish:gap+0.0342", "burnish:unresolved", "burnish:no-gain",
+                         "burnish:shape-overfit", "burnish:correctness-fail",
+                         "burnish:skipped-instrument"):
+            self.assertIn(expected, r.stdout, f"{expected} does not render")
+
+    def test_a_derived_sample_is_labelled_as_derived(self):
+        """Illustrative figures must never read as measurements.
+
+        This repository's whole discipline is the model/measured distinction, so blurring it in
+        the document that shows people what a score looks like would be absurd.
+        """
+        import subprocess
+        r = subprocess.run([sys.executable, str(ROOT / "scripts" / "sample_outcomes.py")],
+                           capture_output=True, text=True, timeout=120)
+        self.assertIn("figures: MEASURED", r.stdout)
+        self.assertIn("figures: DERIVED", r.stdout)
+
+    def test_a_gain_shows_the_achieved_fraction_going_up(self):
+        """The achieved column has to follow the gap, not sit beside it.
+
+        The first version of the renderer set a gap and kept the original run's achieved column,
+        so the paying sample showed a gain with the achieved fraction going DOWN.
+        """
+        import subprocess
+        r = subprocess.run([sys.executable, str(ROOT / "scripts" / "sample_outcomes.py"),
+                            "--only", "gap"], capture_output=True, text=True, timeout=120)
+        row = next(l for l in r.stdout.splitlines() if "dit-step/1024/bf16" in l)
+        # Backtick-delimited: ['| ', cell, ' | ', gap, ' | ', achieved, ...]
+        achieved = next(f for f in row.split("`") if "->" in f)
+        before, after = [float(x.strip(" %")) for x in achieved.split("->")]
+        self.assertGreater(after, before,
+                           f"a paying sample shows achieved going {before}% -> {after}%")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
