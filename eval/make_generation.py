@@ -29,6 +29,44 @@ from burnscore.roofline import bound_for
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def local_ceilings(generation_doc, device_key="rtx5090", devices=None) -> dict:
+    """Recompute this generation's per-cell ceilings against THIS box's probed peaks.
+
+    A ceiling is `max(flops/peak, unavoidable_bytes/bandwidth)`: the geometry is frozen with the
+    generation, the peaks belong to whatever card is in the machine. The two must not be frozen
+    together, and for a while they were -- `generation.json` carried a ceiling computed from the
+    reference device's probe, so a validator on a different card scored `achieved = someone
+    else's ceiling / my measurement`, which is a ratio of two machines.
+
+    Splitting them is what makes a score portable: probed locally, both halves of the ratio scale
+    with the card and cancel. A 3% difference in the part then produces a 0.0000% difference in
+    gap-closed instead of a systematic 6%.
+
+    Called by `burnish calibrate`, which writes the result into the validator's own calibration
+    file. The frozen generation is never rewritten -- it holds what is measured, not what this
+    machine can do.
+    """
+    cands = json.loads((ROOT / "configs" / "candidates.json").read_text())["candidates"]
+    devices = devices or json.loads((ROOT / "configs" / "devices.json").read_text())
+    device = devices[device_key]
+    model = generation_doc["model"]
+    cand = next(c for c in cands.values() if c.get("repo") == model.get("repo"))
+    resolution = int(model["resolution"])
+    stages = pixart_stages(cand, resolution=resolution, steps=int(model["steps"]),
+                           caption_len=int(model["caption_len"]),
+                           cfg=bool(model.get("classifier_free_guidance", True)))
+    out = {}
+    for s in stages:
+        cell_id = f"{s.stage}/{resolution}/bf16"
+        one = s.__class__(stage=s.stage, shape=dict(s.shape), wdtype=s.wdtype,
+                          adtype=s.adtype, ops=s.ops, input_bytes=s.input_bytes,
+                          output_bytes=s.output_bytes, invocations=1, notes=list(s.notes))
+        b = bound_for(one, device, cell=cell_id, device_name=device_key)
+        out[cell_id] = {"ceiling_seconds": b.ceiling_seconds, "peak_basis": b.peak_basis,
+                        "bound_by": b.bound_by}
+    return out
+
+
 def build(name, candidate_key, device_key, *, resolution, steps, caption_len, cfg):
     cands = json.loads((ROOT / "configs" / "candidates.json").read_text())["candidates"]
     devices = json.loads((ROOT / "configs" / "devices.json").read_text())

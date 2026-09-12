@@ -96,6 +96,7 @@
   "eval/tests/test_gate.py",
   "eval/tests/test_instrument_guard.py",
   "eval/tests/test_instrument_overlay.py",
+  "eval/tests/test_per_validator_calibration.py",
   "eval/tests/test_pr_bot.py",
   "eval/tests/test_runner.py",
   "eval/tests/test_schemas.py",

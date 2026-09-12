@@ -88,6 +88,16 @@ def main():
         print(f">> calibrating {generation.name} on {fp.get('name')} "
               f"driver {fp.get('driver_version')}")
         print(f">> {args.repeats} paired control-vs-control repeats per cell\n")
+        # The ceilings for THIS box, recomputed from the local probe rather than taken from the
+        # frozen generation. A ceiling is max(flops/peak, bytes/bandwidth): the geometry is
+        # frozen, the peaks are whatever card is in this machine. Freezing the two together is
+        # what made a score depend on which validator ran it -- `achieved` became one card's
+        # ceiling over another card's measurement, a systematic ~6% bias between two RTX 5090s.
+        from make_generation import local_ceilings
+        local = local_ceilings(generation.raw)
+        for cid, c in local.items():
+            if cid in generation.cells and c["ceiling_seconds"]:
+                generation.cells[cid].ceiling_seconds = c["ceiling_seconds"]
         for cell in cells:
             arm_a, arm_b, vram = [], [], []
             for repeat, which in interleave(("a", "b"), args.repeats):
@@ -111,6 +121,8 @@ def main():
                 "achieved": achieved,
                 "measured_seconds": measured,
                 "ceiling_seconds": cell.ceiling_seconds,
+                "ceiling_peak_basis": (local.get(cell.id) or {}).get("peak_basis"),
+                "ceiling_bound_by": (local.get(cell.id) or {}).get("bound_by"),
                 "floor_pct": floor.floor_pct,
                 "floor_repeats": floor.repeats,
                 "floor_decided_by": floor.decided_by,
