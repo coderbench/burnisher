@@ -46,7 +46,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def measure(binary, generation, cell, impl, repeat, *, shape_override=None, timeout=1800,
-            fidelity=None, device="cuda", weights=None):
+            fidelity=None, device="cuda", weights=None, warmup=3, iters=10):
     """One arm, one cell, one repeat."""
     label = f"{cell.id} {impl} r{repeat}"
     shape = dict(cell.shape)
@@ -61,7 +61,7 @@ def measure(binary, generation, cell, impl, repeat, *, shape_override=None, time
            "--caption-len", str(shape.get("caption_len", generation.model["caption_len"])),
            "--batch", str(shape.get("batch", generation.model["batch"])),
            "--seed", str(generation.raw.get("seed", 20260911)),
-           "--warmup", "3", "--iters", "10"] + (["--weights", str(weights)] if weights else [])
+           "--warmup", str(warmup), "--iters", str(iters)] + (["--weights", str(weights)] if weights else [])
     code, out, wall = run_once(cmd, timeout=timeout)
     if code != 0:
         raise RunnerError(f"{label}: the runtime exited {code}\n{out[-4000:]}")

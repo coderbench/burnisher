@@ -56,6 +56,12 @@ def main():
     ap.add_argument("--cells", nargs="*")
     ap.add_argument("--device", default="cuda", choices=["cpu", "cuda"])
     ap.add_argument("--weights", help="checkpoint directory; omit for synthetic weights")
+    ap.add_argument("--warmup", type=int, default=2)
+    ap.add_argument("--iters", type=int, default=5,
+                    help="timed iterations per invocation, whose MEDIAN is the reading. The "
+                         "floor comes from the spread ACROSS invocations, not within one, so "
+                         "this trades a little within-run stability for more paired repeats -- "
+                         "and the repeats are what the floor is made of.")
     ap.add_argument("--write", action="store_true", help="update reference.json in place")
     ap.add_argument("--output")
     args = ap.parse_args()
@@ -76,7 +82,8 @@ def main():
             arm_a, arm_b, vram = [], [], []
             for repeat, which in interleave(("a", "b"), args.repeats):
                 r = measure(args.binary, generation, cell, args.impl, repeat,
-                            device=args.device, weights=args.weights)
+                            device=args.device, weights=args.weights,
+                            warmup=args.warmup, iters=args.iters)
                 (arm_a if which == "a" else arm_b).append(r["metrics"]["latency_s"])
                 vram.append(r["metrics"]["peak_vram_bytes"])
             floor = measure_floor(cell.id, arm_a, arm_b, reported_digits=args.timer_digits)
@@ -120,7 +127,8 @@ def main():
                           "are measurements."),
         "device_probe": fp,
         "calibrated_with": {"impl": args.impl, "repeats": args.repeats,
-                            "timer_digits": args.timer_digits},
+                            "timer_digits": args.timer_digits,
+                            "warmup": args.warmup, "iters": args.iters},
         "_floor_method": ("Two arms, both the unmodified base, interleaved with every guard a "
                           "scored comparison uses. The floor is the larger of the paired "
                           "control-vs-control spread and the instrument's own resolution."),
