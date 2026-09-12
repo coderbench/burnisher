@@ -108,12 +108,11 @@ jobs:
           echo "all four refused"
 
   cuda-compile:
-    # The CUDA backend has never been compiled -- there was no nvcc and no Blackwell device when
-    # this repository was written, and docs/STATUS.md says so in those words. This job is here so
-    # that stops being true the first time it runs on a runner that has a toolkit. It does not
-    # run anything: compiling is not measuring.
+    # The CUDA backend is now the main body of the runtime, so a build failure here is a
+    # failure. This job was `continue-on-error` for as long as no nvcc and no Blackwell part had
+    # ever seen this code; keeping it advisory after that would mean the backend everything is
+    # scored on could stop compiling without CI objecting.
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: Jimver/cuda-toolkit@v0.2.19
@@ -122,5 +121,15 @@ jobs:
       - name: compile for sm_120
         run: |
           cmake -S . -B build-cuda -DBURNISHER_BUILD_CUDA=ON \
-                -DCMAKE_CUDA_ARCHITECTURES=120 -DBURNISHER_BUILD_TESTS=OFF
+                -DCMAKE_CUDA_ARCHITECTURES=120
           cmake --build build-cuda -j2
+      # Tests ON, and they run here. This runner has no GPU, which is the point: the suite must
+      # not need one. What it checks that the CPU build cannot is how an implementation NAME
+      # resolves when the device backend is registered -- a single-kernel submission leaves
+      # fourteen of fifteen ops on the fallback, and a host fallback under a device run is a
+      # fault. That is registry arithmetic, not a kernel launch, so it runs anywhere.
+      #
+      # Verified to pass with CUDA_VISIBLE_DEVICES="" on a box that does have a GPU, so a
+      # failure here means the code changed, not that the runner is missing silicon.
+      - name: the suite must pass on a CUDA build with no device
+        run: CUDA_VISIBLE_DEVICES="" ctest --test-dir build-cuda --output-on-failure
