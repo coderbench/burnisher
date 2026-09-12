@@ -38,7 +38,7 @@ step, so a defect and not accumulated chaos), then a stage bisect, then a layer 
 versus CUDA at bf16. No amount of reading the kernel would have found it.
 
 **What remains, and it is not this issue.** The kernels are correct and slow -- deliberately, per
-docs/CONTRIBUTING.md. `dit-step/1024/bf16` sits at 1.5% of its
+CONTRIBUTING.md. `dit-step/1024/bf16` sits at 1.5% of its
 arithmetic ceiling, which is 54.4 ms against a measured
 3571 ms.
 That gap is what every other issue in this backlog is for.

@@ -32,7 +32,7 @@ four frozen prompts' ids are committed with the tokenizer digest beside them in
 `eval/cells/BG-1/token-ids.json`, and the gate refuses a run whose ids do not match it.
 
 **3. The reference latents -- pinned, in two dtypes.** `eval/cells/BG-1/reference-latents/` and
-`reference-latents-bfloat16/` hold four latents each with a manifest, produced by the pinned
+`eval/cells/BG-1/reference-latents-bfloat16/` hold four latents each with a manifest, produced by the pinned
 reference implementation at the pinned revision. The starting noise is committed with them and
 passed to the runtime as an INPUT: two RNGs agreeing bit for bit is not a thing to depend on,
 and regenerating noise at the compute dtype starts a bf16 run and an fp32 reference from

@@ -615,7 +615,7 @@ step, so a defect and not accumulated chaos), then a stage bisect, then a layer 
 versus CUDA at bf16. No amount of reading the kernel would have found it.
 
 **What remains, and it is not this issue.** The kernels are correct and slow -- deliberately, per
-docs/CONTRIBUTING.md. `dit-step/1024/bf16` sits at {100 * f['dit_achieved']:.1f}% of its
+CONTRIBUTING.md. `dit-step/1024/bf16` sits at {100 * f['dit_achieved']:.1f}% of its
 arithmetic ceiling, which is {f['dit_ceiling_bf16_ms']:.1f} ms against a measured
 {1e3 * json.loads((ROOT / 'eval' / 'cells' / 'BG-1' / 'reference.json').read_text())['cells']['dit-step/1024/bf16']['measured_seconds']:.0f} ms.
 That gap is what every other issue in this backlog is for.
@@ -655,7 +655,7 @@ four frozen prompts' ids are committed with the tokenizer digest beside them in
 `eval/cells/BG-1/token-ids.json`, and the gate refuses a run whose ids do not match it.
 
 **3. The reference latents -- pinned, in two dtypes.** `eval/cells/BG-1/reference-latents/` and
-`reference-latents-bfloat16/` hold four latents each with a manifest, produced by the pinned
+`eval/cells/BG-1/reference-latents-bfloat16/` hold four latents each with a manifest, produced by the pinned
 reference implementation at the pinned revision. The starting noise is committed with them and
 passed to the runtime as an INPUT: two RNGs agreeing bit for bit is not a thing to depend on,
 and regenerating noise at the compute dtype starts a bf16 run and an fp32 reference from

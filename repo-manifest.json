@@ -81,6 +81,7 @@
   "eval/tests/fixtures.py",
   "eval/tests/test_cli.py",
   "eval/tests/test_device_runners.py",
+  "eval/tests/test_documented_figures.py",
   "eval/tests/test_example_receipt.py",
   "eval/tests/test_gate.py",
   "eval/tests/test_runner.py",

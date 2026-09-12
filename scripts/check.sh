@@ -69,6 +69,9 @@ else
   echo "    and torch -- the REFERENCE implementation, deliberately not a dependency here."
 fi
 
+step "documentation points at files that exist"
+python3 scripts/check_links.py || fail=1
+
 step "manifest"
 python3 scripts/manifest.py --check || fail=1
 

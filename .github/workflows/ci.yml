@@ -53,6 +53,9 @@ jobs:
         run: |
           python3 scripts/make_issues.py --write --out /tmp/issues > /dev/null
           diff -r -u issues /tmp/issues
+      - name: documentation points at files that exist
+        run: python3 scripts/check_links.py
+
       - name: manifest
         run: python3 scripts/manifest.py --check
 
