@@ -141,7 +141,7 @@ def cmd_generation(args, rest):
 
 def cmd_score(args, rest):
     from burnscore import cells as C, compute as CP, receipt as R, ledger as L
-    gen = C.load(generation_path(args.generation, args.cells_root))
+    gen = C.load(generation_path(args.generation, args.cells_root), calibration=args.calibration)
     records = json.loads(Path(args.results).read_text())
     if isinstance(records, dict):
         held = records.get("held_out") or None
@@ -158,7 +158,7 @@ def cmd_score(args, rest):
               file=sys.stderr)
         return 2
     out = CP.compute(gen, records, held_out_records=held,
-                     allow_partial=args.allow_partial)
+                     allow_partial=args.allow_partial, device=prov.get("device"))
     rec = R.build_receipt(
         generation=gen, per_cell=out["per_cell"], aggregate=out["aggregate"],
         interval=out["interval"], frontier=out["frontier"], correctness=correctness,
@@ -391,6 +391,10 @@ def build_parser():
                    help="score an incomplete matrix; the receipt will say PARTIAL and credit "
                         "nothing")
     p.add_argument("--cells-root")
+    p.add_argument("--calibration",
+                   help="this box's calibration, from `burnish calibrate --write`. Defaults to "
+                        "the committed reference device's, which is only right if you ARE the "
+                        "reference device.")
     p.set_defaults(fn=cmd_score)
 
     p = sub.add_parser("receipt", help="verify or show a receipt")

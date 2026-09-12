@@ -133,6 +133,8 @@ def main():
     # Default None, resolved from the generation after it is loaded. A hardcoded default here
     # is a second opinion about a number the frozen generation already declares, and the two
     # drift the moment either moves.
+    ap.add_argument("--calibration",
+                    help="this box's calibration; defaults to the committed reference device's")
     ap.add_argument("--repeats", type=int, default=None,
                     help="paired repeats per cell; defaults to what the generation declares, "
                          "and the scorer refuses fewer")
@@ -156,7 +158,8 @@ def main():
                     help="skip the held-out shapes; the receipt cannot be credited without them")
     args = ap.parse_args()
 
-    generation = C.load(generation_path(args.generation, args.cells_root))
+    generation = C.load(generation_path(args.generation, args.cells_root),
+                        calibration=args.calibration)
     if args.repeats is None:
         args.repeats = generation.repeats
 

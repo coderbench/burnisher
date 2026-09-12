@@ -223,6 +223,7 @@ def evaluate(repo, pr, args) -> dict:
              "--impl-base", args.impl_base, "--impl-candidate", args.impl_candidate,
              "--pr", str(num), "--ledger", args.ledger,
              "--weights", args.weights, "--noise", args.noise,
+             *(["--calibration", args.calibration] if args.calibration else []),
              "--work-dir", str(out_dir)],
             capture_output=True, text=True, timeout=args.timeout)
         print(r.stdout[-1500:])
@@ -281,6 +282,10 @@ def main():
     ap.add_argument("--ledger", default=os.environ.get("BURNISH_LEDGER", ""))
     ap.add_argument("--weights", default=os.environ.get("BURNISH_WEIGHTS", ""))
     ap.add_argument("--noise", default=os.environ.get("BURNISH_NOISE", ""))
+    ap.add_argument("--calibration", default=os.environ.get("BURNISH_CALIBRATION", ""),
+                    help="this validator's own calibration. Without it the scorer uses the "
+                         "committed reference device's and refuses unless this box IS that "
+                         "device -- which is the intended failure, not a bug.")
     ap.add_argument("--impl-base", default="cuda")
     ap.add_argument("--impl-candidate", required=False, default="cuda")
     ap.add_argument("--timeout", type=int, default=7200)

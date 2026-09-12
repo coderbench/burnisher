@@ -277,6 +277,17 @@ oracle it is gated against, so the gate would then reject the fix. It is recorde
 
 ## What is still not known
 
+**0. ~~Whether a score means the same thing on another validator's box.~~ SETTLED, and the fix
+changed the design.** The calibration used to be effectively frozen to one card: `achieved` is
+`ceiling / measured` and the ceiling was baked into the frozen generation, so scoring another
+card's run against it mixed two machines. Measured, a 3% hardware difference produced a **6%**
+difference in gap-closed — systematic, in one direction, invisible to the interval.
+
+The ceiling now comes from the validator's own probe, which makes both halves of the ratio scale
+with the card and cancel: the same 3% difference produces **0.0000%**. Every validator calibrates
+their own box, the scorer refuses a run whose GPU UUID does not match its calibration, and every
+receipt records which calibration produced it. `docs/EVAL.md` has the setup.
+
 **1. Whether the fp8 and NVFP4 peaks are reachable.** Those two cells still read
 `peak_basis: vendor`. Every implemented cell reads `measured`.
 

@@ -1,6 +1,6 @@
 {
  "benchmark_generation": "BG-1",
- "content_digest": "sha256:1d21d65d3fc194d5eb2742ab75163b594013053af0a7e7c6c34c8d8821cc7076",
+ "content_digest": "sha256:7331d5de74243c00206b0c891504f716d7a034524b238cd8adb32ce3e983f05e",
  "correctness": "PASS",
  "coverage": {
   "_note": "A partial matrix credits nothing. Dropping the cell a change hurts is the cheapest way to raise a score, and a rule that stops a drop from PAYING removes the incentive rather than policing it.",
@@ -311,6 +311,12 @@
   "_instrument_note": "warmup and iters are the counts the cell noise floors were calibrated with. A measurement averaged over a different number of invocations than its floor was is a different instrument, and the comparison does not mean anything.",
   "_pairing": "interleaved base/candidate, one process per record",
   "base_commit": "e0ac6cffaf196b8bd161bbe016855648bed17b60",
+  "calibration": {
+   "_why": "A calibration is a measurement of one physical card. `achieved` is ceiling over measured and both are properties of the hardware, so a run is scored against the calibration of the box it ran on -- never another's.",
+   "device_name": "NVIDIA GeForce RTX 5090",
+   "device_uuid": "GPU-da2aa62b-30d9-78a4-d9a1-86a21df7e530",
+   "driver_version": "595.91.07"
+  },
   "candidate_commit": "e0ac6cffaf196b8bd161bbe016855648bed17b60",
   "code_provenance_complete": true,
   "code_provenance_missing": [],
@@ -352,5 +358,5 @@
  "status": "UNRESOLVED",
  "supersede_reason": null,
  "supersedes": [],
- "timestamp_utc": "2026-09-12T06:18:12.200745+00:00"
+ "timestamp_utc": "2026-09-12T07:13:49.385140+00:00"
 }

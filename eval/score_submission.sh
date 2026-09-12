@@ -37,6 +37,12 @@ WEIGHTS="${BURNISH_WEIGHTS:-}"; NOISE="${BURNISH_NOISE:-}"
 # evaluation is defined by and the scorer enforces it as a minimum, so hardcoding a number here
 # would be a second opinion about a frozen parameter.
 GEN="BG-1"; REPEATS=""; GATE_REPEATS=2; DTYPE="fp32"; DEVICE="cuda"; OUT=""
+# THIS BOX's calibration. Every validator has their own, and that is what makes two validators
+# agree about what a submission earned: `achieved` is ceiling over measured and both halves are
+# properties of the card, so probing locally makes them cancel. Scoring against the committed
+# reference device's calibration instead biases every result by roughly twice the hardware
+# difference -- about 6% between two RTX 5090s -- systematically and in the same direction.
+CALIBRATION="${BURNISH_CALIBRATION:-}"
 
 usage() {
     sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
@@ -52,6 +58,7 @@ while [ $# -gt 0 ]; do
         --pr)              PR="$2"; shift 2 ;;
         --ledger)          LEDGER="$2"; shift 2 ;;
         --weights)         WEIGHTS="$2"; shift 2 ;;
+        --calibration)     CALIBRATION="$2"; shift 2 ;;
         --noise)           NOISE="$2"; shift 2 ;;
         --generation)      GEN="$2"; shift 2 ;;
         --repeats)         REPEATS="$2"; shift 2 ;;
@@ -116,6 +123,15 @@ CACHE="${BURNISH_GATE_CACHE:-$HOME/.cache/burnish/gate}"
 KEY="$(printf '%s' "$BASE_COMMIT|$IMPL_BASE|$DTYPE|$DEVICE|$GEN|$GATE_REPEATS|$(sha256sum "$NOISE" | cut -c1-16)|$(readlink -f "$WEIGHTS")" | sha256sum | cut -c1-32)"
 HIT="$CACHE/gate-base-$KEY.json"
 
+if [ -z "$CALIBRATION" ]; then
+    echo
+    echo ">> NOTE: no --calibration given, so the committed REFERENCE DEVICE's calibration is"
+    echo "   used. That is correct only if this box IS the reference device -- the scorer"
+    echo "   checks the GPU UUID and will refuse rather than quietly biasing the result."
+    echo "   Calibrate this box once:  burnish probe --write"
+    echo "                             burnish calibrate --repeats 9 --output <yours>.json"
+fi
+
 say "1/4  gate the BASE arm ($IMPL_BASE)"
 if [ -s "$HIT" ]; then
     echo ">> cached: the base arm at $BASE_COMMIT already passed this exact gate"
@@ -143,11 +159,13 @@ BURNISH_ENTRY=bench "$RUN" "$BASE" "$SUB" -- \
     --impl-base "$IMPL_BASE" --impl-candidate "$IMPL_CAND" \
     ${REPEATS:+--repeats "$REPEATS"} \
     --gate-result "$OUT/gate-cand.json" --gate-base-result "$OUT/gate-base.json" \
+    ${CALIBRATION:+--calibration "$CALIBRATION"} \
     --output "$OUT/raw.json"
 
 say "4/4  score into the ledger"
 BURNISH_ENTRY=score "$RUN" "$BASE" "$SUB" -- \
     "$OUT/raw.json" --generation "$GEN" --output "$OUT/receipt.json" \
+    ${CALIBRATION:+--calibration "$CALIBRATION"} \
     --ledger "$LEDGER" --pr "$PR"
 
 say "done"

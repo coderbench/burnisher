@@ -56,11 +56,12 @@ class AuditError(AssertionError):
     """A published verdict is not supported by its own published measurements."""
 
 
-def audit_one(raw_path, receipt_path, *, cells_root=None, verbose=True) -> dict:
+def audit_one(raw_path, receipt_path, *, cells_root=None, calibration=None,
+              verbose=True) -> dict:
     raw = json.loads(Path(raw_path).read_text())
     published = json.loads(Path(receipt_path).read_text())
     gen_name = published.get("benchmark_generation") or raw.get("generation")
-    gen = C.load(generation_path(gen_name, cells_root))
+    gen = C.load(generation_path(gen_name, cells_root), calibration=calibration)
     checks = []
 
     def check(name, ok, detail=""):
@@ -86,7 +87,8 @@ def audit_one(raw_path, receipt_path, *, cells_root=None, verbose=True) -> dict:
     # moving the base arm to manufacture a speedup moves its achieved fraction too, and the
     # drift guard notices before anything is scored.
     try:
-        out = CP.compute(gen, raw["records"], held_out_records=raw.get("held_out") or None)
+        out = CP.compute(gen, raw["records"], held_out_records=raw.get("held_out") or None,
+                         device=(raw.get("provenance") or {}).get("device"))
         rebuilt = R.build_receipt(
             generation=gen, per_cell=out["per_cell"], aggregate=out["aggregate"],
             interval=out["interval"], frontier=out["frontier"],

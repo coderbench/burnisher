@@ -178,7 +178,70 @@ scored as a change to what is measured.
 - **The cheap tier does not verify measurements.** It verifies that a verdict follows from data.
   Those are different claims and conflating them would be the exact failure this design exists to
   avoid.
-- **One box is one box.** Every figure in this repository comes from a single RTX 5090 running one
-  submission at a time. The calibration is pinned to that physical card; a validator on different
-  silicon must run `burnish probe` and `burnish calibrate` first, or the drift guard will refuse
-  to score rather than quietly measuring from the wrong denominator.
+- **Queueing is unmeasured.** Every figure here comes from one box running one submission at a
+  time. What a single submission costs is measured (~25 minutes); what happens when many arrive
+  at once is not.
+
+
+---
+
+## Running a validator: calibrate your own box first
+
+**Every validator calibrates their own hardware, and the score comes out the same anyway.** That
+is not a concession to operational reality — it is the arithmetic working.
+
+`achieved = ceiling / measured`, and both halves are properties of the card. Probe your own box
+and both scale with it and cancel. Use somebody else's ceiling with your own measurement and they
+do not:
+
+| | a card 3% slower than the reference |
+|:--|:--|
+| scored against the reference's calibration | **6% different score**, systematically, forever |
+| scored against its own calibration | **0.0000% different** |
+
+Two RTX 5090s really do differ by about 3% on achievable GEMM — `configs/devices.json` records
+the measurement. A 6% bias is not noise a bootstrap absorbs and not something an interval
+reveals; every submission a slower validator happened to pick up would pay less than the same
+submission elsewhere, and nothing in the receipt would say so.
+
+So the scorer **refuses** a run whose GPU UUID does not match the calibration it is being scored
+against. Loud failure instead of a quiet 6%.
+
+### Setup, once per box
+
+```bash
+# 1. measure this card's real peaks -- the ceilings are computed from them
+burnish probe --write
+
+# 2. measure each cell's achieved fraction and its own noise floor  (~30 min)
+burnish calibrate --repeats 9 --output /var/burnish/calibration.json
+
+# 3. point everything at it
+export BURNISH_CALIBRATION=/var/burnish/calibration.json
+```
+
+Keep the calibration **beside your ledger, not in the repository**. It describes your card. The
+committed `eval/cells/BG-1/reference.json` is the reference device's, kept so the repository's
+own published tables have something to stand on — it is not a default that happens to work for
+you.
+
+### Recalibrate when the box changes
+
+A driver update, a different card, a new thermal regime. You do not have to guess when: the drift
+guard measures it. If the base arm moves more than three noise floors from where the calibration
+says it should be, scoring stops and tells you, rather than computing every score from a stale
+denominator.
+
+The two checks answer different questions and both are needed:
+
+| check | question | settled by |
+|:--|:--|:--|
+| calibration identity | is this calibration even about this machine? | the GPU UUID |
+| drift guard | has this machine changed since? | a measurement |
+
+### What every receipt now says
+
+Each receipt records the calibration it was scored against — device, name, driver. Two validators
+scoring the same submission produce two receipts with two different calibrations and, if both
+boxes are honest, the same number. That is what makes `burnish challenge` meaningful: a
+disagreement is about the measurement, not about whose card it ran on.

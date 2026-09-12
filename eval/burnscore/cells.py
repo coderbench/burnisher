@@ -101,6 +101,16 @@ class Generation:
     # as expensive as it needed to be AND quieter than the floor it was judged against.
     calibrated_warmup: int = None
     calibrated_iters: int = None
+    # Which physical device the calibration above was measured on.
+    #
+    # Not the model name: "RTX 5090" is not an identity. Two of them differ by about 3% on the
+    # achievable GEMM rate, which is larger than most cells' floors, so a calibration carried
+    # over from another card is a set of numbers nobody measured HERE. The UUID is what makes
+    # "is this calibration mine?" a question with an answer.
+    calibration_device: str = None
+    calibration_device_name: str = None
+    calibration_driver: str = None
+    calibration_path: str = None
 
     @property
     def digest(self) -> str:
@@ -132,12 +142,39 @@ class Generation:
                           "from PAYING removes the incentive rather than policing it.")}
 
 
-def load(path) -> Generation:
+def load(path, calibration=None) -> Generation:
+    """Load a frozen generation, and the calibration of the box it will be scored on.
+
+    The split between these two files is the whole of what makes a score portable, and it is
+    worth stating precisely because the obvious arrangement is wrong.
+
+      generation.json   WHAT IS MEASURED. Cells, shapes, dtypes, tolerances, objectives, the
+                        sampling plan, the held-out list, the model pins. Frozen: receipts stay
+                        attached to it, and editing one silently re-scores history.
+
+      reference.json    WHAT THIS BOX DOES. Device peaks, ceilings, achieved fractions, noise
+                        floors. A measurement of hardware, so it belongs to the hardware, and
+                        every validator has their own.
+
+    The ceiling sits in the second file, not the first, and that placement is load-bearing. A
+    ceiling is `f(geometry, device peak)`: the geometry is frozen, the peak is local. Freezing
+    the CEILING rather than the geometry bakes one card's peak into everybody's ruler, and then
+    `achieved = ceiling / measured` moves with whichever card ran -- a 3% slower part reports a
+    6% different score, systematically, forever.
+
+    Probed locally, both halves of that ratio scale with the hardware and cancel. Measured: a 3%
+    difference in the card produces a 0.00% difference in gap-closed. That is what lets two
+    validators on two boxes agree about what a submission earned.
+
+    `calibration` overrides the committed reference.json -- it is how a validator scores against
+    their OWN box. The committed one is the reference device's, kept so the repository's own
+    published tables have something to stand on.
+    """
     p = Path(path)
     doc = json.loads(p.read_text())
     objectives = [Objective.from_json(o) for o in doc["objectives"]]
     cells = {}
-    ref_path = p.parent / "reference.json"
+    ref_path = Path(calibration) if calibration else (p.parent / "reference.json")
     calib = json.loads(ref_path.read_text()) if ref_path.exists() else {"cells": {}}
     for c in doc["cells"]:
         cal = calib.get("cells", {}).get(c["id"], {})
@@ -146,9 +183,22 @@ def load(path) -> Generation:
             wdtype=c["wdtype"], adtype=c.get("adtype", c["wdtype"]),
             implemented=bool(c.get("implemented", True)),
             weight=float(c.get("weight", 1.0)),
-            ceiling_seconds=c.get("ceiling_seconds"),
+            # The LOCAL ceiling when this box has been calibrated, the committed one otherwise.
+            # A generation's ceiling is what the reference device could do; a validator scoring
+            # on their own hardware has to use their own, or the achieved fraction is a ratio of
+            # one card's ceiling to another card's measurement.
+            ceiling_seconds=cal.get("ceiling_seconds") or c.get("ceiling_seconds"),
             achieved=cal.get("achieved"), floor_pct=cal.get("floor_pct"),
             floor_repeats=cal.get("floor_repeats"), notes=c.get("notes", ""))
+    # Which box this calibration describes. Carried so the scorer can refuse a run measured
+    # somewhere else -- see `require_calibrated_for`.
+    probe = calib.get("device_probe") or {}
+    gen_kwargs_extra = {
+        "calibration_device": probe.get("uuid"),
+        "calibration_device_name": probe.get("name"),
+        "calibration_driver": probe.get("driver_version"),
+        "calibration_path": str(ref_path) if ref_path.exists() else None,
+    }
     gen = Generation(
         name=doc["name"], description=doc["description"], model=doc["model"],
         device=doc["device"], objectives=objectives,
@@ -160,7 +210,8 @@ def load(path) -> Generation:
         repeats=int(doc.get("repeats", 3)),
         tolerance=doc.get("tolerance", {}), held_out=doc.get("held_out", {}), raw=doc,
         calibrated_warmup=(calib.get("calibrated_with") or {}).get("warmup"),
-        calibrated_iters=(calib.get("calibrated_with") or {}).get("iters"))
+        calibrated_iters=(calib.get("calibrated_with") or {}).get("iters"),
+        **gen_kwargs_extra)
     if gen.raw.get("_status"):
         # Kept loadable so the ceiling table still prints; refused by the scorer.
         pass

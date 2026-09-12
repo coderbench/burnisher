@@ -50,9 +50,60 @@ def group(records):
     return out
 
 
+def require_calibrated_for(generation, device: dict) -> None:
+    """Refuse to score a run measured on a box this calibration does not describe.
+
+    `achieved` is `ceiling / measured`, and both halves are properties of the hardware. Score a
+    run from card B against card A's calibration and the ratio is a mix of two machines: a 3%
+    difference in the part produces a systematic 6% difference in gap-closed, in the same
+    direction, forever. That is not noise a bootstrap can absorb -- it is a bias, and it would
+    quietly pay submissions differently depending on which validator happened to pick them up.
+
+    Calibrating locally makes both halves scale with the card and cancel: measured, a 3%
+    difference in the hardware produces a 0.00% difference in the score. So the fix is for every
+    validator to calibrate their own box -- and this is the check that makes forgetting to a
+    loud failure instead of a quiet 6%.
+
+    It is a separate check from the drift guard below, and the two answer different questions.
+    This one asks "is this calibration even about this machine?" and is settled by an identifier.
+    The drift guard asks "has this machine changed since?" and is settled by a measurement.
+    """
+    want = generation.calibration_device
+    # Anything that is not a device fingerprint is "unknown", not "mismatched". A raw file with
+    # no provenance, or provenance from an older runner that recorded the device as a bare
+    # string, is already flagged by `code_provenance_complete`; refusing it here would break
+    # every synthetic fixture to catch nothing.
+    got = device.get("uuid") if isinstance(device, dict) else None
+    if not want or not got or want == got:
+        return
+    raise ComputeError(
+        f"this run was measured on {got} and the calibration describes "
+        f"{want}.\n"
+        f"  calibration: {generation.calibration_path or 'the committed reference.json'}\n"
+        f"               {generation.calibration_device_name}, driver "
+        f"{generation.calibration_driver}\n\n"
+        f"  A calibration is a measurement OF A CARD. `achieved` is ceiling over measured and "
+        f"both\n  are properties of the hardware, so scoring one card's run against another "
+        f"card's\n  calibration mixes two machines -- and two RTX 5090s differ by about 3% on "
+        f"achievable\n  GEMM, which lands as a systematic ~6% difference in gap-closed rather "
+        f"than as noise.\n\n"
+        f"  Calibrate this box once, and every score it produces becomes comparable with every\n"
+        f"  other validator's:\n\n"
+        f"      burnish probe --write\n"
+        f"      burnish calibrate --repeats 9 --write --output <your calibration>.json\n"
+        f"      burnish score ... --calibration <your calibration>.json\n")
+
+
 def compute(generation, records, *, held_out_records=None, allow_partial=False,
-            reference_drift_guard=True):
-    """Score a submission. `generation` is frozen; `records` are what the runner measured."""
+            reference_drift_guard=True, device=None):
+    """Score a submission. `generation` is frozen; `records` are what the runner measured.
+
+    `device` is the box the records were measured on, from the raw file's provenance. Passed so
+    the calibration can be checked against it: a calibration is a measurement of a particular
+    card, and scoring against somebody else's is a bias rather than an error bar.
+    """
+    if device is not None:
+        require_calibrated_for(generation, device)
     uncalibrated = [c.id for c in generation.cells.values()
                     if c.implemented and not c.calibrated]
     _require(not uncalibrated,

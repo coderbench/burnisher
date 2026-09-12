@@ -151,7 +151,7 @@ def build_receipt(*, generation, per_cell, aggregate, interval, frontier, correc
         "coverage": coverage,
         "held_out_survived": held_out,
         "credit_withheld": credit_withheld,
-        "provenance": _with_completeness(provenance),
+        "provenance": _with_completeness(with_calibration(provenance, generation)),
         "supersedes": supersedes or [],
         "supersede_reason": supersede_reason,
     }
@@ -164,6 +164,27 @@ def build_receipt(*, generation, per_cell, aggregate, interval, frontier, correc
 # A receipt that cannot name them is still a valid measurement -- it just is not evidence about
 # any particular commit, which is a different and much weaker thing.
 _CODE_PROVENANCE = ("candidate_commit", "base_commit", "instrument_from")
+
+
+def with_calibration(provenance: dict, generation) -> dict:
+    """Stamp the receipt with the calibration it was scored against.
+
+    Every validator calibrates their own box, so two receipts for one submission were scored
+    with two different sets of ceilings and floors. That is correct and it is what makes the
+    scores comparable -- but it means a receipt that does not name its calibration cannot be
+    told apart from one scored against somebody else's, and a challenge could not distinguish a
+    real disagreement from a stale calibration on one side.
+    """
+    p = dict(provenance or {})
+    p["calibration"] = {
+        "device_uuid": generation.calibration_device,
+        "device_name": generation.calibration_device_name,
+        "driver_version": generation.calibration_driver,
+        "_why": ("A calibration is a measurement of one physical card. `achieved` is ceiling "
+                 "over measured and both are properties of the hardware, so a run is scored "
+                 "against the calibration of the box it ran on -- never another's."),
+    }
+    return p
 
 
 def _with_completeness(provenance: dict) -> dict:

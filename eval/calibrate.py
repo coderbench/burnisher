@@ -62,8 +62,18 @@ def main():
                          "floor comes from the spread ACROSS invocations, not within one, so "
                          "this trades a little within-run stability for more paired repeats -- "
                          "and the repeats are what the floor is made of.")
-    ap.add_argument("--write", action="store_true", help="update reference.json in place")
-    ap.add_argument("--output")
+    # --write updates the committed reference.json, which is the REFERENCE DEVICE's calibration
+    # and part of the instrument. A validator calibrating their own box wants --output instead:
+    # their calibration belongs beside their ledger, not in a repository everybody shares.
+    ap.add_argument("--write", action="store_true",
+                    help="update the committed reference.json in place. This is the reference "
+                         "device's calibration and part of the instrument -- if you are a "
+                         "validator calibrating your own box, use --output.")
+    ap.add_argument("--output",
+                    help="write this box's calibration here, to pass to `burnish score "
+                         "--calibration`. Keep it beside your ledger: it describes YOUR card, "
+                         "and a calibration used on a different one biases every score it "
+                         "produces in the same direction.")
     args = ap.parse_args()
 
     gpath = generation_path(args.generation, args.cells_root)
