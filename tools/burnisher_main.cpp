@@ -786,14 +786,16 @@ int cmd_encode(const Args& a) {
 int cmd_schedule(const Args& a) {
     const int steps = static_cast<int>(a.num("steps", 20));
     const int64_t n = a.num("size", 16);
+    const DType dt = dtype_arg(a);
     SchedulerConfig cfg;
     DPMSolverMultistep sched(cfg);
     sched.set_timesteps(steps);
 
-    Tensor sample({n}, DType::F32);
+    Tensor sample({n}, dt);
     for (int64_t i = 0; i < n; ++i) sample.set(i, static_cast<float>(std::sin(i * 0.7)));
-    Tensor eps({n}, DType::F32);
-    // The trajectory, one row per step plus the final state.
+    Tensor eps({n}, dt);
+    // The trajectory, one row per step plus the final state. Always fp32 so the DUMP does not
+    // add a rounding the comparison would then attribute to the sampler.
     Tensor traj({steps + 1, n}, DType::F32);
     for (int64_t i = 0; i < n; ++i) traj.set(i, sample.get(i));
     for (int i = 0; i < steps; ++i) {
@@ -808,7 +810,8 @@ int cmd_schedule(const Args& a) {
     std::ostringstream ts;
     for (int i = 0; i < steps; ++i) ts << (i ? "," : "") << sched.timestep(i);
     std::cout << "BURNISH_JSON: {\"effective\":{\"steps\":" << steps
-              << ",\"size\":" << n << "},\"timesteps\":[" << ts.str()
+              << ",\"size\":" << n << ",\"dtype\":\"" << dtype_name(dt)
+              << "\"},\"timesteps\":[" << ts.str()
               << "],\"output_stats\":" << stats_json(OutputStats::of(traj)) << "}\n";
     return 0;
 }

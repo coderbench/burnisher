@@ -241,7 +241,8 @@ def stage_scheduler(args):
     steps, n = args.steps, 16
     ours_json = subprocess.run(
         [str(args.binary), "schedule", "--steps", str(steps), "--size", str(n),
-         "--out", "/tmp/diff_sched.npy"], capture_output=True, text=True, check=True)
+         "--dtype", args.dtype, "--out", "/tmp/diff_sched.npy"],
+        capture_output=True, text=True, check=True)
     ours = np.load("/tmp/diff_sched.npy")
     our_ts = json.loads(ours_json.stdout.split("BURNISH_JSON:", 1)[1])["timesteps"]
 
@@ -262,14 +263,19 @@ def stage_scheduler(args):
         return False
     print(f"  timesteps agree ({steps} values, {ref_ts[0]} down to {ref_ts[-1]})")
 
-    sample = torch.tensor([np.sin(i * 0.7) for i in range(n)], dtype=torch.float32)
-    traj = [sample.numpy().copy()]
+    # The reference sampler at the SAME dtype. At high sigma the x0 prediction is two orders of
+    # magnitude larger than the latent, so where a sampler rounds matters enormously -- which is
+    # exactly what this comparison is for.
+    td = {"fp32": torch.float32, "bf16": torch.bfloat16}[args.dtype]
+    sample = torch.tensor([np.sin(i * 0.7) for i in range(n)], dtype=td)
+    traj = [sample.float().numpy().copy()]
     for i, t in enumerate(sched.timesteps):
-        eps = torch.tensor([np.cos(j * 0.3 + i * 0.11) for j in range(n)], dtype=torch.float32)
+        eps = torch.tensor([np.cos(j * 0.3 + i * 0.11) for j in range(n)], dtype=td)
         sample = sched.step(eps, t, sample, return_dict=False)[0]
-        traj.append(sample.numpy().copy())
+        traj.append(sample.float().numpy().copy())
     ref = np.stack(traj)
-    return report("scheduler", ours, ref, tolerance=1e-5)
+    tol = args.tolerance if args.tolerance else (1e-5 if args.dtype == "fp32" else 5e-2)
+    return report("scheduler", ours, ref, tolerance=tol)
 
 
 STAGES = {"scheduler": stage_scheduler, "vae-decode": stage_vae, "dit-step": stage_dit,
