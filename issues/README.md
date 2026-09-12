@@ -10,6 +10,8 @@ quotes a MEASURED figure from the pinned hardware it says so in its Basis line a
 names the artifact the figure came from; everywhere else, the number is a bound and
 publishing it as a gain is the one thing a submission must never do.
 
+## Open
+
 | issue | title | labels |
 |:--|:--|:--|
 | [`dit-attention`](dit-attention.md) | DiT self-attention at 4k-16k tokens | kernel, dit, cuda |
@@ -23,6 +25,14 @@ publishing it as a gain is the one thing a submission must never do.
 | [`cuda-graphs`](cuda-graphs.md) | Capture the denoise loop as a CUDA graph | cuda, launch-overhead |
 | [`offload`](offload.md) | Offload and streaming: video models do not fit | memory, streaming, frontier |
 | [`shape-specialization`](shape-specialization.md) | Per-resolution shape specialization and the held-out guard | kernel, anti-gaming |
-| [`cuda-op-backend`](cuda-op-backend.md) | The CUDA op backend does not exist yet | cuda, blocking, v0 |
-| [`checkpoint-load`](checkpoint-load.md) | Load the pinned checkpoint and pin the reference latents | blocking, correctness, v0 |
 | [`video-temporal`](video-temporal.md) | Temporal and sparse attention across frames | future, video |
+
+## Closed
+
+Kept rather than deleted. Each says what the problem was and what settled it;
+between them they are most of what this repository learned building v0.
+
+| issue | title | labels |
+|:--|:--|:--|
+| [`cuda-op-backend`](cuda-op-backend.md) | The CUDA op backend | cuda, v0 |
+| [`checkpoint-load`](checkpoint-load.md) | Load the pinned checkpoint and pin the reference latents | correctness, v0 |

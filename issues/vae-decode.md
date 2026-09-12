@@ -1,5 +1,6 @@
 # VAE decode: tiling, fusion, and the mid-block attention
 
+**Status:** open  
 **Labels:** kernel, vae, cuda  
 **Basis:** model (arithmetic). No measurement appears below.  
 **Device:** NVIDIA GeForce RTX 5090

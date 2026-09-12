@@ -1,5 +1,6 @@
 # Step and feature caching: algorithmic, and it must pass the gate
 
+**Status:** open  
 **Labels:** algorithm, scheduler  
 **Basis:** model (arithmetic). No measurement appears below.  
 **Device:** NVIDIA GeForce RTX 5090

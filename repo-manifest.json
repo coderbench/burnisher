@@ -48,6 +48,7 @@
   "eval/burnscore/roofline.py",
   "eval/calibrate.py",
   "eval/cells/BG-1/dtype-cost.json",
+  "eval/cells/BG-1/dtype-latency.json",
   "eval/cells/BG-1/generation.json",
   "eval/cells/BG-1/prompts.json",
   "eval/cells/BG-1/reference-latents-bfloat16/dense-detail.npy",

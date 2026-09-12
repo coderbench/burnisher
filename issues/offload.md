@@ -1,5 +1,6 @@
 # Offload and streaming: video models do not fit
 
+**Status:** open  
 **Labels:** memory, streaming, frontier  
 **Basis:** model (arithmetic). No measurement appears below.  
 **Device:** NVIDIA GeForce RTX 5090

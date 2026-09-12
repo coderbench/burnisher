@@ -1,5 +1,6 @@
 # T5-XXL: 89% of the checkpoint, 2% of the clock
 
+**Status:** open  
 **Labels:** memory, quantization, text-encoder  
 **Basis:** model (arithmetic). No measurement appears below.  
 **Device:** NVIDIA GeForce RTX 5090

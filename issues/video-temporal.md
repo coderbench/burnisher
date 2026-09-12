@@ -1,5 +1,6 @@
 # Temporal and sparse attention across frames
 
+**Status:** open  
 **Labels:** future, video  
 **Basis:** model (arithmetic). No measurement appears below.  
 **Device:** NVIDIA GeForce RTX 5090

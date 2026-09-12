@@ -1,5 +1,6 @@
 # Per-resolution shape specialization and the held-out guard
 
+**Status:** open  
 **Labels:** kernel, anti-gaming  
 **Basis:** model (arithmetic). No measurement appears below.  
 **Device:** NVIDIA GeForce RTX 5090

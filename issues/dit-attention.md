@@ -1,5 +1,6 @@
 # DiT self-attention at 4k-16k tokens
 
+**Status:** open  
 **Labels:** kernel, dit, cuda  
 **Basis:** model (arithmetic). No measurement appears below.  
 **Device:** NVIDIA GeForce RTX 5090

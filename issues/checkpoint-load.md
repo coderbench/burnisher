@@ -1,44 +1,50 @@
 # Load the pinned checkpoint and pin the reference latents
 
-**Labels:** blocking, correctness, v0  
+**Status:** CLOSED -- 962 tensors verified, ids committed with digests, reference latents pinned  
+**Labels:** correctness, v0  
 **Basis:** model (arithmetic). No measurement appears below.  
 **Device:** NVIDIA GeForce RTX 5090
 
-`burnisher generate --weights DIR --token-ids FILE` is wired and loads a real checkpoint. Three
-things stood between this repository and its first real number. One and a half are now done.
+**What this was.** Three things stood between this repository and its first real number: a
+checkpoint layout mapping nobody had checked against a real checkpoint, prompt ids that did not
+exist, and reference latents that could not be produced by this runtime without making the
+candidate its own oracle.
 
-**1. The checkpoint layout mapping — DONE, and verified.** `SafeTensors` maps a file and resolves
-tensors by name, and `declare_pixart_shapes()` enumerates every name the three models ask for.
-All **962** of them have now been checked against the real checkpoint at the pinned
-revisions: **0 missing, 0 wrong shape**.
+**1. The layout mapping -- verified.** `declare_pixart_shapes()` enumerates every tensor the
+three models ask for. All **962** have been checked against the real checkpoint at the
+pinned revisions: **0 missing, 0 wrong
+shape**.
 
 The check costs about 1.8 MB rather than 22 GB. A safetensors file begins with an 8-byte header
 length and then that many bytes of JSON naming every tensor and its shape, so two HTTP range
-requests per shard fetch the whole layout. `scripts/verify_checkpoint_layout.py` does it;
-`configs/checkpoint-layout.json` is the committed record, and CI re-checks the runtime against it
-offline on every push.
+requests per shard fetch the whole layout. `scripts/verify_checkpoint_layout.py` does it,
+`configs/checkpoint-layout.json` is the committed record, and CI re-checks the runtime against
+it offline on every push -- which is why this stays useful after being closed.
 
-It found one real defect on its first run — `pos_embed.proj.weight` was declared flattened as
-`[1152, 16]` where the checkpoint stores the conv layout `[1152, 4, 2, 2]`. Same bytes in the same
-order, so the runtime would have worked; the declaration was still wrong, and a shape that file
-gets wrong is a shape nothing else can catch.
+It found a real defect on its first run: `pos_embed.proj.weight` was declared flattened as
+`[1152, 16]` where the checkpoint stores the conv layout `[1152, 4, 2, 2]`. Same bytes in the
+same order, so the runtime would have worked; the declaration was still wrong, and a shape that
+file gets wrong is a shape nothing else can catch.
 
-**2. Pre-tokenized prompt ids.** The T5 tokenizer is a SentencePiece model. Vendoring one would
-put a second oracle in the repository, so `burnisher generate --token-ids FILE` takes ids
-directly — one prompt per line, negative first under classifier-free guidance. What is missing is
-the ids themselves: the frozen prompt set is `eval/cells/BG-1/prompts.json` and its four prompts
-need their ids produced with the pinned tokenizer and committed with a digest.
-docs/CORRECTNESS.md has the procedure.
+**2. Pre-tokenized ids -- committed.** The T5 tokenizer is a SentencePiece model, and vendoring
+one would put a second oracle in the repository, so `--token-ids FILE` takes ids directly. The
+four frozen prompts' ids are committed with the tokenizer digest beside them in
+`eval/cells/BG-1/token-ids.json`, and the gate refuses a run whose ids do not match it.
 
-**3. The reference latents.** The gate compares against latents produced by the PINNED reference
-implementation at the PINNED revision. They cannot be produced by this runtime -- that would make
-the candidate its own oracle -- and they do not exist yet. Until they do, `burnish gate` reports
-`NO_REFERENCE` and refuses, which is the correct behaviour and not a workaround to be removed.
+**3. The reference latents -- pinned, in two dtypes.** `eval/cells/BG-1/reference-latents/` and
+`reference-latents-bfloat16/` hold four latents each with a manifest, produced by the pinned
+reference implementation at the pinned revision. The starting noise is committed with them and
+passed to the runtime as an INPUT: two RNGs agreeing bit for bit is not a thing to depend on,
+and regenerating noise at the compute dtype starts a bf16 run and an fp32 reference from
+different points -- which for a while meant the gate was measuring RNG rounding.
 
-**Pin the reference hard.** It drifts between versions and it is the oracle for everything else.
-The revision in `configs/candidates.json` is pinned to a commit; the reference implementation's
-own version must be pinned the same way, in docs/CORRECTNESS.md, and a moved pin is a new
-generation rather than an edit.
+**What this taught, and it changed the gate.** `eval/cells/BG-1/dtype-cost.json` records the
+reference compared against *itself* across dtypes: worst relative L2 **0.3713**. So an
+end-to-end latent comparison at bf16 cannot gate correctness -- the oracle disagrees with itself
+by more than a real defect would. The gate therefore checks assembly in fp32, where the same
+comparison lands at 0.0005, and checks the reduced-precision path stage by stage at the scored
+dtype. A tolerance argued from one forward pass would have been wrong in both directions;
+`configs/tolerance.json` carries the measurements and the reasoning instead.
 
 ---
 

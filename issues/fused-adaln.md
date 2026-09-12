@@ -1,5 +1,6 @@
 # Fuse AdaLN modulation into its neighbours
 
+**Status:** open  
 **Labels:** kernel, fusion, dit  
 **Basis:** model (arithmetic). No measurement appears below.  
 **Device:** NVIDIA GeForce RTX 5090

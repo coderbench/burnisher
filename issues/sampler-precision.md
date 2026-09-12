@@ -1,5 +1,6 @@
 # The sampler quantises a 300-magnitude intermediate to bf16
 
+**Status:** open  
 **Labels:** numerics, measured, scheduler  
 **Basis:** model (arithmetic). No measurement appears below.  
 **Device:** NVIDIA GeForce RTX 5090

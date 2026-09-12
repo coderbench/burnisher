@@ -186,9 +186,17 @@ move.
 ISSUES = []
 
 
-def issue(slug, title, labels):
+def issue(slug, title, labels, closed_by=None):
+    """Register one backlog issue. `closed_by` names what closed it, and closing is not deleting.
+
+    A backlog is read by somebody choosing what to work on, so an item describing finished work
+    is worse than no item at all -- it costs whoever picks it a day before they find out. But
+    deleting it loses the record of what the problem was and what settled it, and this repository
+    is built on the premise that knowing why a guard exists is the point. So a closed issue stays,
+    with its own section in the index, saying plainly that it is done and what did it.
+    """
     def wrap(fn):
-        ISSUES.append((slug, title, labels, fn))
+        ISSUES.append((slug, title, labels, fn, closed_by))
         return fn
     return wrap
 
@@ -571,86 +579,95 @@ contribution; a lookup table keyed on 4096 tokens is not.
 """
 
 
-@issue("cuda-op-backend", "The CUDA op backend does not exist yet",
-       ["cuda", "blocking", "v0"])
+@issue("cuda-op-backend", "The CUDA op backend", ["cuda", "v0"],
+       closed_by="every op has a `cuda` implementation, gated and calibrated on an RTX 5090")
 def _(f):
-    return f"""
-**This is the largest missing piece in the repository and it blocks every measurement.**
+    return MEASURED_MARK + f"""
+**What this was.** For most of v0 `src/cuda/` held `device.cu` -- the probe -- and nothing else.
+There was no toolkit and no Blackwell part, and shipping kernels that had never been compiled,
+let alone run, as though they worked is the exact failure this repository exists to avoid. Every
+cell's `achieved` and `floor_pct` was null, every ceiling stood on a vendor peak rather than a
+probed one, and the scorer was complete, tested against synthetic records, and had never scored
+a real measurement.
 
-What exists: the op registry, six ops with complete CPU reference implementations, the three
-model graphs, the scheduler, the pipeline, and a `probe` that measures a device's real peaks.
-`burnisher selftest` runs the entire graph end to end and reproduces itself byte for byte.
+**What closed it.** All fifteen ops now register a `cuda` implementation beside the CPU
+reference rather than replacing it, so the oracle stays runnable and any device kernel can be
+diffed against it under the correctness gate. The three cells are calibrated on the pinned box
+and `eval/cells/BG-1/reference.json` records the probe that identifies it. `examples/` holds the
+first real receipt and the raw measurements behind it.
 
-What does not exist: a CUDA implementation of any op. `src/cuda/` contains `device.cu` -- the
-probe -- and nothing else. There was no CUDA toolkit and no Blackwell part available when this
-was written, and shipping kernels that had never been compiled, let alone run, as though they
-worked is the exact failure this repository is built to avoid. docs/STATUS.md says so in those
-words.
+**What it cost, which is the part worth keeping.** Getting from "the kernels compile" to "the
+kernels are right" took six defects, and five of them were invisible to a passing test suite:
 
-**The consequence, stated plainly.** Every cell's `achieved` and `floor_pct` is null. Every
-ceiling stands on a VENDOR device peak rather than a probed one. `burnish calibrate`,
-`burnish gate` and `burnish bench` all refuse to run rather than estimating. The scorer is
-complete and tested against synthetic measurements and has never scored a real one.
+- attention indexed `[batch, heads, seq, dim]` over head-LAST buffers;
+- padding was never masked, so the caption's tail voted;
+- the output patch ordering was transposed -- relative L2 of 1.37 with *identical* mean and
+  standard deviation, which is the signature of a permutation rather than an arithmetic error;
+- the sampler used a Karras sigma ratio where the reference uses VP;
+- `atomicAdd` in the attention reduction made the run non-deterministic, which the gate caught
+  before any of the above could be measured;
+- `gather` cast fp32 token ids through the weight table's dtype, so at bf16 the ids themselves
+  were rounded. Every fp32 test passed. The pipeline diverged by 1.20 at bf16 and by nothing at
+  fp32, which is why the gate now checks assembly in fp32 AND every stage at the scored dtype.
 
-**The shape of the work**, in the order that unblocks the most:
+The last one is the argument for the whole apparatus: it was found by a step sweep (0.993 at one
+step, so a defect and not accumulated chaos), then a stage bisect, then a layer bisect, then CPU
+versus CUDA at bf16. No amount of reading the kernel would have found it.
 
-1. Device storage for `Tensor` (a `Device::CUDA` allocation path with a high-water mark, which
-   the memory objective needs anyway).
-2. `gemm` through cuBLASLt, honouring `b_transposed` and the epilogue -- the epilogue is where
-   the AdaLN fusion lands later.
-3. `attention`, both registered names, so the naive path stays measurable.
-4. `norm`, `modulate`, `activation` -- simple, and they are the fusion targets.
-5. `conv2d` -- the VAE's shapes are few and fixed, which is what makes a specialized path
-   plausible.
-
-Each one registers a NAME beside the CPU reference rather than replacing it, so the CPU oracle
-stays runnable and a device kernel can be diffed against it under the correctness gate.
-
-The CI job `cuda-compile` compiles `device.cu` for sm_120 on a runner with a toolkit. It is
-`continue-on-error` today because nothing in this repository has ever seen nvcc.
+**What remains, and it is not this issue.** The kernels are correct and slow -- deliberately, per
+docs/CONTRIBUTING.md. `dit-step/1024/bf16` sits at {100 * f['dit_achieved']:.1f}% of its
+arithmetic ceiling, which is {f['dit_ceiling_bf16_ms']:.1f} ms against a measured
+{1e3 * json.loads((ROOT / 'eval' / 'cells' / 'BG-1' / 'reference.json').read_text())['cells']['dit-step/1024/bf16']['measured_seconds']:.0f} ms.
+That gap is what every other issue in this backlog is for.
 """
 
 
 @issue("checkpoint-load", "Load the pinned checkpoint and pin the reference latents",
-       ["blocking", "correctness", "v0"])
+       ["correctness", "v0"],
+       closed_by="962 tensors verified, ids committed with digests, reference latents pinned")
 def _(f):
     n_tensors = f["checkpoint_tensors_verified"]
     return f"""
-`burnisher generate --weights DIR --token-ids FILE` is wired and loads a real checkpoint. Three
-things stood between this repository and its first real number. One and a half are now done.
+**What this was.** Three things stood between this repository and its first real number: a
+checkpoint layout mapping nobody had checked against a real checkpoint, prompt ids that did not
+exist, and reference latents that could not be produced by this runtime without making the
+candidate its own oracle.
 
-**1. The checkpoint layout mapping — DONE, and verified.** `SafeTensors` maps a file and resolves
-tensors by name, and `declare_pixart_shapes()` enumerates every name the three models ask for.
-All **{n_tensors}** of them have now been checked against the real checkpoint at the pinned
-revisions: **{f['checkpoint_missing']} missing, {f['checkpoint_wrong_shape']} wrong shape**.
+**1. The layout mapping -- verified.** `declare_pixart_shapes()` enumerates every tensor the
+three models ask for. All **{n_tensors}** have been checked against the real checkpoint at the
+pinned revisions: **{f['checkpoint_missing']} missing, {f['checkpoint_wrong_shape']} wrong
+shape**.
 
 The check costs about 1.8 MB rather than 22 GB. A safetensors file begins with an 8-byte header
 length and then that many bytes of JSON naming every tensor and its shape, so two HTTP range
-requests per shard fetch the whole layout. `scripts/verify_checkpoint_layout.py` does it;
-`configs/checkpoint-layout.json` is the committed record, and CI re-checks the runtime against it
-offline on every push.
+requests per shard fetch the whole layout. `scripts/verify_checkpoint_layout.py` does it,
+`configs/checkpoint-layout.json` is the committed record, and CI re-checks the runtime against
+it offline on every push -- which is why this stays useful after being closed.
 
-It found one real defect on its first run — `pos_embed.proj.weight` was declared flattened as
-`[1152, 16]` where the checkpoint stores the conv layout `[1152, 4, 2, 2]`. Same bytes in the same
-order, so the runtime would have worked; the declaration was still wrong, and a shape that file
-gets wrong is a shape nothing else can catch.
+It found a real defect on its first run: `pos_embed.proj.weight` was declared flattened as
+`[1152, 16]` where the checkpoint stores the conv layout `[1152, 4, 2, 2]`. Same bytes in the
+same order, so the runtime would have worked; the declaration was still wrong, and a shape that
+file gets wrong is a shape nothing else can catch.
 
-**2. Pre-tokenized prompt ids.** The T5 tokenizer is a SentencePiece model. Vendoring one would
-put a second oracle in the repository, so `burnisher generate --token-ids FILE` takes ids
-directly — one prompt per line, negative first under classifier-free guidance. What is missing is
-the ids themselves: the frozen prompt set is `eval/cells/BG-1/prompts.json` and its four prompts
-need their ids produced with the pinned tokenizer and committed with a digest.
-docs/CORRECTNESS.md has the procedure.
+**2. Pre-tokenized ids -- committed.** The T5 tokenizer is a SentencePiece model, and vendoring
+one would put a second oracle in the repository, so `--token-ids FILE` takes ids directly. The
+four frozen prompts' ids are committed with the tokenizer digest beside them in
+`eval/cells/BG-1/token-ids.json`, and the gate refuses a run whose ids do not match it.
 
-**3. The reference latents.** The gate compares against latents produced by the PINNED reference
-implementation at the PINNED revision. They cannot be produced by this runtime -- that would make
-the candidate its own oracle -- and they do not exist yet. Until they do, `burnish gate` reports
-`NO_REFERENCE` and refuses, which is the correct behaviour and not a workaround to be removed.
+**3. The reference latents -- pinned, in two dtypes.** `eval/cells/BG-1/reference-latents/` and
+`reference-latents-bfloat16/` hold four latents each with a manifest, produced by the pinned
+reference implementation at the pinned revision. The starting noise is committed with them and
+passed to the runtime as an INPUT: two RNGs agreeing bit for bit is not a thing to depend on,
+and regenerating noise at the compute dtype starts a bf16 run and an fp32 reference from
+different points -- which for a while meant the gate was measuring RNG rounding.
 
-**Pin the reference hard.** It drifts between versions and it is the oracle for everything else.
-The revision in `configs/candidates.json` is pinned to a commit; the reference implementation's
-own version must be pinned the same way, in docs/CORRECTNESS.md, and a moved pin is a new
-generation rather than an edit.
+**What this taught, and it changed the gate.** `eval/cells/BG-1/dtype-cost.json` records the
+reference compared against *itself* across dtypes: worst relative L2 **0.3713**. So an
+end-to-end latent comparison at bf16 cannot gate correctness -- the oracle disagrees with itself
+by more than a real defect would. The gate therefore checks assembly in fp32, where the same
+comparison lands at 0.0005, and checks the reduced-precision path stage by stage at the scored
+dtype. A tolerance argued from one forward pass would have been wrong in both directions;
+`configs/tolerance.json` carries the measurements and the reasoning instead.
 """
 
 
@@ -697,16 +714,21 @@ def main():
              "quotes a MEASURED figure from the pinned hardware it says so in its Basis line and",
              "names the artifact the figure came from; everywhere else, the number is a bound and",
              "publishing it as a gain is the one thing a submission must never do.",
-             "", "| issue | title | labels |", "|:--|:--|:--|"]
+             "", "## Open", "",
+             "| issue | title | labels |", "|:--|:--|:--|"]
+    closed_rows = []
 
-    for slug, title, labels, fn in ISSUES:
+    for slug, title, labels, fn, closed_by in ISSUES:
         body = fn(f).strip()
         measured = MEASURED_MARK in body
         body = body.replace(MEASURED_MARK, "").strip()
         basis = ("model (arithmetic) for every ceiling, and clearly marked where a MEASURED\n"
                  "figure from the pinned hardware is quoted alongside one. A ceiling is not a gain."
                  if measured else "model (arithmetic). No measurement appears below.")
+        status = (f"**Status:** CLOSED -- {closed_by}  \n" if closed_by
+                  else "**Status:** open  \n")
         text = (f"# {title}\n\n"
+                f"{status}"
                 f"**Labels:** {', '.join(labels)}  \n"
                 f"**Basis:** {basis}  \n"
                 f"**Device:** {f['device']}\n\n"
@@ -719,8 +741,14 @@ def main():
         if args.write:
             out_dir.mkdir(parents=True, exist_ok=True)
             (out_dir / f"{slug}.md").write_text(text)
-        index.append(f"| [`{slug}`]({slug}.md) | {title} | {', '.join(labels)} |")
+        row = f"| [`{slug}`]({slug}.md) | {title} | {', '.join(labels)} |"
+        (closed_rows if closed_by else index).append(row)
 
+    if closed_rows:
+        index += ["", "## Closed", "",
+                  "Kept rather than deleted. Each says what the problem was and what settled it;",
+                  "between them they are most of what this repository learned building v0.", "",
+                  "| issue | title | labels |", "|:--|:--|:--|"] + closed_rows
     index_text = "\n".join(index) + "\n"
     if args.write:
         (out_dir / "README.md").write_text(index_text)

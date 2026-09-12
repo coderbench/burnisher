@@ -1,5 +1,6 @@
 # NVFP4 and MXFP4 on silicon with no reference tuning
 
+**Status:** open  
 **Labels:** quantization, cuda, cartography  
 **Basis:** model (arithmetic) for every ceiling, and clearly marked where a MEASURED
 figure from the pinned hardware is quoted alongside one. A ceiling is not a gain.  

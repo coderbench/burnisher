@@ -1,5 +1,6 @@
 # A single generation is dominated by uploading the weights
 
+**Status:** open  
 **Labels:** cuda, measured, startup  
 **Basis:** model (arithmetic). No measurement appears below.  
 **Device:** NVIDIA GeForce RTX 5090

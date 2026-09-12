@@ -1,5 +1,6 @@
 # Capture the denoise loop as a CUDA graph
 
+**Status:** open  
 **Labels:** cuda, launch-overhead  
 **Basis:** model (arithmetic). No measurement appears below.  
 **Device:** NVIDIA GeForce RTX 5090

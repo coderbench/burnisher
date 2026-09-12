@@ -1,42 +1,47 @@
-# The CUDA op backend does not exist yet
+# The CUDA op backend
 
-**Labels:** cuda, blocking, v0  
-**Basis:** model (arithmetic). No measurement appears below.  
+**Status:** CLOSED -- every op has a `cuda` implementation, gated and calibrated on an RTX 5090  
+**Labels:** cuda, v0  
+**Basis:** model (arithmetic) for every ceiling, and clearly marked where a MEASURED
+figure from the pinned hardware is quoted alongside one. A ceiling is not a gain.  
 **Device:** NVIDIA GeForce RTX 5090
 
-**This is the largest missing piece in the repository and it blocks every measurement.**
+**What this was.** For most of v0 `src/cuda/` held `device.cu` -- the probe -- and nothing else.
+There was no toolkit and no Blackwell part, and shipping kernels that had never been compiled,
+let alone run, as though they worked is the exact failure this repository exists to avoid. Every
+cell's `achieved` and `floor_pct` was null, every ceiling stood on a vendor peak rather than a
+probed one, and the scorer was complete, tested against synthetic records, and had never scored
+a real measurement.
 
-What exists: the op registry, six ops with complete CPU reference implementations, the three
-model graphs, the scheduler, the pipeline, and a `probe` that measures a device's real peaks.
-`burnisher selftest` runs the entire graph end to end and reproduces itself byte for byte.
+**What closed it.** All fifteen ops now register a `cuda` implementation beside the CPU
+reference rather than replacing it, so the oracle stays runnable and any device kernel can be
+diffed against it under the correctness gate. The three cells are calibrated on the pinned box
+and `eval/cells/BG-1/reference.json` records the probe that identifies it. `examples/` holds the
+first real receipt and the raw measurements behind it.
 
-What does not exist: a CUDA implementation of any op. `src/cuda/` contains `device.cu` -- the
-probe -- and nothing else. There was no CUDA toolkit and no Blackwell part available when this
-was written, and shipping kernels that had never been compiled, let alone run, as though they
-worked is the exact failure this repository is built to avoid. docs/STATUS.md says so in those
-words.
+**What it cost, which is the part worth keeping.** Getting from "the kernels compile" to "the
+kernels are right" took six defects, and five of them were invisible to a passing test suite:
 
-**The consequence, stated plainly.** Every cell's `achieved` and `floor_pct` is null. Every
-ceiling stands on a VENDOR device peak rather than a probed one. `burnish calibrate`,
-`burnish gate` and `burnish bench` all refuse to run rather than estimating. The scorer is
-complete and tested against synthetic measurements and has never scored a real one.
+- attention indexed `[batch, heads, seq, dim]` over head-LAST buffers;
+- padding was never masked, so the caption's tail voted;
+- the output patch ordering was transposed -- relative L2 of 1.37 with *identical* mean and
+  standard deviation, which is the signature of a permutation rather than an arithmetic error;
+- the sampler used a Karras sigma ratio where the reference uses VP;
+- `atomicAdd` in the attention reduction made the run non-deterministic, which the gate caught
+  before any of the above could be measured;
+- `gather` cast fp32 token ids through the weight table's dtype, so at bf16 the ids themselves
+  were rounded. Every fp32 test passed. The pipeline diverged by 1.20 at bf16 and by nothing at
+  fp32, which is why the gate now checks assembly in fp32 AND every stage at the scored dtype.
 
-**The shape of the work**, in the order that unblocks the most:
+The last one is the argument for the whole apparatus: it was found by a step sweep (0.993 at one
+step, so a defect and not accumulated chaos), then a stage bisect, then a layer bisect, then CPU
+versus CUDA at bf16. No amount of reading the kernel would have found it.
 
-1. Device storage for `Tensor` (a `Device::CUDA` allocation path with a high-water mark, which
-   the memory objective needs anyway).
-2. `gemm` through cuBLASLt, honouring `b_transposed` and the epilogue -- the epilogue is where
-   the AdaLN fusion lands later.
-3. `attention`, both registered names, so the naive path stays measurable.
-4. `norm`, `modulate`, `activation` -- simple, and they are the fusion targets.
-5. `conv2d` -- the VAE's shapes are few and fixed, which is what makes a specialized path
-   plausible.
-
-Each one registers a NAME beside the CPU reference rather than replacing it, so the CPU oracle
-stays runnable and a device kernel can be diffed against it under the correctness gate.
-
-The CI job `cuda-compile` compiles `device.cu` for sm_120 on a runner with a toolkit. It is
-`continue-on-error` today because nothing in this repository has ever seen nvcc.
+**What remains, and it is not this issue.** The kernels are correct and slow -- deliberately, per
+docs/CONTRIBUTING.md. `dit-step/1024/bf16` sits at 1.5% of its
+arithmetic ceiling, which is 54.4 ms against a measured
+3571 ms.
+That gap is what every other issue in this backlog is for.
 
 ---
 
