@@ -53,7 +53,7 @@ def _git(*a):
 
 
 def generate(binary, generation, token_ids_file, seed, impl, *, out_dir, label, weights,
-             device, dtype, noise):
+             device, dtype, noise, steps=None):
     """One generation, dumping the denoised LATENT.
 
     Token IDS, not a prompt string. The T5 tokenizer is a SentencePiece model and the runtime
@@ -61,6 +61,7 @@ def generate(binary, generation, token_ids_file, seed, impl, *, out_dir, label, 
     from `scripts/tokenize_prompts.py` and their digest is recorded in this report, so a changed
     tokenization is a changed comparison and says so.
     """
+    steps = steps or generation.model["steps"]
     out = Path(out_dir) / f"{label}.npy"
     cmd = [str(binary), "generate",
            "--weights", str(weights),
@@ -71,7 +72,7 @@ def generate(binary, generation, token_ids_file, seed, impl, *, out_dir, label, 
            "--dtype", dtype,
            "--noise", str(noise),
            "--resolution", str(generation.model["resolution"]),
-           "--steps", str(generation.model["steps"]),
+           "--steps", str(steps),
            "--guidance-scale", str(generation.raw["model"]["guidance_scale"]),
            "--dump-latents", str(out)]
     code, text, _ = run_once(cmd)
@@ -114,6 +115,11 @@ def main():
                     help="the pinned initial latent, from `burnisher noise`. The SAME file the "
                          "reference latents were produced from -- see their manifest's "
                          "noise_sha256.")
+    ap.add_argument("--steps", type=int,
+                    help="override the generation's step count. For measuring WHERE a "
+                         "divergence takes off: in a chaotic trajectory an implementation "
+                         "difference and a rounding difference are indistinguishable after "
+                         "enough steps, and the gate can only discriminate before that.")
     ap.add_argument("--repeats", type=int, default=10,
                     help="determinism replays. Byte-identical is the bar.")
     ap.add_argument("--prompts", help="frozen prompt set (default: the generation's)")
@@ -153,6 +159,7 @@ def main():
         # different one is comparing two different experiments while looking identical.
         "noise_sha256": hashlib.sha256(Path(args.noise).read_bytes()).hexdigest(),
         "device": args.device, "dtype": args.dtype, "seed": seed,
+        "steps": args.steps or generation.model["steps"],
         "base_commit": _git("rev-parse", "HEAD~1"),
         "candidate_commit": _git("rev-parse", "HEAD"),
         "instrument_from": None,
@@ -170,7 +177,8 @@ def main():
         for i in range(args.repeats):
             r = generate(args.binary, generation, det_ids, seed, args.impl,
                          out_dir=work, label=f"det-{i}", weights=args.weights,
-                         device=args.device, dtype=args.dtype, noise=args.noise)
+                         device=args.device, dtype=args.dtype, noise=args.noise,
+                         steps=args.steps)
             digests.append(r["latent_sha256"])
             first = first or r["latent_path"]
             print(f"   replay {i:2d}  {r['latent_sha256'][:16]}")
@@ -222,7 +230,8 @@ def main():
             label = f"gate-{p['id']}"
             r = generate(args.binary, generation, ids_dir / f"token-ids-{p['id']}.txt", seed,
                          args.impl, out_dir=work, label=label, weights=args.weights,
-                         device=args.device, dtype=args.dtype, noise=args.noise)
+                         device=args.device, dtype=args.dtype, noise=args.noise,
+                         steps=args.steps)
             ref = ref_dir / f"{p['id']}.npy"
             if not ref.exists():
                 raise RunnerError(f"the frozen prompt set names {p['id']} and the reference "
