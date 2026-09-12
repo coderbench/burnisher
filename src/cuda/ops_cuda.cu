@@ -693,23 +693,44 @@ void guidance_cuda(const GuidanceArgs& a) {
     check_launch("guidance");
 }
 
+// The ids are ALWAYS fp32 and the table is whatever the model computes in, so this kernel is
+// the one place in the backend with two operands of different dtypes -- and it is templated on
+// only one of them.
+//
+// That is not a hypothetical. This kernel originally cast the ids pointer to the TABLE's type.
+// At fp32 the two agree and everything works; at bf16 it read fp32 ids as bf16, produced
+// garbage token ids, and the text encoder returned embeddings for the wrong tokens. The whole
+// pipeline then disagreed with the reference by a relative L2 of 1.2 -- and every fp32 test in
+// the repository passed, because fp32 is exactly the case where the bug cannot appear.
+//
+// So the id type is fixed and separate, and the args carry an explicit contract.
 template <typename T>
-__global__ void k_gather(const T* table, const T* ids, T* out, int64_t rows, int64_t cols) {
+__global__ void k_gather(const T* table, const float* ids, T* out, int64_t rows, int64_t cols) {
     const int64_t n = rows * cols;
     for (int64_t i = blockIdx.x * (int64_t)blockDim.x + threadIdx.x; i < n;
          i += (int64_t)gridDim.x * blockDim.x) {
         const int64_t r = i / cols, c = i % cols;
-        const int64_t id = (int64_t)ld(ids, r);
+        const int64_t id = (int64_t)ids[r];
         st(out, i, ld(table, id * cols + c));
     }
 }
 
 void gather_cuda(const GatherArgs& a) {
-    require_device(*a.table, "gather");
+    require_device(*a.table, "gather", "table");
+    require_device(*a.ids, "gather", "ids");
+    if (a.ids->dtype() != DType::F32) {
+        throw std::runtime_error(
+            std::string("cuda gather: ids are ") + dtype_name(a.ids->dtype()) + ", not fp32. "
+            "The ids and the table are the one pair of operands in this backend with DIFFERENT "
+            "dtypes, and reading one as the other produces wrong token ids rather than an "
+            "error -- which is a whole model's worth of wrong answer that fp32 testing cannot "
+            "see.");
+    }
     const int64_t n = a.rows * a.cols;
     const int grid = (int)std::min<int64_t>(65535, (n + kBlock - 1) / kBlock);
     DISPATCH(*a.table, T,
-             k_gather<T><<<grid, kBlock>>>((const T*)a.table->data(), (const T*)a.ids->data(),
+             k_gather<T><<<grid, kBlock>>>((const T*)a.table->data(),
+                                           (const float*)a.ids->data(),
                                            (T*)a.out->data(), a.rows, a.cols));
     check_launch("gather");
 }

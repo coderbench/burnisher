@@ -369,6 +369,10 @@ void guidance_cpu(const GuidanceArgs& a) {
 }
 
 void gather_cpu(const GatherArgs& a) {
+    if (a.ids->dtype() != DType::F32) {
+        throw std::runtime_error(std::string("gather: ids are ") + dtype_name(a.ids->dtype()) +
+                                 ", not fp32; see the contract on GatherArgs");
+    }
     for (int64_t i = 0; i < a.rows; ++i) {
         const int64_t id = static_cast<int64_t>(a.ids->get(i));
         for (int64_t j = 0; j < a.cols; ++j) {

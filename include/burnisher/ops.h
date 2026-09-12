@@ -196,8 +196,12 @@ struct TransposeArgs {
 // the ids are a handful of integers. The BOUNDS CHECK stays on the host, where a bad id can be
 // named in the error rather than producing a silent out-of-range read.
 struct GatherArgs {
-    const Tensor* table;
-    const Tensor* ids;      // float-stored integers, `rows` of them
+    const Tensor* table;    // the model's compute dtype
+    // ALWAYS fp32, whatever the table is. This is the only pair of operands in the runtime with
+    // different dtypes, and it is the one that got read as the other: a kernel templated on the
+    // table's type cast the ids to it too, which is a no-op at fp32 and returns embeddings for
+    // garbage tokens at bf16. Both implementations check it now.
+    const Tensor* ids;
     Tensor* out;
     int64_t rows, cols;
 };
