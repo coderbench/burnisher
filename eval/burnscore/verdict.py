@@ -107,7 +107,23 @@ OUTCOMES = {
 HELD = "HELD"
 CELL_OPENED = "CELL_OPENED"
 
+NEEDS_REBASE = "NEEDS_REBASE"
+MERGE_FIRST = "MERGE_FIRST"
+
 EXTRA_OUTCOMES = {
+    NEEDS_REBASE: (
+        "measured against a baseline that has since moved",
+        "Not a rejection and not a judgement of the work. It was measured in the same round as "
+        "a submission that closed more of the gap and was merged, so its baseline no longer "
+        "exists. Gains do not compose -- the ledger compounds toward the ceiling, and two wins "
+        "can overlap entirely -- so only one submission per round can be credited against a "
+        "known baseline. Rebase and it is re-measured."),
+    MERGE_FIRST: (
+        "the best verified gain of its round",
+        "The largest credited gap-closed among the submissions measured in one round. At most "
+        "one per round can be merged, because everything else in it was measured against the "
+        "baseline this one is about to move."),
+
     HELD: (
         "an independent re-measurement disagrees beyond the noise floor",
         "Held, not rejected. Two receipts for this submission disagree by more than the cell's "
@@ -143,6 +159,8 @@ GREY = "BFD4F2"        # not evaluated
 ORANGE = "F9A825"      # the evaluator's own fault
 
 COLORS = {
+    "NEEDS_REBASE": AMBER,
+    "MERGE_FIRST": GREEN,
     "FRONTIER_EXPANDED": GREEN,
     "EXPANDED_OFF_LATENCY": GREEN,
     "CELL_OPENED": GREEN,

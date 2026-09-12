@@ -47,6 +47,60 @@ a measurement happened. Saying so is cheaper than being found out.
 
 ---
 
+## Rounds: every two hours, three at a time, oldest first
+
+Submissions are not evaluated on arrival. Two benchmarks cannot run at once — they race for VRAM
+and both results are worthless — so throughput is a hard constraint, and a submission costs about
+**24 measured GPU-minutes**.
+
+```
+0 */2 * * *  eval/run_round_cron.sh
+```
+
+| | |
+|:--|:--|
+| **cadence** | every two hours |
+| **slots** | **three**. Three fit the interval with 41 minutes of slack; five overrun it outright at the measured cost |
+| **order** | first in, first out |
+| **the rest** | wait for the next round — nothing is dropped |
+
+Three rather than five because the slack matters more than the throughput: a round that runs past
+its interval meets the next one holding the lock, and the next one skips. The slot count should
+rise as the runtime gets faster — it is the one quantity here that improves without anyone
+working on it directly.
+
+**FIFO, not "most promising first".** Any ordering that reads the submission to decide whether to
+measure it is an ordering somebody can game, and it makes the wait a function of the evaluator's
+opinion rather than of the queue. A submission the instrument guard skips costs nothing and does
+not consume a slot.
+
+**A second round never queues behind the first.** It takes a lock and exits. Waiting an hour and
+then running would measure against a `main` that moved while it waited; the next tick is two
+hours away and the work is still there.
+
+### At most one merge per round, and why
+
+**Gains do not compose.** The ledger compounds toward the ceiling, so two submissions each closing
+20% of the remaining gap close 36% together, not 40%. And two wins can overlap *entirely* — fused
+AdaLN and CUDA-graph capture both attack launch overhead, so a gain measured against the old
+`main` may be worth nothing once the other has landed.
+
+So the largest credited gain in a round is merged, and every other scored submission gets
+`burnish:needs-rebase`. That label is **not a rejection**: the result was correct, it is simply a
+measurement of a baseline that no longer exists. Rebase and it is re-measured.
+
+**A round where nothing resolved a gain merges nothing.** Giving away a merge for an unresolved
+measurement is paying for a number nobody could distinguish from a quiet afternoon.
+
+Merging is opted into (`--merge`), not assumed — a round that merges unattended is an
+outward-facing action.
+
+### The head commit is frozen when the round starts
+
+Later pushes cannot reach the measurement: the worktree is built from the SHA resolved at round
+start. But GitHub does not remove a label when you push, so **every comment names the commit it
+measured**. A verdict overtaken by a push is visibly stale rather than quietly wrong.
+
 ## What happens to a pull request
 
 1. **Guard.** Does the submission change the measuring instrument? If so it is **skipped, not

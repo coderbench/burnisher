@@ -173,6 +173,17 @@ def report(verdict: dict, receipt: dict, *, raw_name, receipt_name) -> str:
                 f"`{c.get('floor_pct', 0):.3f}%` | "
                 f"{'yes' if c.get('resolved') else 'no'} |")
         lines.append("")
+    # The commit this measured, stated on the pull request rather than only in the receipt.
+    #
+    # A round freezes each submission's head when it starts, so a push during evaluation cannot
+    # reach the measurement -- but GitHub does not remove a label when you push, so the author
+    # would see a verdict that looks like it describes their new head. Naming the commit makes
+    # an overtaken label visibly stale instead of quietly wrong.
+    commit = (receipt.get("provenance") or {}).get("candidate_commit")
+    if commit:
+        lines += [f"Measured at `{commit[:12]}`. A round freezes the head commit when it "
+                  f"starts, so anything pushed after that is not in this result — it will be "
+                  f"measured in a later round.", ""]
     lines += [
         "---",
         "",
