@@ -44,7 +44,7 @@ class TestAProposedCell(unittest.TestCase):
         self.tmp.cleanup()
 
     def propose(self, name, *, resolution=512, inflate_ceiling=False, duplicate=False,
-                with_refs=True, claim_calibration=True):
+                with_refs=True, claim_calibration=True, missing_oracle=None):
         d = self.root / name
         d.mkdir(parents=True, exist_ok=True)
         doc = json.loads((SRC / "generation.json").read_text())
@@ -62,8 +62,20 @@ class TestAProposedCell(unittest.TestCase):
             doc["cells"][0]["ceiling_seconds"] *= 4.0
         (d / "generation.json").write_text(json.dumps(doc, indent=1, sort_keys=True))
         if with_refs:
+            # A COMPLETE oracle, the way a real submission must ship one: a prompt set, token
+            # ids per prompt, and a reference latent per prompt.
+            ids = ["alpha", "beta"]
+            (d / "prompts.json").write_text(json.dumps(
+                {"name": f"{name} prompt set",
+                 "prompts": [{"id": i, "text": f"a {i} prompt"} for i in ids]}))
+            (d / "token-ids.json").write_text(json.dumps({"tokenizer_sha256": "deadbeef"}))
             (d / "reference-latents").mkdir(exist_ok=True)
             (d / "reference-latents" / "manifest.json").write_text('{"produced_by": "ref"}')
+            for i in ids:
+                (d / f"token-ids-{i}.txt").write_text("1 2 3\n")
+                (d / "reference-latents" / f"{i}.npy").write_bytes(b"\x93NUMPY stub")
+            for drop in (missing_oracle or []):
+                (d / drop).unlink()
         if claim_calibration:
             # A flattering calibration: everything is nearly at its ceiling and nothing is noisy.
             (d / "reference.json").write_text(json.dumps({"cells": {
@@ -131,7 +143,27 @@ class TestAProposedCell(unittest.TestCase):
         self.propose("BG-NOREF", with_refs=False)
         r = self._check("BG-NOREF")
         self.assertFalse(r["pass"])
-        self.assertIn("reference latents are present with a manifest", self._failed(r))
+        self.assertIn("the oracle is complete: prompts, token ids and a reference latent "
+                      "for each", self._failed(r))
+
+    def test_a_PARTIALLY_complete_oracle_is_caught_before_the_gpu(self):
+        """The check the cheap tier exists for, and which it failed at first.
+
+        Verifying only that a manifest existed let a submission missing `prompts.json`, or one
+        token-ids file, reach the hardware and fail thirty GPU-minutes later with a KeyError.
+        A structural check that does not catch structural problems is worse than none, because
+        it gets trusted.
+        """
+        for drop in ("prompts.json", "token-ids.json", "token-ids-beta.txt",
+                     "reference-latents/alpha.npy", "reference-latents/manifest.json"):
+            name = "BG-P" + drop.replace("/", "").replace(".", "").replace("-", "")[:8]
+            self.propose(name, missing_oracle=[drop])
+            r = self._check(name)
+            self.assertFalse(r["pass"], f"a submission missing {drop} was accepted")
+            detail = next(c["detail"] for c in r["checks"] if not c["pass"]
+                          and "oracle" in c["check"])
+            self.assertIn(Path(drop).name, detail,
+                          f"the failure does not name the missing {drop}")
 
     def test_an_existing_generation_cannot_be_resubmitted_as_new(self):
         r = CG.check("BG-1", base="HEAD", root=ROOT / "eval" / "cells", verbose=False)
@@ -173,6 +205,57 @@ class TestTheOverlayKeepsAnAddedGeneration(unittest.TestCase):
         src = (ROOT / "eval" / "cartography.py").read_text()
         self.assertIn("the evaluator, not the submission", src)
         self.assertIn("the submission's own calibration is discarded", src)
+
+
+class TestAMeasurementCommandFailsInASentence(unittest.TestCase):
+    """A runner that cannot measure must say so, not emit a stack trace.
+
+    These are invoked three ways: by hand, through `tools/burnish` (which already handled it),
+    and as a subprocess by another runner. The third is why it matters -- `cartography.py`
+    shells out to `gate.py`, so a traceback from inside `require_idle_device` would arrive in a
+    pull request comment as a wall of Python instead of "this box has no GPU".
+    """
+
+    RUNNERS = ("gate.py", "calibrate.py", "bench.py")
+
+    def test_every_runner_exits_cleanly_when_there_is_no_device(self):
+        for runner in self.RUNNERS:
+            src = (ROOT / "eval" / runner).read_text()
+            self.assertIn("except RunnerError as exc:", src,
+                          f"{runner} lets a RunnerError escape as a traceback")
+            self.assertIn("EXIT_NO_DEVICE = 3", src)
+
+    def test_no_device_is_distinguishable_from_a_failed_measurement(self):
+        """Exit 3 vs 1. Conflating them makes a missing driver look like a rejected submission,
+        which blames a contributor for the evaluator's machine."""
+        r = subprocess.run(
+            [sys.executable, str(ROOT / "eval" / "gate.py"), "--binary", "/bin/false",
+             "--weights", "/tmp", "--impl", "cuda", "--device", "cuda", "--dtype", "fp32",
+             "--noise", str(ROOT / "README.md"), "--reference", str(ROOT / "eval"),
+             "--generation", "BG-1", "--repeats", "2", "--output", "/tmp/_g.json"],
+            capture_output=True, text=True, timeout=120)
+        if "nvidia-smi" in r.stderr or "device" in r.stderr.lower():
+            self.assertEqual(r.returncode, 3, r.stderr[-400:])
+            self.assertNotIn("Traceback", r.stderr)
+
+    def test_the_gate_names_a_missing_input_instead_of_crashing_inside_hashlib(self):
+        """A cartography submission runs a generation nobody has run before -- exactly when an
+        input is most likely absent and least likely to be guessable from a stack trace."""
+        r = subprocess.run(
+            [sys.executable, str(ROOT / "eval" / "gate.py"), "--binary", "/bin/false",
+             "--weights", "/tmp", "--impl", "cuda", "--device", "cuda", "--dtype", "fp32",
+             "--noise", "/tmp/definitely-not-here.npy", "--reference", str(ROOT / "eval"),
+             "--generation", "BG-1", "--repeats", "2", "--output", "/tmp/_g.json"],
+            capture_output=True, text=True, timeout=120)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("does not exist", r.stderr)
+        self.assertIn("definitely-not-here.npy", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
+    def test_cartography_blames_the_box_not_the_submission_when_there_is_no_gpu(self):
+        src = (ROOT / "eval" / "cartography.py").read_text()
+        self.assertIn("this box cannot measure", src)
+        self.assertIn("The proposed cell was not judged", src)
 
 
 if __name__ == "__main__":

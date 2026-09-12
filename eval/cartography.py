@@ -134,13 +134,38 @@ def check(generation_name, *, base, repo=None, root=None, verbose=True) -> dict:
     ok("every submitted ceiling recomputes from the base configs", not mismatched,
        "; ".join(mismatched))
 
-    # 4. The oracle exists. Without reference latents the correctness gate has nothing to compare
-    #    against, and a cell whose correctness cannot be gated is a cell where a wrong answer
-    #    scores.
-    refs = gdir / "reference-latents"
-    manifest = refs / "manifest.json"
-    ok("reference latents are present with a manifest", manifest.exists(),
-       str(refs) if manifest.exists() else f"{refs} has no manifest.json")
+    # 4. The oracle is COMPLETE. Not "a manifest exists" -- every file the correctness gate will
+    #    reach for, checked now, on a machine with no GPU.
+    #
+    #    This checked only for a manifest at first, which made the cheap tier useless for its one
+    #    job: a submission missing `prompts.json` or a single token-ids file passed here, went to
+    #    the hardware, and failed thirty GPU-minutes later with a KeyError. A structural check
+    #    that does not catch structural problems is worse than none, because it is trusted.
+    missing = []
+    prompts_path = gdir / "prompts.json"
+    prompt_ids = []
+    if not prompts_path.exists():
+        missing.append("prompts.json")
+    else:
+        try:
+            prompt_ids = [pr["id"] for pr in json.loads(prompts_path.read_text())["prompts"]]
+        except (ValueError, KeyError, TypeError) as exc:
+            missing.append(f"prompts.json is unreadable ({exc})")
+    if not (gdir / "token-ids.json").exists():
+        missing.append("token-ids.json")
+    if not prompt_ids:
+        missing.append("the prompt set declares no prompts")
+    for pid in prompt_ids:
+        if not (gdir / f"token-ids-{pid}.txt").exists():
+            missing.append(f"token-ids-{pid}.txt")
+        if not (gdir / "reference-latents" / f"{pid}.npy").exists():
+            missing.append(f"reference-latents/{pid}.npy")
+    if not (gdir / "reference-latents" / "manifest.json").exists():
+        missing.append("reference-latents/manifest.json")
+    ok("the oracle is complete: prompts, token ids and a reference latent for each",
+       not missing,
+       f"{len(prompt_ids)} prompt(s); missing: {', '.join(missing)}" if missing
+       else f"{len(prompt_ids)} prompts, each with token ids and a reference latent")
 
     # 5. The submission's own calibration is read and then ignored. Reported so a reviewer can see
     #    what was claimed, and compared against the evaluator's own measurement when --measure
@@ -196,6 +221,12 @@ def measure(generation_name, *, root, binary, weights, noise, device="cuda", rep
          "--repeats", "2", "--output", str(gdir / "_gate.json")],
         capture_output=True, text=True, timeout=7200)
     print(gate.stdout[-1200:])
+    # Exit 3 is the runners' "there is no device". That is the evaluator's problem, not the
+    # submission's, and calling it a failed cell would blame a contributor for a missing driver.
+    if gate.returncode == 3:
+        raise MeasurementError(
+            "this box cannot measure: " + (gate.stderr.strip().splitlines() or ["no device"])[-1]
+            + "\n   The proposed cell was not judged. Re-run where there is a GPU.")
     if gate.returncode != 0:
         raise MeasurementError(
             "the proposed cell does not pass the correctness gate on this box. A cell whose "
@@ -211,6 +242,10 @@ def measure(generation_name, *, root, binary, weights, noise, device="cuda", rep
          "--repeats", str(repeats), "--output", str(gdir / "_calibration.json")],
         capture_output=True, text=True, timeout=14400)
     print(cal.stdout[-2000:])
+    if cal.returncode == 3:
+        raise MeasurementError(
+            "this box cannot measure: " + (cal.stderr.strip().splitlines() or ["no device"])[-1]
+            + "\n   The proposed cell was not judged. Re-run where there is a GPU.")
     if cal.returncode != 0:
         raise MeasurementError("the proposed cell could not be calibrated on this box.\n"
                                + (cal.stdout + cal.stderr)[-1500:])

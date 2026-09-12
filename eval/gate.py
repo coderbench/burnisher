@@ -167,6 +167,23 @@ def main():
     work.mkdir(parents=True, exist_ok=True)
     tol = generation.tolerance
 
+    # The one input this file reads before it reports anything: a missing noise file used to
+    # surface as a traceback from inside a hashlib call. A cartography submission reaches this
+    # path with a generation nobody has run before, which is exactly when an input is most
+    # likely to be absent and least likely to be guessable from a stack trace.
+    #
+    # The reference directory is NOT checked here -- there is already a check for it further
+    # down that reports NO_REFERENCE in the gate report and points at the procedure for
+    # producing latents. A second, earlier version of it shadowed the better message.
+    # Only the inputs THIS file reads. `--weights` and `--binary` are handed to the runtime,
+    # which knows what it needs from a checkpoint and says so far better than a bare existence
+    # check here would -- and second-guessing a callee's inputs is how a harness comes to reject
+    # a configuration that would have worked.
+    for path, what in ((args.noise, "--noise, the pinned starting latent"),):
+        if path and not Path(path).exists():
+            print(f"!! {what} does not exist: {path}", file=sys.stderr)
+            return 2
+
     report = {
         "generation": generation.name, "impl": args.impl,
         "prompt_set": prompts["name"],
@@ -346,5 +363,21 @@ def _write(args, report):
         print(text)
 
 
+# A measurement command that cannot measure must say so in a sentence, not a stack trace.
+#
+# These runners are invoked three ways -- by hand, by `tools/burnish` (which catches this), and
+# by another runner as a subprocess. The third is why the handler lives here: `cartography.py`
+# shells out to this file, and a traceback from inside `require_idle_device` arrives as a wall
+# of Python in a pull request comment instead of "this box has no GPU".
+#
+# Exit 3 rather than 1, so a caller can tell "there is no device" from "the thing I measured
+# failed" -- those need different responses and conflating them makes a missing driver look
+# like a rejected submission.
+EXIT_NO_DEVICE = 3
+
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except RunnerError as exc:
+        print(f"!! {exc}", file=sys.stderr)
+        sys.exit(EXIT_NO_DEVICE)

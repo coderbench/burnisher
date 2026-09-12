@@ -34,7 +34,7 @@ from burnscore import cells as C
 from burnscore.floor import measure_floor, resolution_gate
 from bench import measure
 from paths import add_argument as add_cells_root_arg, generation_path
-from runner import GpuLock, device_fingerprint, interleave, require_idle_device
+from runner import GpuLock, RunnerError, device_fingerprint, interleave, require_idle_device
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -225,5 +225,21 @@ def main():
     return 0
 
 
+# A measurement command that cannot measure must say so in a sentence, not a stack trace.
+#
+# These runners are invoked three ways -- by hand, by `tools/burnish` (which catches this), and
+# by another runner as a subprocess. The third is why the handler lives here: `cartography.py`
+# shells out to this file, and a traceback from inside `require_idle_device` arrives as a wall
+# of Python in a pull request comment instead of "this box has no GPU".
+#
+# Exit 3 rather than 1, so a caller can tell "there is no device" from "the thing I measured
+# failed" -- those need different responses and conflating them makes a missing driver look
+# like a rejected submission.
+EXIT_NO_DEVICE = 3
+
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except RunnerError as exc:
+        print(f"!! {exc}", file=sys.stderr)
+        sys.exit(EXIT_NO_DEVICE)
