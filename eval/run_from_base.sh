@@ -88,6 +88,13 @@ chmod +x "$STAGE/tools/burnish" 2>/dev/null || true
 # The runtime under test comes from the SUBMISSION; the instrument driving it comes from base.
 export BURNISHER_BIN="${BURNISHER_BIN:-$SUB/build/burnisher}"
 export BURNISH_INSTRUMENT_FROM="$BASE_SHA"
+# The instrument runs from a staging directory that is not a git repository -- `git archive`
+# extracts files, not history -- so the evaluator cannot find out what it is scoring by asking
+# git about its own location. It would get nothing, and it did: the first receipts this harness
+# produced named the instrument and left the candidate blank. Only this script knows where the
+# submission is, so it passes both commits down.
+export BURNISH_CANDIDATE_COMMIT="$(git -C "$SUB" rev-parse HEAD 2>/dev/null || true)"
+export BURNISH_BASE_COMMIT="$(git -C "$REPO" rev-parse "$BASE" 2>/dev/null || true)"
 echo ">> runtime under test: $BURNISHER_BIN"
 
 case "${BURNISH_ENTRY:-bench}" in

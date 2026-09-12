@@ -185,8 +185,16 @@ def main():
         # read HEAD~1 for a while, which quietly asserted the opposite -- that the base arm was
         # the previous commit -- and would have attributed a kernel's regression to whatever
         # happened to be one commit back.
-        "base_commit": _git("rev-parse", "HEAD"),
-        "candidate_commit": _git("rev-parse", "HEAD"),
+        #
+        # The environment comes FIRST and `_git` is the fallback, not the other way round. Under
+        # eval/run_from_base.sh -- the only configuration a scored submission runs in -- this
+        # file has been extracted into a staging directory with no git history in it, so asking
+        # git about our own location returns nothing at all. Answering "unknown" there while a
+        # caller who knows the answer is standing right next to us is how the first receipts came
+        # out unable to name what they had scored.
+        "base_commit": os.environ.get("BURNISH_BASE_COMMIT") or _git("rev-parse", "HEAD"),
+        "candidate_commit": (os.environ.get("BURNISH_CANDIDATE_COMMIT")
+                             or _git("rev-parse", "HEAD")),
         # Set by eval/run_from_base.sh when it overlays the instrument from the base ref. This
         # was hardcoded to None, so the one guard that proves the candidate did not grade its
         # own homework -- a one-line edit to a noise floor, a ceiling or a tolerance does not
