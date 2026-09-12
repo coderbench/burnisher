@@ -48,6 +48,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -178,9 +179,20 @@ def main():
         "noise_sha256": hashlib.sha256(Path(args.noise).read_bytes()).hexdigest(),
         "device": args.device, "dtype": args.dtype, "seed": seed,
         "steps": args.steps or generation.model["steps"],
-        "base_commit": _git("rev-parse", "HEAD~1"),
+        # Both arms come from ONE build. That is the whole point of the op registry: base and
+        # candidate are two registered implementations selected by name in a single binary with
+        # a single model load, so there is one commit under the comparison, not two. This field
+        # read HEAD~1 for a while, which quietly asserted the opposite -- that the base arm was
+        # the previous commit -- and would have attributed a kernel's regression to whatever
+        # happened to be one commit back.
+        "base_commit": _git("rev-parse", "HEAD"),
         "candidate_commit": _git("rev-parse", "HEAD"),
-        "instrument_from": None,
+        # Set by eval/run_from_base.sh when it overlays the instrument from the base ref. This
+        # was hardcoded to None, so the one guard that proves the candidate did not grade its
+        # own homework -- a one-line edit to a noise floor, a ceiling or a tolerance does not
+        # look like cheating in a diff -- exported its answer into a variable the receipt threw
+        # away. A receipt that cannot name the instrument it was scored with is not evidence.
+        "instrument_from": os.environ.get("BURNISH_INSTRUMENT_FROM"),
         "tolerance": tol,
     }
 

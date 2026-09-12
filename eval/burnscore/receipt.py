@@ -151,12 +151,43 @@ def build_receipt(*, generation, per_cell, aggregate, interval, frontier, correc
         "coverage": coverage,
         "held_out_survived": held_out,
         "credit_withheld": credit_withheld,
-        "provenance": provenance,
+        "provenance": _with_completeness(provenance),
         "supersedes": supersedes or [],
         "supersede_reason": supersede_reason,
     }
     receipt["content_digest"] = content_digest(receipt)
     return receipt
+
+
+
+# Provenance fields that identify the CODE a receipt scored, as opposed to the box it ran on.
+# A receipt that cannot name them is still a valid measurement -- it just is not evidence about
+# any particular commit, which is a different and much weaker thing.
+_CODE_PROVENANCE = ("candidate_commit", "base_commit", "instrument_from")
+
+
+def _with_completeness(provenance: dict) -> dict:
+    """State outright whether this receipt can say what code it scored.
+
+    These fields go null whenever the runner has no git metadata -- a tarball deploy onto a
+    benchmark box does it, and so does a checkout with the instrument overlay skipped. Null is
+    an honest answer, but a reader skimming a receipt reads a null field as "not applicable"
+    rather than as "unknown", and those are opposite meanings when the question is whether a
+    submission graded its own homework. So the receipt answers the question in one flag instead
+    of leaving it to be inferred from three absences.
+    """
+    p = dict(provenance or {})
+    missing = [k for k in _CODE_PROVENANCE if not p.get(k)]
+    p["code_provenance_complete"] = not missing
+    p["code_provenance_missing"] = missing
+    if missing:
+        p["_code_provenance_note"] = (
+            "This receipt records a measurement but cannot name the code it measured: "
+            + ", ".join(missing) + " unknown. It is reproducible as an experiment and is NOT "
+            "admissible as evidence that a particular commit earned a score. A scored "
+            "submission runs through eval/run_from_base.sh in a git checkout, which fills all "
+            "three.")
+    return p
 
 
 def verify_receipt(receipt: dict, generation=None) -> None:

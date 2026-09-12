@@ -117,6 +117,7 @@
   "scripts/build_cuda.sh",
   "scripts/check.sh",
   "scripts/differential_test.py",
+  "scripts/dtype_latency.py",
   "scripts/make_issues.py",
   "scripts/make_reference_latents.py",
   "scripts/manifest.py",

@@ -317,6 +317,36 @@ class TestComputeAndReceipt(unittest.TestCase):
             CP.compute(real, [])
         self.assertIn("UNCALIBRATED", str(cm.exception))
 
+    def test_a_receipt_says_whether_it_can_name_the_code_it_scored(self):
+        """Three null fields do not read as "unknown" to anybody skimming. One flag does.
+
+        The fields go null whenever the runner has no git metadata. That is honest, but it is
+        also exactly the state a submission would want a receipt to be in, so the receipt has to
+        say it out loud rather than leave it to be noticed.
+        """
+        out, _ = self._score(speedups={"dit-step/1024/bf16": 1.15})
+        blind = dict(fixtures.provenance())
+        for k in ("candidate_commit", "base_commit", "instrument_from"):
+            blind.pop(k, None)
+        rec = R.build_receipt(
+            generation=self.gen, per_cell=out["per_cell"], aggregate=out["aggregate"],
+            interval=out["interval"], frontier=out["frontier"], correctness="PASS",
+            determinism=True, coverage=out["coverage"], held_out=True, provenance=blind)
+        self.assertFalse(rec["provenance"]["code_provenance_complete"])
+        self.assertEqual(sorted(rec["provenance"]["code_provenance_missing"]),
+                         ["base_commit", "candidate_commit", "instrument_from"])
+        R.verify_receipt(rec, self.gen)
+
+        full = dict(fixtures.provenance())
+        full.update(candidate_commit="a" * 40, base_commit="a" * 40, instrument_from="deadbee")
+        rec2 = R.build_receipt(
+            generation=self.gen, per_cell=out["per_cell"], aggregate=out["aggregate"],
+            interval=out["interval"], frontier=out["frontier"], correctness="PASS",
+            determinism=True, coverage=out["coverage"], held_out=True, provenance=full)
+        self.assertTrue(rec2["provenance"]["code_provenance_complete"])
+        self.assertEqual(rec2["provenance"]["code_provenance_missing"], [])
+        self.assertNotIn("_code_provenance_note", rec2["provenance"])
+
     def test_a_real_speedup_scores_and_resolves(self):
         out, _ = self._score(speedups={"dit-step/1024/bf16": 1.15})
         cell = out["per_cell"]["dit-step/1024/bf16"]
