@@ -175,8 +175,13 @@ def main():
         args.guidance = gen["model"]["guidance_scale"]
     noise = np.load(args.noise)
     prompt_ids = args.prompts or list(ids_doc["prompts"])
-    dtype = getattr(torch, {"fp32": "float32", "bf16": "bfloat16",
-                            "fp16": "float16"}.get(args.dtype, args.dtype))
+    # Normalised ONCE, here, because the dtype name decides the output directory as well as the
+    # arithmetic -- `--dtype fp32` and `--dtype float32` must not write to two different places.
+    # They did: the first wrote `reference-latents-fp32`, which the gate does not look for, so
+    # the oracle was produced correctly and filed where nothing would find it.
+    args.dtype = {"fp32": "float32", "bf16": "bfloat16",
+                  "fp16": "float16"}.get(args.dtype, args.dtype)
+    dtype = getattr(torch, args.dtype)
 
     print(f"reference: {json.dumps(versions())}")
     print(f"checkpoint: {gen['model']['repo']} @ {gen['model']['revision'][:12]}")
