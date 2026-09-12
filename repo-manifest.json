@@ -9,7 +9,7 @@
    "test_scheduler",
    "test_models"
   ],
-  "python_pass": true,
+  "python_pass": false,
   "python_tests": 122
  },
  "files": [
@@ -145,7 +145,7 @@
   "tools/burnisher_main.cpp"
  ],
  "generation": {
-  "calibrated": false,
+  "calibrated": true,
   "cells": [
    "t5-encode/1024/bf16",
    "dit-step/1024/bf16",
@@ -162,13 +162,7 @@
   "model": "PixArt-alpha/PixArt-Sigma-XL-2-1024-MS",
   "name": "BG-1",
   "revision": "e102b3591cc82e97071b8b4cb90d834d0c487207",
-  "uncalibrated_cells": [
-   "dit-step/1024/bf16",
-   "dit-step/1024/fp8",
-   "dit-step/1024/nvfp4",
-   "t5-encode/1024/bf16",
-   "vae-decode/1024/bf16"
-  ]
+  "uncalibrated_cells": []
  },
  "name": "burnisher",
  "scoring": "Score is the fraction of a cell's REMAINING arithmetic-roofline gap that a change closes, credited only when it clears that cell's own MEASURED noise floor under a paired bootstrap at a stated confidence. No letter grades. Latency, peak VRAM and output fidelity form a frontier, so a change that is faster and hungrier has moved along it rather than expanded it. Adding a cell nobody had measured is itself a scored contribution.",

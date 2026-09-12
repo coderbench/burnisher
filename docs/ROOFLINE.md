@@ -28,15 +28,15 @@ ceiling that moved when a contributor fused would not be a ceiling.
 
 | cell | runs | ceiling | bound | ai | fuse | achieved | left | floor | res |
 |---|--:|--:|:--|--:|--:|--:|--:|--:|:--:|
-| `t5-encode/1024/bf16` | 1 | 23.08 ms | compute | 607 | 1.04 | -- | -- | -- | -- |
-| `dit-step/1024/bf16` | 20 | 54.45 ms | compute | 10864 | 1.16 | -- | -- | -- | -- |
-| `vae-decode/1024/bf16` | 1 | 43.00 ms | compute | 99505 | 1.32 | -- | -- | -- | -- |
+| `t5-encode/1024/bf16` | 1 | 23.08 ms | compute | 607 | 1.04 | 18.2% | 5.51 | 3.753 | yes |
+| `dit-step/1024/bf16` | 20 | 54.45 ms | compute | 10864 | 1.16 | 1.5% | 65.59 | 0.578 | yes |
+| `vae-decode/1024/bf16` | 1 | 43.00 ms | compute | 99505 | 1.32 | 0.8% | 126.37 | 0.259 | yes |
 | `dit-step/1024/fp8` | 20 | 31.70 ms | compute | 21715 | 1.28 | -- | -- | -- | -- |
 | `dit-step/1024/nvfp4` | 20 | 15.85 ms | compute | 38565 | 1.58 | -- | -- | -- | -- |
 
 ## What is not known yet
 
-**5 of 5 cells have no measured achieved fraction and no measured floor.**
+**2 of 5 cells have no measured achieved fraction and no measured floor.**
 
 For these, the size of the box is known and how full it is is not. Nothing in this table
 should be read as a claim that there is room in them -- only that there could be, and how

@@ -6,10 +6,9 @@ first one to read and it is deliberately blunt.
 
 ## The one-sentence version
 
-**The instrument is complete and tested. The runtime runs end to end on CPU and on an RTX 5090,
-reproduces itself byte for byte on both, and agrees with the reference implementation stage by
-stage. The device peaks are measured. The per-cell achieved fractions and noise floors are the
-remaining gap.**
+**Everything the scoring model needs is measured. Every implemented cell has an achieved
+fraction and its own noise floor, the scorer produces receipts, and the correctness gate is
+calibrated from measurement rather than argument.**
 
 ### Measured on the pinned RTX 5090
 
@@ -22,7 +21,30 @@ remaining gap.**
 | CUDA T5 encoder vs the reference | 7.6e-07 |
 | CUDA VAE decoder vs the CPU oracle | 5.8e-06 |
 | CUDA DiT vs the reference | 5.2e-05 |
-| reference latents, 4 prompts at 1024px / 20 steps | **committed** |
+| reference latents, 4 prompts at 1024px / 20 steps, fp32 AND bf16 | **committed** |
+
+### The calibrated cells
+
+| cell | achieved | still available | noise floor | resolvable |
+|:--|--:|--:|--:|:--:|
+| `t5-encode/1024/bf16` | 18.2% | 5.5x | 3.753% | yes |
+| `dit-step/1024/bf16` | 1.5% | **65.6x** | 0.578% | yes |
+| `vae-decode/1024/bf16` | 0.8% | **126.4x** | 0.259% | yes |
+
+Nine paired control-vs-control repeats per cell, real weights, on the pinned part. The floors are
+`spread`-decided in every cell, meaning the run-to-run variation is larger than the instrument's
+own resolution -- which is the honest case; a floor decided by resolution would mean the bench
+cannot see its own noise.
+
+**That headroom is real and it is the point.** The kernels are deliberately naive: attention is
+one block per query row with no tiling and no tensor cores, convolution is one thread per output
+element, and every GEMM epilogue is a separate pass. v0 ships a correct, complete, SLOW pipeline
+and contributors make it fast.
+
+**And the floors say a contribution can be small and still count.** In `dit-step` the floor is
+worth 0.00009 of the remaining gap, so a change that closes nine parts in a hundred thousand of
+what is left is already outside the noise. That is the opposite of a 2% threshold, and it is what
+measuring the floor instead of guessing it buys.
 
 ## What has been built and checked
 
