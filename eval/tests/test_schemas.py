@@ -193,11 +193,44 @@ class TestPublishedArtifactsMatchTheirSchemas(unittest.TestCase):
             self._check_required(row, schema, row["cell"])
             self.assertEqual(row["ceiling_basis"], "model")
             self.assertIn(row["peak_basis"], schema["properties"]["peak_basis"]["enum"])
-            # This repository ships uncalibrated on purpose. The schema must ALLOW null here,
-            # and the published table must actually be null rather than quietly filled in.
-            self.assertIsNone(row["achieved"], f"{row['cell']} publishes an achieved fraction; "
-                                               f"no hardware has run in this tree")
-            self.assertIsNone(row["floor_pct"])
+            # The schema must ALLOW null here: a cell that has never been calibrated publishes
+            # no achieved fraction, and that is the honest state for a newly added cell.
+            #
+            # What this once asserted was that every row IS null, because no hardware had run in
+            # this tree. Hardware has now run, so asserting absence would assert a stale fact.
+            # The guard underneath it does not retire, though: it was never really about null,
+            # it was about a published number that nobody measured. So it now checks the
+            # property that actually distinguishes the two -- every non-null figure in the
+            # published table must be DERIVED from the calibration receipt, to the digit, rather
+            # than typed next to it.
+            if row["achieved"] is None:
+                self.assertIsNone(row["floor_pct"], f"{row['cell']} publishes a noise floor "
+                                                    f"without an achieved fraction; half a "
+                                                    f"calibration is not a calibration")
+                continue
+            cal = self._calibration().get(row["cell"])
+            self.assertIsNotNone(cal, f"{row['cell']} publishes an achieved fraction with no "
+                                      f"entry in reference.json; nobody measured this")
+            self.assertEqual(cal["basis"], "measured",
+                             f"{row['cell']} publishes a figure whose basis is not a "
+                             f"measurement. A modelled number is never a gain.")
+            self.assertAlmostEqual(row["achieved"], cal["achieved"], places=12,
+                                   msg=f"{row['cell']}: the published achieved fraction is not "
+                                       f"the calibrated one")
+            self.assertAlmostEqual(row["floor_pct"], cal["floor_pct"], places=12,
+                                   msg=f"{row['cell']}: the published floor is not the "
+                                       f"calibrated one")
+            self.assertTrue(row["resolvable"])
+
+    def _calibration(self):
+        ref = json.loads((ROOT / "eval" / "cells" / "BG-1" / "reference.json").read_text())
+        # A calibration with no box behind it is a guess with provenance-shaped fields. The
+        # probe identifies the exact part, because two RTX 5090s differ by 3% on GEMM and an
+        # achieved fraction carried over from another box is a number nobody measured HERE.
+        probe = ref["device_probe"]
+        for k in ("name", "uuid", "driver_version"):
+            self.assertTrue(probe.get(k), f"reference.json calibration has no {k}")
+        return ref["cells"]
 
 
 if __name__ == "__main__":

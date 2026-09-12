@@ -252,13 +252,67 @@ class TestComputeAndReceipt(unittest.TestCase):
         recs = fixtures.records(self.gen, **kw)
         return CP.compute(self.gen, recs), recs
 
-    def test_the_real_bg1_reference_is_uncalibrated_and_refuses_to_score(self):
-        """The honest state of this repository, asserted so it cannot rot into a guess."""
+    def test_the_real_bg1_reference_is_calibrated_and_internally_consistent(self):
+        """The honest state of this repository, asserted so it cannot rot into a guess.
+
+        This test asserted the opposite -- that BG-1 shipped uncalibrated and refused to score
+        -- for as long as that was true. It is no longer true, and an assertion that a
+        measurement is absent is worthless once it has been taken. What survives is the reason
+        the assertion existed: that no cell may carry a number nobody measured. That is checked
+        here against the arithmetic, because a calibration is the one artefact in the tree whose
+        parts can be made to check each other -- achieved is ceiling over measured, by
+        definition, so a hand-edited achieved fraction stops agreeing with the seconds beside it.
+        """
         real = C.load(HERE.parent / "cells" / "BG-1" / "generation.json")
-        self.assertEqual(real.scorable_cells(), [])
+        ref = json.loads((HERE.parent / "cells" / "BG-1" / "reference.json").read_text())
+        self.assertEqual(sorted(c.id for c in real.scorable_cells()), sorted(ref["cells"]))
+        # A cell declared but not yet measured is the intended state for new cartography: the
+        # map may name a place before anyone has been there. What it may NOT do is offer that
+        # place for scoring, which is the assertion above -- scorable_cells is exactly the
+        # calibrated set, no more.
+        uncal = [c.id for c in real.cells.values() if c.id not in ref["cells"]]
+        for cid in uncal:
+            self.assertIsNone(real.cells[cid].achieved,
+                              f"{cid} has an achieved fraction but no calibration behind it")
         for cell in real.cells.values():
-            self.assertIsNone(cell.achieved)
-            self.assertIsNone(cell.floor_pct)
+            cal = ref["cells"].get(cell.id)
+            if cal is None:
+                continue
+            self.assertIsNotNone(cell.achieved, f"{cell.id} lost its calibration")
+            self.assertIsNotNone(cell.floor_pct)
+            self.assertEqual(cal["basis"], "measured")
+            # achieved == ceiling / measured. Three numbers, one relation: edit any one of them
+            # by hand and this stops holding.
+            self.assertAlmostEqual(cal["achieved"],
+                                   cal["ceiling_seconds"] / cal["measured_seconds"], places=10,
+                                   msg=f"{cell.id}: achieved does not equal ceiling/measured. "
+                                       f"One of the three was typed rather than measured.")
+            # A run cannot beat its own arithmetic ceiling. If it appears to, the ceiling is
+            # wrong, and every gap-closed score computed against it is wrong with it.
+            self.assertLessEqual(cal["achieved"], 1.0, f"{cell.id} beats its own roofline")
+            # The floor is the larger of the paired spread and the instrument's resolution, and
+            # it must say which of the two decided it -- a floor nobody can attribute is a
+            # threshold, and a threshold is the thing this scoring model exists to replace.
+            self.assertIn(cal["floor_decided_by"], ("spread", "resolution"))
+            self.assertAlmostEqual(cal["floor_pct"],
+                                   max(cal["floor_spread_pct"], cal["floor_resolution_pct"]),
+                                   places=12, msg=f"{cell.id}: the floor is neither the spread "
+                                                  f"nor the resolution")
+            self.assertGreaterEqual(cal["floor_repeats"], 2,
+                                    f"{cell.id}: a spread needs repeated runs to be a spread")
+
+    def test_an_uncalibrated_cell_still_refuses_to_score(self):
+        """The refusal itself is the guard, and it outlives BG-1's own calibration.
+
+        Every new cell enters the tree uncalibrated -- that is what paying for cartography
+        means -- so this path is walked by every cell that is ever added, not just by the state
+        BG-1 happened to ship in.
+        """
+        real = C.load(HERE.parent / "cells" / "BG-1" / "generation.json")
+        for cell in real.cells.values():
+            cell.achieved = None
+            cell.floor_pct = None
+        self.assertEqual(real.scorable_cells(), [])
         with self.assertRaises(CP.ComputeError) as cm:
             CP.compute(real, [])
         self.assertIn("UNCALIBRATED", str(cm.exception))

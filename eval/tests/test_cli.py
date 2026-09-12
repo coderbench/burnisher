@@ -155,14 +155,27 @@ class TestTestsDoNotPolluteTheTree(unittest.TestCase):
 
 
 class TestGenerationCli(unittest.TestCase):
-    def test_show_reports_the_real_bg1_as_uncalibrated(self):
+    def test_show_reports_every_bg1_cell_as_calibrated_and_scorable(self):
         r = run("generation", "show", "--name", "BG-1")
         self.assertEqual(r.returncode, 0, r.stderr)
         doc = json.loads(r.stdout)
-        self.assertEqual(doc["scorable_now"], [],
-                         "BG-1 must ship uncalibrated; a scorable cell here means somebody "
-                         "filled in a measurement that was never taken")
-        self.assertTrue(doc["uncalibrated"])
+        # This asserted the opposite until BG-1 was calibrated on the pinned box. The guard it
+        # carried -- "a scorable cell means somebody filled in a measurement that was never
+        # taken" -- is kept below, pointed at provenance instead of absence: a cell is scorable
+        # only if a measurement with a basis and a box behind it says so.
+        self.assertFalse(doc["uncalibrated"])
+        ref = json.loads((ROOT / "eval" / "cells" / "BG-1" / "reference.json").read_text())
+        self.assertEqual(sorted(doc["scorable_now"]), sorted(ref["cells"]),
+                         "a cell is scorable that has no calibration behind it")
+        for cid in doc["scorable_now"]:
+            cal = ref["cells"][cid]
+            self.assertEqual(cal["basis"], "measured", f"{cid} is scorable on a modelled figure")
+            self.assertGreater(cal["floor_pct"], 0.0,
+                               f"{cid} claims a zero noise floor; no instrument has one, and a "
+                               f"zero floor resolves every difference including the noise")
+            self.assertTrue(cal["resolvable"],
+                            f"{cid} is offered for scoring but its ceiling does not clear its "
+                            f"own floor")
         self.assertTrue(doc["digest"].startswith("sha256:"))
 
     def test_check_passes_against_the_committed_configs(self):
