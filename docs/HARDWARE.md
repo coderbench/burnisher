@@ -66,12 +66,23 @@ burnish gate --determinism --repeats 10         # stop here if this fails
 burnish gate --impl stock --output gate-base.json     # the base arm, against the reference
 burnish calibrate --repeats 9 --write           # achieved fractions and noise floors
 
-# then, per submission:
-burnish gate --impl <name> --output gate.json   # correctness first, always
-burnish bench --impl-candidate <name> \
-    --gate-result gate.json --gate-base-result gate-base.json --output raw.json
-burnish score raw.json --ledger <outside the worktree>
 ```
+
+Those are the one-time steps that set a box up. **A submission is one command:**
+
+```bash
+eval/score_submission.sh --base <ref> --worktree <dir> \
+    --impl-base cuda --impl-candidate <name> \
+    --pr <n> --ledger <a directory OUTSIDE the worktree> \
+    --weights <checkpoint> --noise <the pinned noise .npy>
+```
+
+It runs gate-base, gate-candidate, paired bench and score in that order, with the instrument
+overlaid from the base ref at every stage, and refuses to start if the device is busy. The
+stages underneath are `burnish gate | bench | score` and are worth running by hand while
+iterating on a kernel — but a *scored* run goes through the script, because two people following
+the same prose write two different drivers and the difference between them shows up as a
+difference in scores that no receipt can explain.
 
 ## Why the probe matters more than it looks
 

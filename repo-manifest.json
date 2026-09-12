@@ -85,6 +85,7 @@
   "eval/tests/test_documented_figures.py",
   "eval/tests/test_example_receipt.py",
   "eval/tests/test_gate.py",
+  "eval/tests/test_instrument_overlay.py",
   "eval/tests/test_runner.py",
   "eval/tests/test_schemas.py",
   "eval/tests/test_scoring.py",
