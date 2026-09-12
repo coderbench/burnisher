@@ -202,17 +202,26 @@ def stage_t5(args):
     mask = (ids != ids_doc["pad_id"]).long()
 
     print(">> reference")
+    td = {"fp32": torch.float32, "bf16": torch.bfloat16}[args.dtype]
     enc = T5EncoderModel.from_pretrained(str(Path(args.weights) / "text_encoder"),
-                                         torch_dtype=torch.float32, low_cpu_mem_usage=True)
+                                         torch_dtype=td, low_cpu_mem_usage=True)
     enc.eval()
+    if args.layers:
+        enc.encoder.block = enc.encoder.block[: args.layers]
+    if args.device == "cuda":
+        enc = enc.cuda()
+        ids = ids.cuda()
+        mask = mask.cuda()
     t0 = time.time()
     with torch.no_grad():
-        ref = enc(input_ids=ids, attention_mask=mask).last_hidden_state.numpy()
+        ref = enc(input_ids=ids,
+                  attention_mask=mask).last_hidden_state.float().cpu().numpy()
     print(f"    ({time.time() - t0:.0f}s)")
     del enc
 
-    argv = ["encode", "--weights", args.weights, "--token-ids", "/tmp/diff_ids.txt",
-            "--out", "/tmp/diff_t5_out.npy", "--dtype", args.dtype]
+    argv = (["encode", "--weights", args.weights, "--token-ids", "/tmp/diff_ids.txt",
+             "--out", "/tmp/diff_t5_out.npy", "--dtype", args.dtype] +
+            (["--layers", str(args.layers)] if args.layers else []))
     if args.against != "reference":
         print(f">> ours, impl={args.against}")
         ref = run_ours(args.binary, argv, "/tmp/diff_t5_out.npy", args.against,
@@ -222,7 +231,7 @@ def stage_t5(args):
     # The encoder's output at PADDED positions is meaningless on both sides -- it is masked out
     # downstream. Comparing it would compare two different pieces of garbage, so the comparison
     # is restricted to real tokens, which is also what the model's consumer sees.
-    keep = mask.numpy().astype(bool)
+    keep = mask.cpu().numpy().astype(bool)
     return report("t5-encode (real tokens only)", ours[keep], ref[keep],
                   tolerance=args.tolerance)
 

@@ -745,6 +745,9 @@ int cmd_encode(const Args& a) {
         }
     }
     T5Config t5;
+    // --layers truncates the encoder stack, for bisecting a disagreement by depth. A defect is
+    // present at one layer; amplification starts small and climbs.
+    if (a.has("layers")) t5.num_layers = static_cast<int>(a.num("layers", t5.num_layers));
     const DType dt = dtype_arg(a);
     const Device dev = device_arg(a);
     if (dev == Device::CUDA) ids = ids.to_device();
