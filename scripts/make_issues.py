@@ -100,6 +100,15 @@ def facts(cand, devices, axes):
     f["checkpoint_tensors_verified"] = v.get("required_by_runtime", 0)
     f["checkpoint_missing"] = v.get("missing")
     f["checkpoint_wrong_shape"] = v.get("wrong_shape")
+    # Measured, if anyone has measured it. Read from the artifact rather than restated, and
+    # absent from the issue entirely when the artifact is absent: a claim about what the
+    # hardware does is worth nothing without a run behind it, and the whole point of this
+    # generator is that a figure in an issue cannot be typed.
+    lat = ROOT / "eval" / "cells" / "BG-1" / "dtype-latency.json"
+    f["dtype_latency"] = json.loads(lat.read_text()) if lat.exists() else None
+    ref = ROOT / "eval" / "cells" / "BG-1" / "reference.json"
+    cal = json.loads(ref.read_text())["cells"] if ref.exists() else {}
+    f["dit_achieved"] = (cal.get("dit-step/1024/bf16") or {}).get("achieved")
     t5 = G.t5_encoder(cand["text_encoder"], seq=300, batch=2)
     f["t5_params_gb"] = t5.param_bytes / 1e9
     f["t5_ceiling_ms"] = bound_for(t5, dev, cell="t5").ceiling_seconds * 1e3
@@ -107,6 +116,39 @@ def facts(cand, devices, axes):
         t = G.t5_encoder(cand["text_encoder"], seq=300, batch=2, wdtype=dt, adtype="bf16")
         f[f"t5_params_{dt}_gb"] = t.param_bytes / 1e9
     return f
+
+
+def _narrowing_note(f):
+    """The measured reason these ceilings are worth less than they look, if it has been measured.
+
+    A narrower dtype only pays where the wide path is limited by the width. The ceilings in the
+    table above say what the ARITHMETIC permits; they do not say what this runtime would
+    collect, because this runtime is nowhere near either bound yet.
+    """
+    d = f.get("dtype_latency")
+    if not d:
+        return ""
+    fp32, bf16 = d["dit_step_fp32_s"], d["dit_step_bf16_s"]
+    ratio = fp32 / bf16
+    return f"""
+**Measured first, and it changes what these cells are worth today.** One DiT step on the pinned
+box costs {fp32:.3f} s at fp32 and {bf16:.3f} s at bf16 -- a ratio of {ratio:.3f}x for a HALVING
+of every weight read, measured over {d['repeats']} paired repeats on {d['device']['name']}
+(driver {d['device']['driver_version']}).
+
+Halving the bytes bought nothing, which means this path is not limited by the bytes. It is
+limited by how the kernels are written. That is the number to carry into an fp8 or NVFP4
+attempt: **the published ceiling for a narrower dtype is not collectable until the bf16 path
+is actually near a bound**, and today it sits at {100 * f['dit_achieved']:.1f}% of
+its own. Quantizing a kernel that is bound by its launch structure moves the ceiling down and
+the measurement not at all -- and a submission that reports the ceiling as the gain is
+reporting a model as a measurement.
+
+The order this implies: the fp8 and NVFP4 cells stay open and stay worth taking, but the gain
+lands only after, or together with, the work that makes bf16 bandwidth-bound in the first place
+-- fused AdaLN, CUDA-graph capture, and the attention kernel. Take those first and these cells
+become worth their ceilings; take these first and they are worth what the ratio above says.
+"""
 
 
 ISSUES = []
@@ -290,7 +332,7 @@ in the optimistic direction, which is the direction that costs somebody a week.
 rounding accumulated over twenty DPM-Solver++ steps and nothing else. A 4-bit weight path will
 need its own tolerance, argued in writing, in its own generation -- not a widened version of
 this one.
-"""
+{_narrowing_note(f)}"""
 
 
 @issue("step-caching", "Step and feature caching: algorithmic, and it must pass the gate",
