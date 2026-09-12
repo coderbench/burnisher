@@ -100,6 +100,16 @@ export PYTHONUNBUFFERED=1
 # submission is, so it passes both commits down.
 export BURNISH_CANDIDATE_COMMIT="$(git -C "$SUB" rev-parse HEAD 2>/dev/null || true)"
 export BURNISH_BASE_COMMIT="$(git -C "$REPO" rev-parse "$BASE" 2>/dev/null || true)"
+# Printed, not just exported. A receipt that cannot name the code it scored is not evidence, and
+# the run log is where somebody notices that before forty minutes of GPU time have been spent on
+# a receipt that will come back unprovenanced.
+if [ -n "$BURNISH_CANDIDATE_COMMIT" ]; then
+    echo ">> scoring candidate $BURNISH_CANDIDATE_COMMIT against base $BURNISH_BASE_COMMIT"
+else
+    echo "!! NOTE: no git metadata for $SUB, so this receipt will not be able to name the code"
+    echo "         it scored. It will still be a valid measurement; it will not be evidence"
+    echo "         that a particular commit earned anything."
+fi
 echo ">> runtime under test: $BURNISHER_BIN"
 
 case "${BURNISH_ENTRY:-bench}" in
