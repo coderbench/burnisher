@@ -142,7 +142,7 @@ def floor_as_gap_closed(floor_pct: float, achieved_base: float) -> float:
     return (a2 - achieved_base) / (1.0 - achieved_base)
 
 
-def resolution_gate(floor_pct: float, achieved_base: float, *, ratio=20.0) -> dict:
+def resolution_gate(floor_pct: float, achieved_base: float, *, ratio=2.0) -> dict:
     """Screen question 2, asked of a cell that has now been measured.
 
     An axis whose room sits inside its own noise is OPEN, not solved -- and a cell whose room is
