@@ -84,16 +84,39 @@ kernel is the normal case, not an edge case. The runtime reports the resolved im
 every op and the harness refuses a run whose report disagrees with what was asked for, so a
 fallback you did not intend shows up as a rejected run rather than a wrong number.
 
-## What will get your submission rejected, and why
+## What your pull request gets back
+
+One label, and a comment saying how it was reached. A paying outcome carries **the number**:
+
+```
+burnish:gap+0.0342
+```
+
+— the fraction of this generation's *remaining* arithmetic-roofline gap that your change closed.
+That is the payout basis itself. There are no XS/S/M/L/XL tiers here: a bucket boundary pays two
+differently-measured submissions the same and two almost-identical ones differently, and the
+number is already comparable across cells, models and hardware.
+
+**You can check the verdict yourself, with no GPU, in about two seconds.** The measurements are
+published next to the receipt and the verdict is a pure function of them:
+
+```bash
+burnish audit pr-000042-raw.json pr-000042.json
+```
+
+If you think the measurement itself is wrong, re-run it on your own 5090 and file a
+counter-receipt with `burnish challenge`. A disagreement beyond the cell's own noise floor puts
+the credit on hold rather than paying it or withdrawing it. `docs/EVAL.md` has the whole loop.
 
 | outcome | cause |
 |:--|:--|
-| `DETERMINISM_FAIL` | ten replays of your build were not byte-identical. Nothing can be attributed to a change against a baseline that does not reproduce itself. |
-| `CORRECTNESS_FAIL` | the latents moved outside the stated tolerance. This is a rejection, not a trade-off, and widening the tolerance is not the fix. |
-| `SHAPE_OVERFIT` | the gain vanished on a held-out shape the evaluator drew after your code was frozen. A kernel fast only on the benchmarked shape is a tuned constant. |
-| `PARTIAL` | you ran some cells and not others. Dropping the cell a change hurts is the cheapest way to raise a score. |
-| `UNRESOLVED` | the effect is inside the cell's own measured noise floor. You will get the number and the interval; you will not get credit. |
-| `MOVED_ALONG_FRONTIER` | faster, but it cost memory or fidelity. That is a trade the runtime could already make. |
+| `burnish:determinism-fail` | replays of your build were not byte-identical. Nothing can be attributed to a change against a baseline that does not reproduce itself. |
+| `burnish:correctness-fail` | the latents moved outside the stated tolerance. A rejection, not a trade-off, and widening the tolerance is not the fix. |
+| `burnish:shape-overfit` | the gain vanished on a held-out shape the evaluator drew after your code was frozen. A kernel fast only on the benchmarked shape is a tuned constant. |
+| `burnish:partial` | you ran some cells and not others. Dropping the cell a change hurts is the cheapest way to raise a score. |
+| `burnish:unresolved` | the effect is inside the cell's own measured noise floor. You get the number and the interval; you do not get credit — and this is not a judgement about the idea. |
+| `burnish:moved-along-frontier` | faster, but it cost memory or fidelity. That is a trade the runtime could already make. |
+| `burnish:skipped-instrument` | it changes the measuring instrument, so it was not evaluated and no GPU time was spent on it. Not a rejection — see below. |
 
 ## Commit messages
 
@@ -113,11 +136,19 @@ fix: the VAE tiler dropped the last row at odd heights
 docs: state the measured floor for every published cell
 ```
 
-## Changing the instrument
+## Changing the instrument — and the one exception that is paid
 
-`eval/`, `configs/`, `schemas/` and `tools/burnish` are the **instrument**. `eval/run_from_base.sh`
-overlays them from the base commit before scoring anything, so changes you make there are reported
-and then discarded for scoring purposes.
+`eval/`, `configs/`, `schemas/` and `tools/burnish` are the **instrument**. Two mechanisms guard
+them, because one is not enough: `eval/run_from_base.sh` overlays them from the base commit
+before scoring, so an edit cannot affect its own author's score; and a required CI check blocks
+the merge, because a change that lands on main becomes the instrument for everybody after it.
+
+**Opening a new cell is the exception, and it is paid.** Adding a new frozen generation under
+`eval/cells/<name>/` — with its reference latents, its calibration and its roofline — is
+cartography, and it is scored in its own right. It is allowed where editing an existing
+generation is not, for a specific reason: an added generation cannot change what any existing
+receipt meant, and an edited one silently re-scores history. `docs/CARTOGRAPHY.md` has what a
+new cell has to come with.
 
 That is not a prohibition. Improving the evaluator is a real contribution — the evaluator is where
 the bugs are, and a broken one prints a confident number. Send it as its own PR, scored as a change

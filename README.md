@@ -11,6 +11,7 @@ produce a picture. It also means to polish by repeated passes, which is what con
 burnish roofline          # how big every box is, and how full
 burnish screen            # which model v0 pins, from arithmetic alone
 burnish bench ... | burnish score   # a number with an interval on it
+burnish audit             # re-derive somebody else's verdict. no GPU, two seconds
 ```
 
 ---
@@ -35,6 +36,28 @@ separate pass.
 each was found, and the first receipt the instrument ever produced — which was a regression, and
 which found a bug in the runtime on its way to saying so. Overselling the surface is the single
 failure mode that kills a subnet, so that page comes before the pitch.
+
+---
+
+## The evaluation is checkable by anyone
+
+Scoring here is a pure function of recorded measurements — no device, no clock, no randomness. A
+receipt measured on a Blackwell part re-derives, figure for figure, on a laptop. So the record is
+not a grade a bot decided; the record is the **measurements**, and the verdict is a derivation
+anyone can repeat:
+
+```bash
+burnish audit pr-000042-raw.json pr-000042.json
+```
+
+That catches a scoring bug, an edited receipt, or a verdict that does not follow from its own
+data — including a receipt whose digest was recomputed to cover the edit. What it cannot catch is
+a measurement that never happened, and nothing arithmetic can. For that, re-measure on your own
+5090 and file a counter-receipt with `burnish challenge`; a disagreement beyond the cell's own
+noise floor holds the credit rather than paying it.
+
+A paying outcome carries the number, not a grade: `burnish:gap+0.0342` is the fraction of the
+remaining roofline gap the change closed. `docs/EVAL.md` is the whole loop.
 
 ---
 

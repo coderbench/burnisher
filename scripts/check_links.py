@@ -53,6 +53,11 @@ def looks_like_a_path(tok: str) -> bool:
     """
     if tok.startswith(SCHEMES) or " " in tok or tok.startswith("-"):
         return False
+    # A placeholder, not a path: `eval/cells/<new>/`, `--ledger <dir>`. Documentation has to be
+    # able to show the SHAPE of a path without a file of that name existing, and demanding a
+    # real example everywhere would make the prose worse to satisfy a checker.
+    if "<" in tok or ">" in tok:
+        return False
     if "/" not in tok:
         return False
     return tok.endswith("/") or Path(tok).suffix in KNOWN_EXT
@@ -80,8 +85,10 @@ def main() -> int:
         print("!! documentation points at paths that do not exist:")
         for doc, tok in sorted(bad):
             print(f"   {doc}: {tok}")
-        print("\n   A generated document repeats a wrong path everywhere at once; fix the")
-        print("   generator in scripts/make_issues.py rather than the file it wrote.")
+        print("\n   If the document is generated (anything under issues/, docs/SCREEN.md,")
+        print("   docs/ROOFLINE.md), fix the generator rather than the file it wrote -- a")
+        print("   generator repeats a wrong path everywhere at once. A placeholder path is")
+        print("   spelled with angle brackets and is skipped.")
         return 1
     print(f"ok: every repo path named across {len(DOCS)} documents exists")
     return 0
