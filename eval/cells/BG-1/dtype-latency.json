@@ -1,0 +1,42 @@
+{
+  "_what_this_is": "One DiT step at fp32 vs bf16, paired and interleaved. A ratio between two dtypes of the same implementation -- not a score, never scored.",
+  "_why": "fp32 reads twice the weight bytes of bf16. A bandwidth-bound step would take about twice as long. What it actually takes decides whether a narrower weight format has anything to sell on this path yet.",
+  "basis": "measured",
+  "device": {
+    "_clocks_note": "Clocks are not pinned and cannot be in a container. Only paired interleaved same-box deltas mean anything; absolute times from two different sessions are not comparable.",
+    "driver_version": "595.91.07",
+    "memory.total": "32607 MiB",
+    "name": "NVIDIA GeForce RTX 5090",
+    "pci.bus_id": "00000000:01:00.0",
+    "uuid": "GPU-da2aa62b-30d9-78a4-d9a1-86a21df7e530"
+  },
+  "dit_step_bf16_s": 3.576476135,
+  "dit_step_fp32_s": 3.265501589,
+  "impl": "cuda",
+  "iters": 5,
+  "ratio_fp32_over_bf16": 0.9130500150813952,
+  "repeats": 5,
+  "samples": {
+    "bf16": [
+      3.559928631,
+      3.573781937,
+      3.576476135,
+      3.576552403,
+      3.577299539
+    ],
+    "fp32": [
+      3.230926189,
+      3.25537409,
+      3.265501589,
+      3.271041979,
+      3.268139644
+    ]
+  },
+  "shape": {
+    "batch": 2,
+    "caption_len": 300,
+    "resolution": 1024
+  },
+  "stage": "dit-step",
+  "warmup": 2
+}

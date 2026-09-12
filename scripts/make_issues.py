@@ -118,36 +118,68 @@ def facts(cand, devices, axes):
     return f
 
 
+# Emitted by any paragraph that cites a MEASURED artifact rather than an arithmetic ceiling.
+# The per-issue header says which basis the issue is written on, and that line has to follow the
+# body rather than be asserted over it: "No measurement appears below" is true of most of these
+# issues and false of the one that quotes a real run, and a header that cannot tell the
+# difference is the exact confusion between model and measurement this repository forbids.
+MEASURED_MARK = "<!--cites-measurement-->"
+
+
 def _narrowing_note(f):
     """The measured reason these ceilings are worth less than they look, if it has been measured.
 
     A narrower dtype only pays where the wide path is limited by the width. The ceilings in the
-    table above say what the ARITHMETIC permits; they do not say what this runtime would
-    collect, because this runtime is nowhere near either bound yet.
+    table above say what the ARITHMETIC permits; they do not say what this runtime would collect,
+    because this runtime is nowhere near either bound yet.
+
+    The prose adapts to the sign of the measurement rather than assuming it. The first draft of
+    this function read "halving the bytes bought nothing", written before the measurement existed
+    -- and the measurement came back on the other side of 1.0, so the sentence would have been
+    wrong in direction while quoting a correct number. A generator that can only narrate the
+    result its author expected is a way of typing a figure by hand with extra steps.
     """
     d = f.get("dtype_latency")
     if not d:
         return ""
     fp32, bf16 = d["dit_step_fp32_s"], d["dit_step_bf16_s"]
     ratio = fp32 / bf16
-    return f"""
+    if ratio > 1.05:
+        verdict = (f"so the narrower dtype does pay here, but at {ratio:.3f}x rather than the "
+                   f"2.00x the byte count allows -- most of the width is already being left on "
+                   f"the floor")
+    elif ratio >= 0.98:
+        verdict = ("so halving the weight traffic bought nothing at all, which means this path "
+                   "is not limited by the traffic")
+    else:
+        verdict = (f"so halving the weight traffic made the step {100 * (1 / ratio - 1):.0f}% "
+                   f"SLOWER. The narrower dtype is not merely failing to pay, it is costing")
+    return MEASURED_MARK + f"""
 **Measured first, and it changes what these cells are worth today.** One DiT step on the pinned
-box costs {fp32:.3f} s at fp32 and {bf16:.3f} s at bf16 -- a ratio of {ratio:.3f}x for a HALVING
-of every weight read, measured over {d['repeats']} paired repeats on {d['device']['name']}
-(driver {d['device']['driver_version']}).
+box costs {fp32:.3f} s at fp32 and {bf16:.3f} s at bf16 -- a ratio of {ratio:.3f}x, measured over
+{d['repeats']} paired interleaved repeats on {d['device']['name']} (driver
+{d['device']['driver_version']}), recorded in `eval/cells/BG-1/dtype-latency.json`.
 
-Halving the bytes bought nothing, which means this path is not limited by the bytes. It is
-limited by how the kernels are written. That is the number to carry into an fp8 or NVFP4
-attempt: **the published ceiling for a narrower dtype is not collectable until the bf16 path
-is actually near a bound**, and today it sits at {100 * f['dit_achieved']:.1f}% of
-its own. Quantizing a kernel that is bound by its launch structure moves the ceiling down and
-the measurement not at all -- and a submission that reports the ceiling as the gain is
-reporting a model as a measurement.
+fp32 reads twice the weight bytes of bf16, so a bandwidth-bound step would show about 2.00x --
+{verdict}.
 
-The order this implies: the fp8 and NVFP4 cells stay open and stay worth taking, but the gain
-lands only after, or together with, the work that makes bf16 bandwidth-bound in the first place
--- fused AdaLN, CUDA-graph capture, and the attention kernel. Take those first and these cells
-become worth their ceilings; take these first and they are worth what the ratio above says.
+The bf16 arm is the calibrated one, and it sits at {100 * f['dit_achieved']:.1f}% of this cell's
+arithmetic ceiling. That is the explanation: at a ninetieth of its bound the step is limited by
+neither the bytes nor the flops, so changing the number of bytes changes nothing that matters.
+What it is limited by is how the kernels are written -- launch count, unfused elementwise work, and a bf16 path that is
+converting more than it is saving. Narrowing the weights of a kernel in that state moves the
+published ceiling DOWN and the measurement not at all.
+
+**The order this implies.** The fp8 and NVFP4 cells stay open and stay worth taking, but the
+gain arrives after -- or together with -- the work that makes this path bound by something a
+narrower weight can relieve: fused AdaLN, CUDA-graph capture, and the attention kernel. Take
+those first and these cells become worth something near their ceilings. Take these first and
+they are worth what the ratio above says, which is nothing.
+
+**And it is a live example of the rule.** The ceiling in the table is `"basis": "model"`. The
+ratio in this paragraph is `"basis": "measured"`. A submission that reported the first as a gain
+would be reporting {f['dit_ceiling_nvfp4_ms']:.1f} ms for a step that measurement says would not
+move.
 """
 
 
@@ -660,21 +692,29 @@ def main():
              "Generated by `scripts/make_issues.py`. Every figure below is computed from",
              "`configs/` by the same geometry the scorer uses; none is typed. Re-generate after",
              "any change to a config, or the backlog and the roofline table will disagree.", "",
-             "**Every number here is `basis: model`** -- arithmetic, from a config file and a",
-             "device peak. An issue can say how big a box could be. It cannot say how full it is,",
-             "because nothing in this repository has been measured on the pinned hardware yet.",
+             "**Ceilings here are `basis: model`** -- arithmetic, from a config file and a device",
+             "peak. A ceiling says how big a box could be, never how full it is. Where an issue",
+             "quotes a MEASURED figure from the pinned hardware it says so in its Basis line and",
+             "names the artifact the figure came from; everywhere else, the number is a bound and",
+             "publishing it as a gain is the one thing a submission must never do.",
              "", "| issue | title | labels |", "|:--|:--|:--|"]
 
     for slug, title, labels, fn in ISSUES:
         body = fn(f).strip()
+        measured = MEASURED_MARK in body
+        body = body.replace(MEASURED_MARK, "").strip()
+        basis = ("model (arithmetic) for every ceiling, and clearly marked where a MEASURED\n"
+                 "figure from the pinned hardware is quoted alongside one. A ceiling is not a gain."
+                 if measured else "model (arithmetic). No measurement appears below.")
         text = (f"# {title}\n\n"
                 f"**Labels:** {', '.join(labels)}  \n"
-                f"**Basis:** model (arithmetic). No measurement appears below.  \n"
+                f"**Basis:** {basis}  \n"
                 f"**Device:** {f['device']}\n\n"
                 f"{body}\n\n"
                 f"---\n\n"
-                f"*Generated by `scripts/make_issues.py`. Do not edit by hand: every figure is\n"
-                f"computed from `configs/`, and a number typed here would disagree with\n"
+                f"*Generated by `scripts/make_issues.py`. Do not edit by hand: every ceiling is\n"
+                f"computed from `configs/` by the geometry the scorer uses, every measured figure\n"
+                f"is read from the artifact it names, and a number typed here would disagree with\n"
                 f"`docs/ROOFLINE.md` and with the scorer.*\n")
         if args.write:
             out_dir.mkdir(parents=True, exist_ok=True)
