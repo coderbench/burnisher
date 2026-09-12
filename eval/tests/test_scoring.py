@@ -15,6 +15,7 @@ import unittest
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+ROOT_EX = HERE.parent.parent / "examples"
 sys.path.insert(0, str(HERE.parent))
 
 from burnscore import cells as C, compute as CP, floor as F, frontier as FR, geometry as G
@@ -402,6 +403,64 @@ class TestComputeAndReceipt(unittest.TestCase):
         with self.assertRaises(CP.ComputeError) as cm:
             CP.compute(self.gen, [r for r in recs if r["repeat"] < 2])
         self.assertIn("declares 3", str(cm.exception))
+
+    def test_interleaving_is_worth_more_than_a_noise_floor(self):
+        """Why the arms alternate instead of main running to completion first.
+
+        The obvious arrangement -- measure `main`, then measure the pull request, then compare --
+        is wrong on rented hardware, and not by a little. The box drifts WITHIN a single bench
+        run: on the committed example the base arm moved +0.480% across three repeats in
+        `dit-step` and -0.368% in `vae-decode`, where that cell's entire measured noise floor is
+        0.259%. Run one arm to completion and then the other, and all of that drift lands
+        between the arms and is attributed to whichever went second.
+
+        Scored both ways, the same measurements give:
+
+            vae-decode   interleaved  -0.000003   correctly unresolved
+                         blocked      +0.000021   payable
+                         floor         0.000021
+
+        A null result becomes a payment, at exactly the threshold, because the box cooled by a
+        third of a percent between the two halves of the run. This test pins the magnitude so
+        the ordering cannot be "simplified" later by somebody who reads the docstring and
+        assumes the effect is negligible.
+        """
+        import math
+        raw = json.loads((ROOT_EX / "BG-1-pr-000001-raw.json").read_text())
+        cal = json.loads((HERE.parent / "cells" / "BG-1" / "reference.json").read_text())["cells"]
+
+        def geo(xs):
+            return math.exp(sum(map(math.log, xs)) / len(xs))
+
+        worst = 0.0
+        for cell_id, c in cal.items():
+            b = [r["metrics"]["latency_s"] for r in raw["records"]
+                 if r["cell"] == cell_id and r["variant"] == "base"]
+            cd = [r["metrics"]["latency_s"] for r in raw["records"]
+                  if r["cell"] == cell_id and r["variant"] == "candidate"]
+            if len(b) < 2:
+                continue
+            ceil = c["ceiling_seconds"]
+
+            def gap(bt, ct):
+                ab, ac = ceil / bt, ceil / ct
+                return (ac - ab) / (1 - ab)
+
+            paired = gap(geo(b), geo(cd))
+            blocked = gap(b[0], cd[-1])          # main in the cool phase, PR in the warm one
+            floor_gap = CP.floor_as_gap_closed(c["floor_pct"], c["achieved"]) \
+                if hasattr(CP, "floor_as_gap_closed") else None
+            if floor_gap is None:
+                from burnscore.floor import floor_as_gap_closed as fg
+                floor_gap = fg(c["floor_pct"], c["achieved"])
+            worst = max(worst, abs(blocked - paired) / floor_gap)
+
+        self.assertGreater(
+            worst, 0.5,
+            f"blocked ordering now differs from interleaved by only {worst:.2f} noise floors. "
+            f"If the box has genuinely stopped drifting within a run that is worth knowing, but "
+            f"check the measurements before relaxing the ordering -- this was 1.1 floors, which "
+            f"is enough to turn a null result into a payment.")
 
     def test_a_real_speedup_scores_and_resolves(self):
         out, _ = self._score(speedups={"dit-step/1024/bf16": 1.15})

@@ -84,6 +84,40 @@ iterating on a kernel — but a *scored* run goes through the script, because tw
 the same prose write two different drivers and the difference between them shows up as a
 difference in scores that no receipt can explain.
 
+## Why the arms alternate, measured rather than argued
+
+The obvious arrangement is: measure `main`, then measure the pull request, then compare. On
+rented hardware that is wrong, and not marginally.
+
+The box drifts **within a single bench run**. From the committed example in `examples/`:
+
+| | base arm, first → last repeat | that cell's entire noise floor |
+|:--|--:|--:|
+| `dit-step/1024/bf16` | **+0.480%** | 0.578% |
+| `vae-decode/1024/bf16` | **−0.368%** | 0.259% |
+
+For `vae-decode` the drift across one 17-minute run is *larger than the whole floor*. Run one arm
+to completion and then the other, and all of it lands between the arms and is attributed to
+whichever went second.
+
+Scoring the same measurements both ways:
+
+```
+vae-decode/1024/bf16
+   interleaved (as designed)   gap_closed -0.000003     correctly unresolved
+   blocked (main, then PR)     gap_closed +0.000021     payable
+   smallest creditable win      0.000021
+```
+
+**A null result becomes a payment**, at exactly the threshold, because the box cooled by a third
+of a percent between the two halves of the run. `eval/tests/test_scoring.py` pins the magnitude
+so nobody later "simplifies" the ordering on the assumption that the effect is small.
+
+This is also why the base arm's timing is never cached, on any box, ever. Its correctness gate is
+cached per base commit — correctness is deterministic, so a byte-identical answer does not need
+re-deriving — but the moment a stored *time* enters a comparison, the comparison is between two
+thermal states rather than two implementations.
+
 ## Why the probe matters more than it looks
 
 Until `burnish probe` runs, every ceiling stands on a peak nobody checked — and the error runs
