@@ -27,7 +27,12 @@ Pipeline::Pipeline(PipelineConfig cfg, std::shared_ptr<WeightSource> tw,
                    std::shared_ptr<WeightSource> dw, std::shared_ptr<WeightSource> vw,
                    T5Config t5, DiTConfig dit, VaeConfig vae, SchedulerConfig sched)
     : cfg_(std::move(cfg)), tw_(std::move(tw)), dw_(std::move(dw)), vw_(std::move(vw)),
-      t5cfg_(t5), ditcfg_(dit), vaecfg_(vae), schedcfg_(sched) {}
+      t5cfg_(t5), ditcfg_(dit), vaecfg_(vae), schedcfg_(sched) {
+    // Resolved here rather than per-generate so that an unknown --impl, or a device baseline an
+    // op cannot provide, fails at construction -- before a checkpoint is mapped and long before
+    // anything is timed.
+    impls_ = ImplSelection::from_request(cfg_.impl, cfg_.device);
+}
 
 Tensor Pipeline::initial_latent() const {
     const int64_t f = vaecfg_.scale_factor();
@@ -60,7 +65,7 @@ Tensor Pipeline::generate(const Tensor& token_ids, StageTimings* timings,
     const auto secs = [](clock::time_point a, clock::time_point b) {
         return std::chrono::duration<double>(b - a).count();
     };
-    const ImplSelection impls = ImplSelection::from_request(cfg_.impl, cfg_.device);
+    const ImplSelection& impls = impls_;
     const int64_t batch = cfg_.classifier_free_guidance ? 2 : 1;
     if (token_ids.dim(0) != batch) {
         throw std::runtime_error(

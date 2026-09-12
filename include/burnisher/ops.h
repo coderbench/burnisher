@@ -290,9 +290,15 @@ std::vector<OpListing> list_all_impls();
 // Resolve an implementation name for one op, honouring a per-op override.
 //
 // A submission selects `--impl fused-adaln`, which applies to whichever ops register that name
-// and leaves the rest on their default. That is what lets one flag A/B a single kernel without
-// silently changing the rest of the pipeline underneath the comparison.
-std::string resolve_impl(const std::string& op, const std::string& requested);
+// and leaves the rest on the baseline for `device`. That is what lets one flag A/B a single
+// kernel without silently changing the rest of the pipeline underneath the comparison.
+//
+// `device` is not optional information. The baseline is `stock` (host kernels) on CPU and `cuda`
+// on CUDA, because a run placed on the device has device pointers in every intermediate and a
+// host kernel handed one of those is a fault. A single-kernel submission -- which is what almost
+// every submission is -- takes this fallback for fourteen of the fifteen ops.
+std::string resolve_impl(const std::string& op, const std::string& requested,
+                         Device device = Device::CPU);
 
 // True when at least one op registers `name`. A name NO op registers is a typo or a kernel that
 // failed to register, and resolving it to `stock` everywhere while reporting success would

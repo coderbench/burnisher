@@ -984,7 +984,7 @@ int cmd_generate(const Args& a) {
         {"device", a.get("device", "cpu")},
         {"noise", a.get("noise").empty() ? "seeded" : "pinned"},
     };
-    for (const auto& kv : ImplSelection::from_request(cfg.impl).as_map()) {
+    for (const auto& kv : p.impls().as_map()) {
         effective["impl." + kv.first] = kv.second;
     }
     std::ostringstream os;

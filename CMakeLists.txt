@@ -51,9 +51,9 @@ if(BURNISHER_BUILD_CUDA)
     # sm_120 is RTX 5090 / RTX PRO 6000 Blackwell; sm_121 is DGX Spark (GB10).
     set(CMAKE_CUDA_ARCHITECTURES 120)
   endif()
-  # device.cu only. The CUDA OP backend is not written: see docs/STATUS.md and the backlog
-  # issues. Shipping unverified kernels as though they worked is the failure this repository
-  # exists to avoid, and there was no toolkit and no Blackwell part to verify them against.
+  # device.cu carries the allocator and the device boundary; ops_cuda.cu carries the kernels.
+  # Both are gated behind the correctness gate before anything they produce is timed: shipping
+  # unverified kernels as though they worked is the failure this repository exists to avoid.
   target_sources(burnisher_core PRIVATE src/cuda/device.cu src/cuda/ops_cuda.cu)
   target_compile_definitions(burnisher_core PUBLIC BURNISHER_CUDA=1)
   set_target_properties(burnisher_core PROPERTIES CUDA_SEPARABLE_COMPILATION ON)

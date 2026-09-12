@@ -79,8 +79,19 @@ class Pipeline {
 
     const PipelineConfig& config() const { return cfg_; }
 
+    // The implementation actually selected for every op, resolved once at construction.
+    //
+    // Callers report THIS, rather than re-deriving it from the config, because a re-derivation
+    // is a second implementation of the resolution rule and the two can disagree. One did: the
+    // `effective.impls` block -- the block eval/runner.py compares against the request to catch
+    // an arm running a configuration nobody asked for -- re-resolved with the default device
+    // instead of the run's, and so reported host kernels for a run that used device ones. A
+    // report derived from anything other than the object that ran is a hand-typed number.
+    const ImplSelection& impls() const { return impls_; }
+
   private:
     PipelineConfig cfg_;
+    ImplSelection impls_;
     std::shared_ptr<WeightSource> tw_, dw_, vw_;
     T5Config t5cfg_;
     DiTConfig ditcfg_;

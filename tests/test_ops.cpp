@@ -304,5 +304,33 @@ int main() {
     CHECK(ImplSelection::from_request("materialized").attention == "materialized");
     CHECK(ImplSelection::from_request("materialized").gemm == "stock");
 
+    // The fallback is per DEVICE, and this is the invariant a single-kernel submission lives or
+    // dies on. `--impl <one attention variant>` leaves fourteen of fifteen ops on the baseline;
+    // if that baseline is the HOST kernel set while the run is placed on the device, fourteen
+    // ops get handed device pointers and the run faults before it measures anything. The first
+    // candidate this harness ever scored died exactly there.
+    //
+    // Stated as a property rather than a list of op names so that adding an op cannot quietly
+    // opt out of it: on a device run, NO op may resolve to `stock`.
+#ifdef BURNISHER_CUDA
+    for (const auto& kv : ImplSelection::from_request("cuda-tile1024", Device::CUDA).as_map()) {
+        if (kv.first == "device") continue;
+        CHECK(kv.second != "stock");
+    }
+    CHECK(ImplSelection::from_request("cuda-tile1024", Device::CUDA).attention ==
+          "cuda-tile1024");
+    CHECK(ImplSelection::from_request("cuda-tile1024", Device::CUDA).gemm == "cuda");
+    // And the plain device name still resolves to itself everywhere, which is the base arm.
+    for (const auto& kv : ImplSelection::from_request("cuda", Device::CUDA).as_map()) {
+        if (kv.first == "device") continue;
+        CHECK(kv.second == "cuda");
+    }
+#endif
+    // The host baseline is unchanged: a CPU run still falls back to the host kernels.
+    for (const auto& kv : ImplSelection::from_request("materialized", Device::CPU).as_map()) {
+        if (kv.first == "device" || kv.first == "attention") continue;
+        CHECK(kv.second == "stock");
+    }
+
     return burnisher_test::summary("test_ops");
 }

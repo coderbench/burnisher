@@ -317,10 +317,12 @@ void declare_pixart_shapes(SyntheticWeights& w, const T5Config& t5, const DiTCon
 }
 
 ImplSelection ImplSelection::from_request(const std::string& requested, Device device) {
-    // Checked HERE, not only in resolve_all(): this is the entry point every model and the CLI
-    // actually use, and until a test caught it an unknown name resolved silently to `stock` for
-    // every op and the run reported success. A silent fallback is the one failure mode the
-    // registry exists to prevent.
+    // Checked HERE: this is the entry point every model and the CLI actually use, and until a
+    // test caught it an unknown name resolved silently to `stock` for every op and the run
+    // reported success. A silent fallback is the one failure mode the registry exists to
+    // prevent. (There was once a second copy of this resolution loop in impl_select.cpp that
+    // nothing called. It is gone -- two copies of a fallback rule drift, and the dead one is
+    // the copy nobody notices is wrong.)
     if (!requested.empty() && requested != "stock" && !any_op_has_impl(requested)) {
         throw std::runtime_error(
             "no op registers an implementation named '" + requested + "'. This is a typo or a "
@@ -329,22 +331,23 @@ ImplSelection ImplSelection::from_request(const std::string& requested, Device d
             "build actually contains.");
     }
     ImplSelection s;
-    s.gemm = resolve_impl("gemm", requested);
-    s.attention = resolve_impl("attention", requested);
-    s.norm = resolve_impl("norm", requested);
-    s.modulate = resolve_impl("modulate", requested);
-    s.activation = resolve_impl("activation", requested);
-    s.conv2d = resolve_impl("conv2d", requested);
-    s.add = resolve_impl("add", requested);
-    s.chunk = resolve_impl("chunk", requested);
-    s.patch = resolve_impl("patch", requested);
-    s.upsample = resolve_impl("upsample", requested);
-    s.gather = resolve_impl("gather", requested);
-    s.scale = resolve_impl("scale", requested);
-    s.repeat = resolve_impl("repeat", requested);
-    s.guidance = resolve_impl("guidance", requested);
-    s.transpose = resolve_impl("transpose", requested);
+    // Set first: every resolve below needs it to pick the right baseline.
     s.device = device;
+    s.gemm = resolve_impl("gemm", requested, device);
+    s.attention = resolve_impl("attention", requested, device);
+    s.norm = resolve_impl("norm", requested, device);
+    s.modulate = resolve_impl("modulate", requested, device);
+    s.activation = resolve_impl("activation", requested, device);
+    s.conv2d = resolve_impl("conv2d", requested, device);
+    s.add = resolve_impl("add", requested, device);
+    s.chunk = resolve_impl("chunk", requested, device);
+    s.patch = resolve_impl("patch", requested, device);
+    s.upsample = resolve_impl("upsample", requested, device);
+    s.gather = resolve_impl("gather", requested, device);
+    s.scale = resolve_impl("scale", requested, device);
+    s.repeat = resolve_impl("repeat", requested, device);
+    s.guidance = resolve_impl("guidance", requested, device);
+    s.transpose = resolve_impl("transpose", requested, device);
     return s;
 }
 
