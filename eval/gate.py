@@ -50,6 +50,7 @@ import hashlib
 import json
 import os
 import subprocess
+import time
 import sys
 from pathlib import Path
 
@@ -221,6 +222,7 @@ def main():
         "tolerance": tol,
     }
 
+    report["_gate_started"] = time.time()
     with GpuLock():
         require_idle_device()
         report["device"] = device_fingerprint()
@@ -355,6 +357,18 @@ def main():
 
 
 def _write(args, report):
+    # What the gate COST, alongside what it found.
+    #
+    # Nothing measured this, and the round budget depends on it: `eval/round.py` decides how
+    # many submissions fit a two-hour interval from the per-submission cost, and for a while
+    # that number was a constant whose provenance was a file mtime somebody read off a
+    # directory listing. A figure this repository acts on has to come from an artifact.
+    if report.get("_gate_started"):
+        report["wall_seconds"] = round(time.time() - report.pop("_gate_started"), 1)
+        report["_wall_note"] = (
+            "Wall clock for this gate, device lock to report. Not a metric -- nothing is scored "
+            "on it -- but it is what the round budget is computed from, so it is recorded rather "
+            "than estimated.")
     text = json.dumps(report, indent=1, sort_keys=True) + "\n"
     if args.output:
         Path(args.output).write_text(text)

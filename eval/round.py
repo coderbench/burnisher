@@ -58,10 +58,22 @@ NEEDS_REBASE = f"{V.PREFIX}:needs-rebase"
 # The winner, when merging is not enabled. A label rather than a merge, so a human can look.
 MERGE_FIRST = f"{V.PREFIX}:merge-first"
 
-# What one scored submission costs, measured on the pinned part (docs/STATUS.md). Used only to
-# warn when a slot budget cannot fit the interval it is being run on -- never to predict a score.
-MEASURED_MINUTES_PER_PR = 24.3
-COLD_GATE_MINUTES = 6.3
+def _round_cost():
+    """What a submission costs, from the artifact rather than a constant in this file.
+
+    Used only to warn when a slot budget cannot fit the interval it is being run on -- never to
+    predict a score. It was a pair of hardcoded numbers whose provenance was a file mtime
+    somebody had read off a directory listing; a figure this evaluator ACTS on has to come from
+    something a reader can check.
+    """
+    p = ROOT / "eval" / "cells" / "BG-1" / "round-cost.json"
+    if not p.exists():
+        return None, None
+    d = json.loads(p.read_text())
+    return d["total_minutes_warm_cache"], d["stages_minutes"]["gate_base"]
+
+
+MEASURED_MINUTES_PER_PR, COLD_GATE_MINUTES = _round_cost()
 
 
 class RoundBusy(RuntimeError):

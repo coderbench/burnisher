@@ -1,0 +1,71 @@
+{
+ "_what_this_is": "A SECOND calibration of the same physical card as eval/cells/BG-1/reference.json, taken hours later with the same driver and the same build. It is not the calibration anything is scored against -- reference.json is -- and it is kept because it is the evidence for a claim docs/EVAL.md and docs/STATUS.md make about the instrument.",
+ "_why_it_is_committed": "Those documents state that per-cell noise floors move by up to 24x between sessions while achieved fractions hold to three significant figures. That is a measured claim, and for a while the only place its numbers existed in this repository was a test docstring -- which is prose. A published figure whose measurement is not in the tree cannot be checked by anybody, which is the one thing this repository is built not to do.",
+ "_conclusion": "A floor is a spread statistic estimated from nine paired repeats and carries large uncertainty; an achieved fraction is a median and is robust. So whether a submission RESOLVES can depend on which session its validator calibrated in, and `burnish calibrate --merge` folds sessions together keeping the worst floor per cell.",
+ "session": 2,
+ "same_card_as_reference": true,
+ "device_probe": {
+  "_clocks_note": "Clocks are not pinned and cannot be in a container. Only paired interleaved same-box deltas mean anything; absolute times from two different sessions are not comparable.",
+  "driver_version": "595.91.07",
+  "memory.total": "32607 MiB",
+  "name": "NVIDIA GeForce RTX 5090",
+  "pci.bus_id": "00000000:01:00.0",
+  "uuid": "GPU-da2aa62b-30d9-78a4-d9a1-86a21df7e530"
+ },
+ "calibrated_with": {
+  "impl": "cuda",
+  "iters": 5,
+  "repeats": 9,
+  "timer_digits": 6,
+  "warmup": 2
+ },
+ "generation": "BG-1",
+ "device": "cuda",
+ "cells": {
+  "dit-step/1024/bf16": {
+   "achieved": 0.015220439298735365,
+   "basis": "measured",
+   "ceiling_seconds": 0.05444889960495386,
+   "floor_decided_by": "spread",
+   "floor_median_ratio": 1.0000533565607066,
+   "floor_pct": 0.2053163200440145,
+   "floor_repeats": 9,
+   "floor_resolution_pct": 0.0005,
+   "floor_spread_pct": 0.2053163200440145,
+   "floors_of_room": 31448.198567920113,
+   "measured_seconds": 3.577354013,
+   "peak_vram_bytes": 3045289984,
+   "resolvable": true
+  },
+  "t5-encode/1024/bf16": {
+   "achieved": 0.18133314533011025,
+   "basis": "measured",
+   "ceiling_seconds": 0.02307707151940508,
+   "floor_decided_by": "spread",
+   "floor_median_ratio": 1.000308426439776,
+   "floor_pct": 0.15480998785128755,
+   "floor_repeats": 9,
+   "floor_resolution_pct": 0.0005,
+   "floor_spread_pct": 0.15480998785128755,
+   "floors_of_room": 2911.7774880002958,
+   "measured_seconds": 0.127263394,
+   "peak_vram_bytes": 19629568000,
+   "resolvable": true
+  },
+  "vae-decode/1024/bf16": {
+   "achieved": 0.007897364235791186,
+   "basis": "measured",
+   "ceiling_seconds": 0.04299607585791064,
+   "floor_decided_by": "spread",
+   "floor_median_ratio": 0.9997562164063962,
+   "floor_pct": 0.8452848208762251,
+   "floor_repeats": 9,
+   "floor_resolution_pct": 0.0005,
+   "floor_spread_pct": 0.8452848208762251,
+   "floors_of_room": 14736.173831186858,
+   "measured_seconds": 5.444357709,
+   "peak_vram_bytes": 698220544,
+   "resolvable": true
+  }
+ }
+}
