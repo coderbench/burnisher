@@ -79,7 +79,7 @@ the reference implementation. That is the correctness gate, and it needs referen
 not exist yet — so "the output is plausible" is the strongest claim available here, and it is
 weaker than "the output is right".
 
-### Four correctness defects the runtime had, and how they were found
+### Five correctness defects the runtime had, and how they were found
 
 Both were invisible to every self-consistency check in the repository, which is the point worth
 recording: a deterministic wrong answer passes a determinism test, and two implementations that
@@ -94,6 +94,36 @@ whole-model determinism test passed because the wrongness was deterministic. It 
 when a cross-attention *mask* test asked a question the layout could not answer. The op is now
 head-last and `tests/test_ops.cpp` pins the invariant: H-head attention must equal H independent
 single-head attentions over the corresponding slices.
+
+**The gather kernel read fp32 token ids as the weight table's dtype.** The CUDA gather was
+templated on the table's type and cast the ids pointer to that same type. The ids are always
+fp32. At fp32 the two coincide and everything works; at **bf16** it read fp32 data as bf16,
+produced garbage token ids, and the text encoder returned embeddings for the wrong tokens. The
+assembled pipeline then disagreed with the reference by a relative L2 of **1.20** — essentially
+uncorrelated — while every fp32 check in the repository passed, because fp32 is exactly the case
+where the bug cannot appear. Determinism passed too: it was deterministically wrong.
+
+It is the only pair of operands in the backend with **different dtypes**, which is the whole
+lesson. `GatherArgs` now carries an explicit contract and both implementations refuse a
+non-fp32 id tensor rather than reinterpreting it.
+
+Finding it took five halvings, and the first one is the transferable part:
+
+| question | answer | what it ruled out |
+|:--|:--|:--|
+| end-to-end, 20 steps, bf16 | 1.20 | nothing — a defect and chaos look identical here |
+| sweep the STEP COUNT | **0.993 at one step** | chaos: amplification starts small, this did not |
+| stage by stage at bf16 | T5 1.028, DiT 0.137, VAE 0.020 | the DiT and the VAE |
+| T5 by layer | **1.95 at one layer** | amplification within the encoder |
+| my CUDA bf16 vs my CPU bf16 | CPU right, CUDA 1.69x too large | the graph — it was the kernel |
+
+After the fix the T5 agrees at **0.0124**, and the DiT's 0.137 turns out to be honest
+amplification: 0.005 at one block, 0.009 at four, 0.137 at twenty-eight — the same curve shape
+as fp32, starting higher because bf16 starts higher.
+
+**The move worth keeping:** when two hypotheses look identical at full scale, shrink the scale
+until they separate. A defect is present at one step and one layer; amplified rounding is not.
+The same bisection localised the attention layout bug by truncating the block stack.
 
 **The sampler used the wrong sigma.** DPM-Solver++ carries two sigmas per endpoint: the
 Karras-style `sqrt((1-acp)/acp)`, whose ratio is `exp(-h)`, and the variance-preserving
