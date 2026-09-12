@@ -359,6 +359,47 @@ the habit this repository is built against.
 """
 
 
+@issue("sampler-precision", "The sampler quantises a 300-magnitude intermediate to bf16",
+       ["numerics", "measured", "scheduler"])
+def _(f):
+    return """
+**Measured, and it is a precision cliff rather than a rounding cost.**
+
+DPM-Solver++ converts the model's epsilon prediction into an x0 prediction:
+
+    x0 = (sample - sigma_vp * eps) / alpha
+
+At the first step sigma is about **157**, so alpha is about **0.0064** and x0 comes out around
+**300** while the latent it will become has a standard deviation near **1**. The sampler stores
+that intermediate in the model's compute dtype. In bf16 the spacing between representable values
+at 300 is about **2** -- so a quantity that has to resolve to a latent of unit scale is being
+rounded to twice that scale.
+
+The consequence is visible at one step and only at one step, because later steps run at small
+sigma where x0 and the latent are the same size:
+
+    steps        1        2        4        8       20
+    rel L2   0.987    ~1.06    ~1.17    ~1.12    0.349
+
+A one-step bf16 generation from this runtime and a one-step bf16 generation from the reference
+implementation are BOTH dominated by this, which is why they disagree at ~1.0 while every
+individual stage agrees to 0.01-0.14.
+
+**The fix is cheap and strictly better numerics.** The sampler's state and its x0 history are one
+latent each -- 4 x 128 x 128, 256 kB in fp32 -- against a denoise step with an arithmetic ceiling
+of 54 ms. Keeping them fp32 regardless of the model's dtype costs nothing measurable and removes
+the cliff entirely.
+
+**It is not done here, deliberately.** It would make this runtime MORE accurate than the
+reference implementation at bf16, and the reference is the oracle: the pinned latents would have
+to be reproduced, and a change that alters every reference is a new generation rather than a
+patch. It belongs in BG-2, with the reference regenerated alongside.
+
+**The measurement to take first** is the same sweep with the sampler forced to fp32 while the
+model stays bf16. If the one-step divergence collapses, the diagnosis is confirmed outright.
+"""
+
+
 @issue("cuda-graphs", "Capture the denoise loop as a CUDA graph", ["cuda", "launch-overhead"])
 def _(f):
     r = f["resolutions"]

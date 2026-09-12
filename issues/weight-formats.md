@@ -10,7 +10,7 @@ published, their ceilings are computable today, and nobody has a reference to be
 
 | dtype | DiT-step ceiling @1024px | DiT resident | T5 resident |
 |:--|--:|--:|--:|
-| bf16 | 56.05 ms | 1.22 GB | 9.53 GB |
+| bf16 | 54.45 ms | 1.22 GB | 9.53 GB |
 | fp8 | 31.70 ms | 0.61 GB | 4.76 GB |
 | nvfp4 | 15.85 ms | 0.34 GB | 2.68 GB |
 

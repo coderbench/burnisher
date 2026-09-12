@@ -8,7 +8,7 @@
 
 `burnisher generate` maps 10.8 GB of checkpoint and uploads it to the
 device on every invocation. At 1024px and 20 steps the whole denoise loop has an arithmetic
-ceiling of 1121 ms, and the upload takes
+ceiling of 1089 ms, and the upload takes
 tens of seconds. The correctness gate runs seven generations and spends the overwhelming majority
 of its wall time moving weights it already moved six times.
 

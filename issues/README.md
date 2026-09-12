@@ -17,6 +17,7 @@ because nothing in this repository has been measured on the pinned hardware yet.
 | [`weight-formats`](weight-formats.md) | NVFP4 and MXFP4 on silicon with no reference tuning | quantization, cuda, cartography |
 | [`step-caching`](step-caching.md) | Step and feature caching: algorithmic, and it must pass the gate | algorithm, scheduler |
 | [`weight-upload`](weight-upload.md) | A single generation is dominated by uploading the weights | cuda, measured, startup |
+| [`sampler-precision`](sampler-precision.md) | The sampler quantises a 300-magnitude intermediate to bf16 | numerics, measured, scheduler |
 | [`cuda-graphs`](cuda-graphs.md) | Capture the denoise loop as a CUDA graph | cuda, launch-overhead |
 | [`offload`](offload.md) | Offload and streaming: video models do not fit | memory, streaming, frontier |
 | [`shape-specialization`](shape-specialization.md) | Per-resolution shape specialization and the held-out guard | kernel, anti-gaming |

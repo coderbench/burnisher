@@ -10,9 +10,9 @@ Nothing about it needs to be re-recorded per step, which makes it the textbook c
 
 | resolution | kernel launches per DiT step | per 20-step generation | step ceiling |
 |--:|--:|--:|--:|
-| 512 | 571 | 11420 | 10.9 ms |
-| 1024 | 571 | 11420 | 56.1 ms |
-| 2048 | 571 | 11420 | 442.2 ms |
+| 512 | 571 | 11420 | 10.6 ms |
+| 1024 | 571 | 11420 | 54.4 ms |
+| 2048 | 571 | 11420 | 429.6 ms |
 
 Those counts come from the op enumeration in `eval/burnscore/geometry.py`, which is the same
 enumeration the roofline is computed from, so they are the launches the runtime actually issues
@@ -21,7 +21,7 @@ rather than an estimate.
 **What the arithmetic can and cannot tell you.** It can tell you the launch COUNT. It cannot tell
 you what a launch costs on this part, because that is a measurement and nobody has taken it here.
 At a few microseconds each, 11420 launches is single-digit
-milliseconds against a 1189 ms ceiling -- worth having and not
+milliseconds against a 1155 ms ceiling -- worth having and not
 transformative. The honest framing is that this is a *small, certain* win rather than a large
 speculative one, and it becomes more interesting at low resolution where the step is short and
 the launch count is unchanged.

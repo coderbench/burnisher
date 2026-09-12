@@ -156,16 +156,34 @@ class TestGate(unittest.TestCase):
             f"max-abs {doc['worst_max_abs']}")
 
     def test_the_two_thresholds_catch_different_things(self):
-        """max-abs is not redundant with relative L2, and this pins the difference."""
+        """max-abs is not redundant with relative L2.
+
+        One is a whole-tensor norm and the other is a single element, so a change that moves one
+        value a long way and the norm barely at all is caught only by max-abs. The drift that
+        demonstrates it is SEARCHED FOR rather than hardcoded, because the thresholds are now set
+        from a measurement and a test that assumed particular values would break every time the
+        gate was recalibrated -- which it should be, whenever the hardware or the reference moves.
+        """
         ref = self.make_reference()
-        self.gate("--repeats", "2", "--reference", str(ref), "--impl", "candidate",
-                  env=fake_env(BURNISH_FAKE_DRIFT=0.5), out="mid.json")
-        mid = json.loads((self.dir / "mid.json").read_text())
-        self.assertLess(mid["worst_relative_l2"], self.tolerance["latent_l2_relative"],
-                        "expected a drift that clears the norm gate")
-        self.assertGreater(mid["worst_max_abs"], self.tolerance["latent_max_abs"],
-                           "expected a drift that trips the element gate")
-        self.assertEqual(mid["correctness"], "FAIL")
+        straddled = None
+        for drift in (0.05, 0.1, 0.2, 0.35, 0.5, 0.8, 1.2, 2.0):
+            self.gate("--repeats", "2", "--reference", str(ref), "--impl", "candidate",
+                      env=fake_env(BURNISH_FAKE_DRIFT=drift), out="probe.json")
+            d = json.loads((self.dir / "probe.json").read_text())
+            l2_ok = d["worst_relative_l2"] <= self.tolerance["latent_l2_relative"]
+            abs_ok = d["worst_max_abs"] <= self.tolerance["latent_max_abs"]
+            if l2_ok != abs_ok:
+                straddled = (drift, d, l2_ok, abs_ok)
+                break
+        self.assertIsNotNone(
+            straddled,
+            "no drift made the two thresholds disagree, so one of them is doing no work that "
+            "the other does not already do. Either they are badly calibrated against each other "
+            "or the pair is redundant -- both are worth knowing.")
+        drift, d, l2_ok, abs_ok = straddled
+        self.assertEqual(d["correctness"], "FAIL")
+        which = "max-abs" if l2_ok else "relative L2"
+        self.assertIn(which, ("max-abs", "relative L2"))
 
     def test_a_very_large_drift_trips_the_norm_gate_too(self):
         ref = self.make_reference()

@@ -18,7 +18,25 @@ different algorithm per process, an atomic in a GroupNorm reduction over a 1024x
 activation, a sampler drawing its noise on device in launch order.
 
 **2. Does it match the pinned reference?** Fixed seed, frozen prompt set, latents compared
-against the pinned reference implementation within a stated tolerance. Latents rather than
+against the pinned reference implementation within a stated tolerance -- **in fp32**, and then
+stage by stage at the dtype the cells are scored in.
+
+That split is measured rather than chosen, and the measurements are in
+`configs/tolerance.json`:
+
+* **End to end in fp32** this runtime reproduces the reference to **5e-4** over twenty steps.
+  Sharp, and it is the only check that validates the whole ASSEMBLY.
+* **End to end in bf16** it reproduces it to **0.35** -- and the reference reproduces ITSELF
+  across the two dtypes only to **0.37**. The denoise trajectory amplifies bf16 rounding to
+  near-saturation, so this comparison cannot separate a correct implementation from a slightly
+  different one. It is recorded and it does not gate.
+* **Stage by stage at bf16** T5 **0.012**, DiT **0.137**, VAE **0.020**, sampler **0.012**.
+  Sharp again, because a single stage has not had twenty steps to amplify anything.
+
+So the gate validates the assembly where the signal is (fp32) and the dtype path where the
+signal is (per stage). Running the whole loop in bf16 and comparing latents measures the
+trajectory, not the runtime -- which is how a `gather` kernel that returned embeddings for the
+wrong tokens hid behind a number that looked like ordinary rounding. Latents rather than
 pixels: the VAE decode is itself one of the things under optimization, so comparing images would
 fold two questions into one and let a decoder change hide a denoiser change.
 
@@ -259,6 +277,16 @@ def main():
             return 0
 
         ok = (worst_l2 <= tol["latent_l2_relative"] and worst_abs <= tol["latent_max_abs"])
+        report["gate_dtype_is_the_assembly_check"] = (args.dtype == "fp32")
+        if args.dtype != "fp32":
+            # Recorded, not gating. The trajectory amplifies bf16 rounding until a correct
+            # implementation and a different one are indistinguishable; see the module docstring.
+            report["end_to_end_is_informational"] = True
+            report["_why"] = (
+                "End-to-end latent comparison at a reduced dtype cannot separate a correct "
+                "implementation from a slightly different one on this workload: the reference "
+                "reproduces itself across dtypes only to 0.37 relative L2. The assembly is "
+                "gated in fp32 and the dtype path is gated stage by stage.")
         report["correctness"] = "PASS" if ok else "FAIL"
         if ok:
             print(f"\n   PASS: worst rel L2 {worst_l2:.5f} <= {tol['latent_l2_relative']}, "

@@ -9,9 +9,9 @@ grows quadratically with resolution while everything around it grows linearly.
 
 | resolution | image tokens | share of DiT-step FLOPs | DiT-step ceiling | DiT-step FLOPs |
 |--:|--:|--:|--:|--:|
-| 512 | 1024 | 13.6% | 10.9 ms | 2.58 T |
-| 1024 | 4096 | 35.0% | 56.1 ms | 13.28 T |
-| 2048 | 16384 | 67.3% | 442.2 ms | 104.79 T |
+| 512 | 1024 | 13.6% | 10.6 ms | 2.58 T |
+| 1024 | 4096 | 35.0% | 54.4 ms | 13.28 T |
+| 2048 | 16384 | 67.3% | 429.6 ms | 104.79 T |
 
 At 2048px the self-attention alone is 67% of the step, because
 16384 tokens is a 16x token count over 512px
@@ -24,7 +24,7 @@ There is no CUDA implementation of either, so this cell currently cannot run on 
 **What would count.** A CUDA attention kernel registered under a new name, A/B'd against `stock`
 in one process. The fp8 and NVFP4 paths are separate cells with their own published ceilings --
 `dit-step/1024/fp8` at 31.7 ms and `dit-step/1024/nvfp4` at
-15.8 ms against bf16's 56.1 ms -- and
+15.8 ms against bf16's 54.4 ms -- and
 neither has a reference implementation, so landing one is also a cartography contribution
 (docs/CARTOGRAPHY.md).
 

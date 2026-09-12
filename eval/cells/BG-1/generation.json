@@ -243,16 +243,20 @@
  ],
  "repeats": 5,
  "tolerance": {
-  "_basis_note": "ARGUED, not measured, and known to be wrong in at least one place: a CORRECT fp32 implementation measured max-abs 0.0654 against the fp32 oracle, over this 0.05 threshold, while its relative L2 was 0.0005 -- fifty times inside the L2 bound. A single outlying element in a 65536-element latent fails a max-abs gate that a whole-tensor norm passes comfortably. Replace both with `scripts/apply_tolerance.py` once `burnish gate --calibrate-tolerance` has run at the scored dtype.",
+  "_basis_note": "MEASURED, at fp32, 5x the worst drift this runtime shows against the fp32 reference over the frozen prompt set (rel L2 5.004e-4, max abs 6.539e-2). fp32 because that is where the end-to-end comparison has signal: in bf16 the reference reproduces ITSELF only to 0.37 relative L2, so the comparison measures the trajectory rather than the runtime. The dtype path is gated stage by stage instead, where a single stage has not had twenty steps to amplify anything. The 5x margin is a stated judgement, not a derivation.",
   "_determinism_is_not_a_tolerance": "The same build must reproduce ITSELF exactly or it cannot be a reference for anything. Only the comparison against the oracle has a tolerance.",
-  "basis": "argued",
+  "basis": "measured",
   "determinism_replays": 10,
   "determinism_rule": "byte-identical latents across replays of the same build",
-  "latent_l2_relative": 0.02,
-  "latent_max_abs": 0.05,
+  "gate_dtype": "fp32",
+  "latent_l2_relative": 0.0025,
+  "latent_max_abs": 0.33,
   "measured": {
-   "_bf16_note": "NOT YET MEASURED. It is the number that sets the real threshold, because it is the only one that isolates implementation error at the dtype the cells are scored in. Until it exists the thresholds above stay `argued` and the gate is known to be miscalibrated.",
-   "bf16_vs_bf16_oracle": null,
+   "bf16_vs_bf16_oracle": {
+    "_what": "This runtime against the reference, both bf16, end to end. Comparable to the reference's own 0.371 across dtypes -- which is why it is recorded and does not gate.",
+    "worst_max_abs": 3.97656,
+    "worst_relative_l2": 0.34881
+   },
    "fp32_vs_fp32_oracle": {
     "_what": "This runtime in fp32 against the fp32 reference latents, same pinned noise. It is the evidence that the PIPELINE IS CORRECT: four stages that each agree to 1e-5 assemble into a generation that reproduces the reference to 5e-4.",
     "worst_max_abs": 0.06539362668991089,
@@ -262,7 +266,27 @@
     "_what": "The reference against itself at two dtypes. No implementation difference at all. This is the cost of bf16 over twenty classifier-free-guided steps at 1024px, and it is the floor under any cross-dtype tolerance.",
     "worst_max_abs": 3.8679,
     "worst_relative_l2": 0.3713
+   },
+   "step_divergence_bf16": {
+    "1": 0.98715,
+    "2": 0.631325,
+    "20": 0.34881,
+    "_what": "End-to-end bf16 divergence against the bf16 oracle by step count. It DECREASES with steps, which is the signature of the sampler's precision cliff at high sigma rather than of a defect: at the first step sigma is 157, so the x0 prediction is ~300 where the latent is ~1, and bf16 spacing there is ~2. issues/sampler-precision.md."
    }
+  },
+  "stage_tolerances_at_scored_dtype": {
+   "_margin": "About 4x each measurement. The DiT's is looser because its disagreement grows with depth -- 0.005 at one block, 0.009 at four, 0.137 at twenty-eight -- so the threshold has to admit the full stack.",
+   "_measured_bf16": {
+    "dit-step": 0.1365,
+    "scheduler": 0.0124,
+    "t5-encode": 0.0124,
+    "vae-decode": 0.0204
+   },
+   "_what": "Per-stage against the reference at the dtype the cells are scored in. These are the checks that cover the reduced-precision path, and they are sharp where the end-to-end comparison is not.",
+   "dit-step": 0.5,
+   "scheduler": 0.06,
+   "t5-encode": 0.06,
+   "vae-decode": 0.1
   }
  }
 }
