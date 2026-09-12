@@ -296,6 +296,18 @@ submission *resolves* could depend on which session its validator calibrated in,
 `burnish calibrate --merge` folds sessions together keeping the worst floor per cell — which can
 only refuse a gain too small to see, never credit noise as a contribution.
 
+**0c. BG-2 exists and is NOT finished.** `eval/cells/BG-2/` declares a 512px generation --
+`dit-step/512/bf16` at a 10.58 ms ceiling against 1024px's 54.45 ms, while `t5-encode` is
+unchanged at 23.08 ms because the text encoder never sees the image. That asymmetry is the
+regeneration property the screen claims, made concrete.
+
+What it does not have: **reference latents, a calibration, or a measured tolerance.**
+`configs/tolerance.json` marks it `basis: provisional` and says in as many words that it must not
+be used to reject anything. It was created to prove the cartography evaluation path end to end;
+the structural half passed on hardware and the measurement half did not complete. Nothing is
+scored against BG-2 and nothing should be until `burnish cartography check --measure` finishes on
+it.
+
 **1. Whether the fp8 and NVFP4 peaks are reachable.** Those two cells still read
 `peak_basis: vendor`. Every implemented cell reads `measured`.
 

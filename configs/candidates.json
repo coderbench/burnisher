@@ -2,7 +2,6 @@
  "_what_this_is": "Every model considered for the v0 pin, with the fields the screen needs, taken from each repository's own config.json and file listing rather than from a paper. `fetched_utc` and `revision` say exactly what was read; re-running `eval/screen.py --refresh` re-reads them and fails loudly if a field moved, because a config that changed under a pinned benchmark is a silent change to the oracle.",
  "_access_note": "`gated` is from the HuggingFace model API. A gated repository is not redistributable-by-default even under a permissive licence: a stranger cloning this repo cannot fetch the weights without an account and a click-through. That is a screen failure, not a footnote -- the benchmark has to be re-runnable by strangers.",
  "fetched_utc": "2026-09-11",
-
  "candidates": {
   "pixart-sigma-xl2-1024": {
    "family": "PixArt-Sigma",
@@ -10,94 +9,212 @@
    "revision": "e102b3591cc82e97071b8b4cb90d834d0c487207",
    "text_encoder_repo": "PixArt-alpha/pixart_sigma_sdxlvae_T5_diffusers",
    "text_encoder_revision": "2c17b4e85261cd549b4068d086b7c2ba9d468e9f",
-   "license": "openrail++", "gated": false,
+   "license": "openrail++",
+   "gated": false,
    "license_note": "CreativeML Open RAIL++-M. Redistributable and re-runnable without credentials; carries use restrictions (Attachment A) that a benchmark harness does not trip. The T5-XXL encoder weights are google/t5-v1_1-xxl, Apache-2.0, ungated.",
    "denoiser": {
-    "kind": "DiT", "class": "Transformer2DModel",
-    "num_layers": 28, "num_attention_heads": 16, "attention_head_dim": 72,
-    "hidden_size": 1152, "patch_size": 2, "in_channels": 4, "out_channels": 8,
-    "cross_attention_dim": 1152, "caption_channels": 4096,
-    "mlp_ratio": 4.0, "norm_type": "ada_norm_single",
+    "kind": "DiT",
+    "class": "Transformer2DModel",
+    "num_layers": 28,
+    "num_attention_heads": 16,
+    "attention_head_dim": 72,
+    "hidden_size": 1152,
+    "patch_size": 2,
+    "in_channels": 4,
+    "out_channels": 8,
+    "cross_attention_dim": 1152,
+    "caption_channels": 4096,
+    "mlp_ratio": 4.0,
+    "norm_type": "ada_norm_single",
     "sample_size": 128,
     "params": 610000000,
     "file_bytes_fp32": 2443500000,
     "_norm_note": "ada_norm_single: ONE shared 6-way modulation table plus a per-layer learned offset, so the AdaLN projection is not per-layer-per-token. That is the shape the `fused AdaLN` backlog item targets."
    },
    "text_encoder": {
-    "kind": "T5-XXL encoder", "class": "T5EncoderModel",
-    "num_layers": 24, "d_model": 4096, "d_ff": 10240, "d_kv": 64, "num_heads": 64,
-    "vocab_size": 32128, "feed_forward_proj": "gated-gelu",
+    "kind": "T5-XXL encoder",
+    "class": "T5EncoderModel",
+    "num_layers": 24,
+    "d_model": 4096,
+    "d_ff": 10240,
+    "d_kv": 64,
+    "num_heads": 64,
+    "vocab_size": 32128,
+    "feed_forward_proj": "gated-gelu",
     "max_sequence_length": 300,
     "params": 4762000000,
     "file_bytes_fp32": 19049300000
    },
    "vae": {
-    "kind": "AutoencoderKL", "latent_channels": 4, "scale_factor": 8,
-    "block_out_channels": [128, 256, 512, 512], "layers_per_block": 2,
-    "norm_num_groups": 32, "scaling_factor": 0.13025,
-    "params": 83700000, "decoder_params": 49500000,
+    "kind": "AutoencoderKL",
+    "latent_channels": 4,
+    "scale_factor": 8,
+    "block_out_channels": [
+     128,
+     256,
+     512,
+     512
+    ],
+    "layers_per_block": 2,
+    "norm_num_groups": 32,
+    "scaling_factor": 0.13025,
+    "params": 83700000,
+    "decoder_params": 49500000,
     "file_bytes_fp32": 334600000
    },
-   "scheduler": {"class": "DPMSolverMultistepScheduler", "solver_order": 2,
-                 "algorithm_type": "dpmsolver++", "solver_type": "midpoint",
-                 "prediction_type": "epsilon", "num_train_timesteps": 1000,
-                 "beta_schedule": "linear", "beta_start": 0.0001, "beta_end": 0.02,
-                 "timestep_spacing": "linspace", "lower_order_final": true},
+   "scheduler": {
+    "class": "DPMSolverMultistepScheduler",
+    "solver_order": 2,
+    "algorithm_type": "dpmsolver++",
+    "solver_type": "midpoint",
+    "prediction_type": "epsilon",
+    "num_train_timesteps": 1000,
+    "beta_schedule": "linear",
+    "beta_start": 0.0001,
+    "beta_end": 0.02,
+    "timestep_spacing": "linspace",
+    "lower_order_final": true
+   },
    "default_steps": 20,
    "classifier_free_guidance": true,
    "resolution": 1024
   },
-
   "flux1-schnell": {
-   "family": "FLUX.1", "repo": "black-forest-labs/FLUX.1-schnell",
-   "license": "apache-2.0", "gated": true,
+   "family": "FLUX.1",
+   "repo": "black-forest-labs/FLUX.1-schnell",
+   "license": "apache-2.0",
+   "gated": true,
    "license_note": "Apache-2.0 WEIGHTS behind an auto-approved HuggingFace gate. `curl` returns 401 without a token. Permissive licence, non-permissive distribution -- and the gate is the binding constraint for a benchmark strangers must re-run.",
-   "denoiser": {"kind": "MMDiT", "num_layers": 57, "hidden_size": 3072, "params": 11900000000,
-                "_note": "19 double-stream + 38 single-stream blocks.", "patch_size": 2,
-                "in_channels": 64, "sample_size": 128},
-   "text_encoder": {"kind": "T5-XXL encoder + CLIP-L", "params": 5000000000, "max_sequence_length": 256},
-   "vae": {"kind": "AutoencoderKL", "latent_channels": 16, "scale_factor": 8, "params": 84000000},
-   "default_steps": 4, "classifier_free_guidance": false, "resolution": 1024,
-   "_screen_outcome": "Ruled out on ACCESS, not on arithmetic. Its arithmetic is good and it is the obvious BG-2."
+   "denoiser": {
+    "kind": "MMDiT",
+    "num_layers": 57,
+    "hidden_size": 3072,
+    "params": 11900000000,
+    "_note": "19 double-stream + 38 single-stream blocks.",
+    "patch_size": 2,
+    "in_channels": 64,
+    "sample_size": 128
+   },
+   "text_encoder": {
+    "kind": "T5-XXL encoder + CLIP-L",
+    "params": 5000000000,
+    "max_sequence_length": 256
+   },
+   "vae": {
+    "kind": "AutoencoderKL",
+    "latent_channels": 16,
+    "scale_factor": 8,
+    "params": 84000000
+   },
+   "default_steps": 4,
+   "classifier_free_guidance": false,
+   "resolution": 1024,
+   "_screen_outcome": "Ruled out on ACCESS, not on arithmetic. Its arithmetic is good and it is the obvious next MODEL to open a generation around, once the gating is resolved. Not named by generation number here: numbers are allocated as generations are created and BG-2 is already a 512px PixArt generation."
   },
-
   "qwen-image": {
-   "family": "Qwen-Image", "repo": "Qwen/Qwen-Image",
-   "license": "apache-2.0", "gated": false,
-   "denoiser": {"kind": "MMDiT", "num_layers": 60, "num_attention_heads": 24,
-                "attention_head_dim": 128, "hidden_size": 3072, "patch_size": 2,
-                "in_channels": 64, "out_channels": 16, "joint_attention_dim": 3584,
-                "params": 20000000000},
-   "text_encoder": {"kind": "Qwen2.5-VL-7B", "params": 7000000000, "max_sequence_length": 1024},
-   "vae": {"kind": "AutoencoderKLQwenImage", "latent_channels": 16, "scale_factor": 8, "params": 250000000},
-   "default_steps": 50, "classifier_free_guidance": true, "resolution": 1328,
+   "family": "Qwen-Image",
+   "repo": "Qwen/Qwen-Image",
+   "license": "apache-2.0",
+   "gated": false,
+   "denoiser": {
+    "kind": "MMDiT",
+    "num_layers": 60,
+    "num_attention_heads": 24,
+    "attention_head_dim": 128,
+    "hidden_size": 3072,
+    "patch_size": 2,
+    "in_channels": 64,
+    "out_channels": 16,
+    "joint_attention_dim": 3584,
+    "params": 20000000000
+   },
+   "text_encoder": {
+    "kind": "Qwen2.5-VL-7B",
+    "params": 7000000000,
+    "max_sequence_length": 1024
+   },
+   "vae": {
+    "kind": "AutoencoderKLQwenImage",
+    "latent_channels": 16,
+    "scale_factor": 8,
+    "params": 250000000
+   },
+   "default_steps": 50,
+   "classifier_free_guidance": true,
+   "resolution": 1328,
    "_screen_outcome": "Apache-2.0 and ungated, and 20B of DiT at bf16 is 40 GB against 32. Ruled out for v0 on FIT; it is the natural target for the offload/streaming cells once those exist."
   },
-
   "sdxl-base-1.0": {
-   "family": "SDXL", "repo": "stabilityai/stable-diffusion-xl-base-1.0",
-   "license": "openrail++", "gated": false,
-   "denoiser": {"kind": "UNet", "params": 2570000000, "block_out_channels": [320, 640, 1280],
-                "transformer_layers_per_block": [1, 2, 10], "cross_attention_dim": 2048,
-                "sample_size": 128, "in_channels": 4,
-                "_attention_note": "Self-attention at 64x64 (4096 tokens) and 32x32 (1024). No attention at 128x128."},
-   "text_encoder": {"kind": "CLIP-L + OpenCLIP-bigG", "params": 817000000, "max_sequence_length": 77},
-   "vae": {"kind": "AutoencoderKL", "latent_channels": 4, "scale_factor": 8, "params": 83700000},
-   "default_steps": 20, "classifier_free_guidance": true, "resolution": 1024,
+   "family": "SDXL",
+   "repo": "stabilityai/stable-diffusion-xl-base-1.0",
+   "license": "openrail++",
+   "gated": false,
+   "denoiser": {
+    "kind": "UNet",
+    "params": 2570000000,
+    "block_out_channels": [
+     320,
+     640,
+     1280
+    ],
+    "transformer_layers_per_block": [
+     1,
+     2,
+     10
+    ],
+    "cross_attention_dim": 2048,
+    "sample_size": 128,
+    "in_channels": 4,
+    "_attention_note": "Self-attention at 64x64 (4096 tokens) and 32x32 (1024). No attention at 128x128."
+   },
+   "text_encoder": {
+    "kind": "CLIP-L + OpenCLIP-bigG",
+    "params": 817000000,
+    "max_sequence_length": 77
+   },
+   "vae": {
+    "kind": "AutoencoderKL",
+    "latent_channels": 4,
+    "scale_factor": 8,
+    "params": 83700000
+   },
+   "default_steps": 20,
+   "classifier_free_guidance": true,
+   "resolution": 1024,
    "_screen_outcome": "Ungated, redistributable, and the MLPerf Inference image-generation workload, so a stranger has a second opinion on every number. Ruled out for v0 on REGENERATION and REACH: it is a UNet, so the DiT-attention, AdaLN and per-resolution-shape cells that make up most of the backlog have no home in it, and its 817M text encoder makes the text-encoder cells uninteresting."
   },
-
   "sana-1.6b-1024": {
-   "family": "Sana", "repo": "Efficient-Large-Model/Sana_1600M_1024px_diffusers",
-   "license": "apache-2.0", "gated": false,
-   "denoiser": {"kind": "Linear-DiT", "num_layers": 20, "num_attention_heads": 70,
-                "attention_head_dim": 32, "hidden_size": 2240, "patch_size": 1,
-                "in_channels": 32, "mlp_ratio": 2.5, "sample_size": 32,
-                "params": 1600000000,
-                "_note": "DC-AE at f32, so a 1024px image is a 32x32 latent and patch_size 1 gives 1024 tokens."},
-   "text_encoder": {"kind": "Gemma-2-2B", "params": 2600000000, "max_sequence_length": 300},
-   "vae": {"kind": "DC-AE f32c32", "latent_channels": 32, "scale_factor": 32, "params": 320000000},
-   "default_steps": 20, "classifier_free_guidance": true, "resolution": 1024,
+   "family": "Sana",
+   "repo": "Efficient-Large-Model/Sana_1600M_1024px_diffusers",
+   "license": "apache-2.0",
+   "gated": false,
+   "denoiser": {
+    "kind": "Linear-DiT",
+    "num_layers": 20,
+    "num_attention_heads": 70,
+    "attention_head_dim": 32,
+    "hidden_size": 2240,
+    "patch_size": 1,
+    "in_channels": 32,
+    "mlp_ratio": 2.5,
+    "sample_size": 32,
+    "params": 1600000000,
+    "_note": "DC-AE at f32, so a 1024px image is a 32x32 latent and patch_size 1 gives 1024 tokens."
+   },
+   "text_encoder": {
+    "kind": "Gemma-2-2B",
+    "params": 2600000000,
+    "max_sequence_length": 300
+   },
+   "vae": {
+    "kind": "DC-AE f32c32",
+    "latent_channels": 32,
+    "scale_factor": 32,
+    "params": 320000000
+   },
+   "default_steps": 20,
+   "classifier_free_guidance": true,
+   "resolution": 1024,
    "_screen_outcome": "Ruled out on RESOLUTION-of-surface and on LICENCE REACH: linear attention at 1024 tokens is a quarter of the token count the backlog is written against, so the headline DiT-attention cells shrink to nothing, and the Gemma-2 text encoder carries Google's Gemma Terms rather than the repo's Apache-2.0 -- a stranger re-running the benchmark inherits a second licence."
   }
  }

@@ -525,12 +525,16 @@ def render_markdown(out, cands, axes):
         acc = r["access"]
         note = r.get("screen_outcome") or ("**PINNED for BG-1.**" if r.get("supported") else "")
         w.append(f"| `{key}` | {acc['license']} | {'yes' if acc['gated'] else 'no'} | {note} |")
+    # The verdict sentence comes from the table above, which comes from configs/. It was typed
+    # here as well, and the two drifted the moment the config changed: the table said one thing
+    # and this paragraph said "the obvious BG-2" after BG-2 had become a 512px PixArt generation.
     w += ["",
           "**Access is a screen criterion, not a footnote.** FLUX.1-schnell has Apache-2.0",
           "weights behind an auto-approved HuggingFace gate: `curl` returns 401 without a token.",
           "A permissive licence with non-permissive distribution still fails \"re-runnable by",
-          "strangers\", and that is the binding constraint for a benchmark. Its arithmetic is",
-          "good and it is the obvious BG-2.", "",
+          "strangers\", and that is the binding constraint for a benchmark. Its recorded screen",
+          "outcome is in the table above, from `configs/candidates.json` -- not restated here,",
+          "because a second copy of a verdict is a second thing to keep true.", "",
           "## Where the time goes", "",
           "| stage | runs per generation | ceiling | share | bound by | resident params |",
           "|:--|--:|--:|--:|:--|--:|"]

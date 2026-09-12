@@ -30,7 +30,7 @@ redistributable.
 | candidate | licence | gated | outcome |
 |:--|:--|:--:|:--|
 | `pixart-sigma-xl2-1024` | openrail++ | no | **PINNED for BG-1.** |
-| `flux1-schnell` | apache-2.0 | yes | Ruled out on ACCESS, not on arithmetic. Its arithmetic is good and it is the obvious BG-2. |
+| `flux1-schnell` | apache-2.0 | yes | Ruled out on ACCESS, not on arithmetic. Its arithmetic is good and it is the obvious next MODEL to open a generation around, once the gating is resolved. Not named by generation number here: numbers are allocated as generations are created and BG-2 is already a 512px PixArt generation. |
 | `qwen-image` | apache-2.0 | no | Apache-2.0 and ungated, and 20B of DiT at bf16 is 40 GB against 32. Ruled out for v0 on FIT; it is the natural target for the offload/streaming cells once those exist. |
 | `sdxl-base-1.0` | openrail++ | no | Ungated, redistributable, and the MLPerf Inference image-generation workload, so a stranger has a second opinion on every number. Ruled out for v0 on REGENERATION and REACH: it is a UNet, so the DiT-attention, AdaLN and per-resolution-shape cells that make up most of the backlog have no home in it, and its 817M text encoder makes the text-encoder cells uninteresting. |
 | `sana-1.6b-1024` | apache-2.0 | no | Ruled out on RESOLUTION-of-surface and on LICENCE REACH: linear attention at 1024 tokens is a quarter of the token count the backlog is written against, so the headline DiT-attention cells shrink to nothing, and the Gemma-2 text encoder carries Google's Gemma Terms rather than the repo's Apache-2.0 -- a stranger re-running the benchmark inherits a second licence. |
@@ -38,8 +38,9 @@ redistributable.
 **Access is a screen criterion, not a footnote.** FLUX.1-schnell has Apache-2.0
 weights behind an auto-approved HuggingFace gate: `curl` returns 401 without a token.
 A permissive licence with non-permissive distribution still fails "re-runnable by
-strangers", and that is the binding constraint for a benchmark. Its arithmetic is
-good and it is the obvious BG-2.
+strangers", and that is the binding constraint for a benchmark. Its recorded screen
+outcome is in the table above, from `configs/candidates.json` -- not restated here,
+because a second copy of a verdict is a second thing to keep true.
 
 ## Where the time goes
 
