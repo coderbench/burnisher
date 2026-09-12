@@ -114,8 +114,20 @@ class TestTheCommittedExampleStillReproduces(unittest.TestCase):
         self.assertFalse(vae["resolved"])
         self.assertTrue(r["coverage"]["complete"],
                         "an unresolved cell must not drop out of the matrix")
-        # "not admissible" -- the example is explicitly unprovenanced, and says so.
-        self.assertFalse(r["provenance"]["code_provenance_complete"])
+        # "what makes this receipt evidence" -- it names the code it scored, including the
+        # commit the INSTRUMENT came from, which is the field that says the submission did not
+        # grade its own homework.
+        self.assertTrue(r["provenance"]["code_provenance_complete"])
+        for k in ("candidate_commit", "base_commit", "instrument_from"):
+            self.assertTrue(r["provenance"].get(k), f"the example receipt has no {k}")
+        # The instrument settings are the ones the noise floors were calibrated with. An example
+        # produced by a different instrument than the one the repository ships would teach the
+        # wrong thing to whoever copies it.
+        import json as _json
+        cal = _json.loads((ROOT / "eval" / "cells" / "BG-1" / "reference.json").read_text())
+        self.assertEqual((r["provenance"]["warmup"], r["provenance"]["iters"]),
+                         (cal["calibrated_with"]["warmup"], cal["calibrated_with"]["iters"]))
+        self.assertGreaterEqual(r["provenance"]["repeats"], self.gen.repeats)
 
     def test_scoring_does_not_touch_the_committed_tree(self):
         """It writes a ledger; the ledger is written outside the worktree, never into it."""

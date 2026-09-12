@@ -7,8 +7,14 @@ describes the scoring model, and this is the model having actually happened.
 
 | file | what it is |
 |:--|:--|
-| `BG-1-pr-000001-raw.json` | 30 timing records -- 3 cells x 2 arms x 5 repeats, paired and interleaved -- plus the gate results, the held-out shape drawn at run time, and the device fingerprint |
+| `BG-1-pr-000001-raw.json` | 18 timing records -- 3 cells x 2 arms x 3 repeats, paired and interleaved -- plus 12 more at a held-out shape drawn at run time, the gate results, and the device fingerprint |
 | `BG-1-pr-000001-receipt.json` | what `burnish score` made of them |
+
+The whole run cost **16 minutes** of GPU wall clock for the bench
+stage, recorded in the receipt rather than estimated. Each record carries its own `wall_s`
+alongside what it measured, and the gap between the two is the evaluator's own overhead --
+process start plus a 21.8 GB checkpoint map, about 11 s a record. A subnet that cannot say what
+scoring costs cannot tell whether it can afford the submissions it is asking for.
 
 `raw.json` is the measurement and the receipt is derived from it, never the other way around.
 You can check that here, on a machine with no GPU:
@@ -37,7 +43,7 @@ It lost, and the receipt says so:
   99% interval     [-0.0057, -0.0056]
 
     dit-step/1024/bf16          -0.0058     1.5% -> 1.0%     0.578%  yes
-    t5-encode/1024/bf16         -0.0094    18.1% -> 17.3%    3.753%  yes
+    t5-encode/1024/bf16         -0.0089    18.1% -> 17.3%    3.753%  yes
     vae-decode/1024/bf16        -0.0000     0.8% -> 0.8%     0.259%   NO
 ```
 
@@ -57,14 +63,20 @@ uninteresting part. The interesting part is what the three cells do differently:
 A worked *win* would demonstrate less. This one exercises the paths a benchmark actually spends
 its life in: a change that does not help, a cell that cannot tell, and an honest zero.
 
-## What this receipt is not admissible for
+## What makes this receipt evidence rather than just a measurement
 
-Its `provenance.code_provenance_complete` is `false`. The run was deployed to the benchmark box
-as a tarball rather than a git checkout, so `candidate_commit`, `base_commit` and
-`instrument_from` are all unknown, and the receipt says so in as many words instead of leaving
-three null fields to be read as "not applicable".
+`provenance.code_provenance_complete` is `true`. The run went through
+`eval/score_submission.sh`, which drives `eval/run_from_base.sh` at every stage, so the receipt
+names three commits: the candidate, the base, and -- the one that matters -- the commit the
+INSTRUMENT came from.
 
-So it is a valid measurement and it is not evidence that any particular commit earned anything.
-A scored submission runs through `eval/run_from_base.sh` inside a checkout, which fills all
-three -- including the commit the *instrument* came from, which is the field that says the
-submission did not grade its own homework.
+That last field is what says the submission did not grade its own homework. `eval/`, `configs/`,
+`schemas/` and `tools/burnish` decide *what is measured*; they are overlaid from the base ref
+before anything runs, so a one-line edit to a noise floor, a ceiling, a tolerance or the model
+revision cannot reach the scorer. None of those look like cheating in a diff. Several look like
+tidying.
+
+The first two receipts this harness ever produced had all three fields null, and still verified.
+They were valid measurements and they were not evidence about any particular commit. The receipt
+now says which of the two it is, in one flag, instead of leaving it to be inferred from three
+absences.

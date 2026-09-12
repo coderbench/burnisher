@@ -5,166 +5,179 @@
  "held_out": [
   {
    "cell": "t5-encode/1024/bf16",
-   "config_id": "held-768",
+   "config_id": "held-1152",
    "metrics": {
-    "iters": 10,
-    "latency_s": 0.127463341,
+    "iters": 5,
+    "latency_s": 0.12743617,
     "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 19629694976
+    "peak_vram_bytes": 19629555712
    },
    "repeat": 0,
    "status": "OK",
-   "variant": "base"
+   "variant": "base",
+   "wall_s": 9.152077436447144
   },
   {
    "cell": "t5-encode/1024/bf16",
-   "config_id": "held-768",
+   "config_id": "held-1152",
    "metrics": {
-    "iters": 10,
-    "latency_s": 0.132910603,
+    "iters": 5,
+    "latency_s": 0.133002086,
     "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 19629191168
+    "peak_vram_bytes": 19629658112
    },
    "repeat": 0,
    "status": "OK",
-   "variant": "candidate"
+   "variant": "candidate",
+   "wall_s": 9.25776481628418
   },
   {
    "cell": "t5-encode/1024/bf16",
-   "config_id": "held-768",
+   "config_id": "held-1152",
    "metrics": {
-    "iters": 10,
-    "latency_s": 0.127421009,
+    "iters": 5,
+    "latency_s": 0.127373942,
     "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 19628007424
+    "peak_vram_bytes": 19628453888
    },
    "repeat": 1,
    "status": "OK",
-   "variant": "base"
+   "variant": "base",
+   "wall_s": 9.117439270019531
   },
   {
    "cell": "t5-encode/1024/bf16",
-   "config_id": "held-768",
+   "config_id": "held-1152",
    "metrics": {
-    "iters": 10,
-    "latency_s": 0.133220718,
+    "iters": 5,
+    "latency_s": 0.132890475,
     "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 19629944832
+    "peak_vram_bytes": 19629838336
    },
    "repeat": 1,
    "status": "OK",
-   "variant": "candidate"
+   "variant": "candidate",
+   "wall_s": 9.069664716720581
   },
   {
    "cell": "dit-step/1024/bf16",
-   "config_id": "held-768",
+   "config_id": "held-1152",
    "metrics": {
-    "iters": 10,
-    "latency_s": 1.201170614,
+    "iters": 5,
+    "latency_s": 5.655717252,
     "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 3012304896
+    "peak_vram_bytes": 3063513088
    },
    "repeat": 0,
    "status": "OK",
-   "variant": "base"
+   "variant": "base",
+   "wall_s": 40.59732222557068
   },
   {
    "cell": "dit-step/1024/bf16",
-   "config_id": "held-768",
+   "config_id": "held-1152",
    "metrics": {
-    "iters": 10,
-    "latency_s": 1.949263876,
+    "iters": 5,
+    "latency_s": 8.71569772,
     "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 3012038656
+    "peak_vram_bytes": 3063836672
    },
    "repeat": 0,
    "status": "OK",
-   "variant": "candidate"
+   "variant": "candidate",
+   "wall_s": 62.04426908493042
   },
   {
    "cell": "dit-step/1024/bf16",
-   "config_id": "held-768",
+   "config_id": "held-1152",
    "metrics": {
-    "iters": 10,
-    "latency_s": 1.200432438,
+    "iters": 5,
+    "latency_s": 5.655166955,
     "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 3012251648
+    "peak_vram_bytes": 3064143872
    },
    "repeat": 1,
    "status": "OK",
-   "variant": "base"
+   "variant": "base",
+   "wall_s": 40.606703996658325
   },
   {
    "cell": "dit-step/1024/bf16",
-   "config_id": "held-768",
+   "config_id": "held-1152",
    "metrics": {
-    "iters": 10,
-    "latency_s": 1.945882905,
+    "iters": 5,
+    "latency_s": 8.710782343,
     "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 3012034560
+    "peak_vram_bytes": 3064573952
    },
    "repeat": 1,
    "status": "OK",
-   "variant": "candidate"
+   "variant": "candidate",
+   "wall_s": 62.01886701583862
   },
   {
    "cell": "vae-decode/1024/bf16",
-   "config_id": "held-768",
+   "config_id": "held-1152",
    "metrics": {
-    "iters": 10,
-    "latency_s": 2.90687926,
+    "iters": 5,
+    "latency_s": 7.270526216,
     "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 692301824
+    "peak_vram_bytes": 699834368
    },
    "repeat": 0,
    "status": "OK",
-   "variant": "base"
+   "variant": "base",
+   "wall_s": 51.35578155517578
   },
   {
    "cell": "vae-decode/1024/bf16",
-   "config_id": "held-768",
+   "config_id": "held-1152",
    "metrics": {
-    "iters": 10,
-    "latency_s": 2.914066858,
+    "iters": 5,
+    "latency_s": 7.277118958,
     "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 692256768
+    "peak_vram_bytes": 699899904
    },
    "repeat": 0,
    "status": "OK",
-   "variant": "candidate"
+   "variant": "candidate",
+   "wall_s": 51.40603518486023
   },
   {
    "cell": "vae-decode/1024/bf16",
-   "config_id": "held-768",
+   "config_id": "held-1152",
    "metrics": {
-    "iters": 10,
-    "latency_s": 2.912238541,
+    "iters": 5,
+    "latency_s": 7.270392386,
     "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 692281344
+    "peak_vram_bytes": 698261504
    },
    "repeat": 1,
    "status": "OK",
-   "variant": "base"
+   "variant": "base",
+   "wall_s": 51.36770486831665
   },
   {
    "cell": "vae-decode/1024/bf16",
-   "config_id": "held-768",
+   "config_id": "held-1152",
    "metrics": {
-    "iters": 10,
-    "latency_s": 2.917110995,
+    "iters": 5,
+    "latency_s": 7.294472453,
     "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 692297728
+    "peak_vram_bytes": 698187776
    },
    "repeat": 1,
    "status": "OK",
-   "variant": "candidate"
+   "variant": "candidate",
+   "wall_s": 51.522478342056274
   }
  ],
- "held_out_shape": 768,
+ "held_out_shape": 1152,
  "provenance": {
-  "_pairing": "interleaved base/candidate, one process, one model load",
-  "base_commit": null,
-  "candidate_commit": null,
+  "_instrument_note": "warmup and iters are the counts the cell noise floors were calibrated with. A measurement averaged over a different number of invocations than its floor was is a different instrument, and the comparison does not mean anything.",
+  "_pairing": "interleaved base/candidate, one process per record",
+  "base_commit": "e0ac6cffaf196b8bd161bbe016855648bed17b60",
+  "candidate_commit": "e0ac6cffaf196b8bd161bbe016855648bed17b60",
   "device": {
    "_clocks_note": "Clocks are not pinned and cannot be in a container. Only paired interleaved same-box deltas mean anything; absolute times from two different sessions are not comparable.",
    "driver_version": "595.91.07",
@@ -179,8 +192,11 @@
   },
   "impl_base": "cuda",
   "impl_candidate": "cuda-tile1024",
-  "instrument_from": null,
-  "repeats": 5
+  "instrument_from": "e0ac6cf",
+  "iters": 5,
+  "repeats": 3,
+  "wall_seconds_total": 933.8,
+  "warmup": 2
  },
  "records": [
   {
@@ -214,10 +230,10 @@
    },
    "impl": "cuda",
    "metrics": {
-    "iters": 10,
-    "latency_s": 0.12813896,
+    "iters": 5,
+    "latency_s": 0.128067363,
     "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 19628875776
+    "peak_vram_bytes": 19629166592
    },
    "output_stats": {
     "latent_absmax": 8.125,
@@ -226,7 +242,8 @@
    },
    "repeat": 0,
    "status": "OK",
-   "variant": "base"
+   "variant": "base",
+   "wall_s": 9.137232303619385
   },
   {
    "cell": "t5-encode/1024/bf16",
@@ -259,10 +276,10 @@
    },
    "impl": "cuda-tile1024",
    "metrics": {
-    "iters": 10,
-    "latency_s": 0.13417264,
+    "iters": 5,
+    "latency_s": 0.133467507,
     "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 19629305856
+    "peak_vram_bytes": 19629510656
    },
    "output_stats": {
     "latent_absmax": 8.125,
@@ -271,7 +288,8 @@
    },
    "repeat": 0,
    "status": "OK",
-   "variant": "candidate"
+   "variant": "candidate",
+   "wall_s": 9.118974208831787
   },
   {
    "cell": "t5-encode/1024/bf16",
@@ -304,10 +322,10 @@
    },
    "impl": "cuda",
    "metrics": {
-    "iters": 10,
-    "latency_s": 0.127893102,
+    "iters": 5,
+    "latency_s": 0.127518336,
     "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 19628789760
+    "peak_vram_bytes": 19629445120
    },
    "output_stats": {
     "latent_absmax": 8.125,
@@ -316,7 +334,8 @@
    },
    "repeat": 1,
    "status": "OK",
-   "variant": "base"
+   "variant": "base",
+   "wall_s": 9.125615358352661
   },
   {
    "cell": "t5-encode/1024/bf16",
@@ -349,10 +368,10 @@
    },
    "impl": "cuda-tile1024",
    "metrics": {
-    "iters": 10,
-    "latency_s": 0.133579907,
+    "iters": 5,
+    "latency_s": 0.132930722,
     "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 19628523520
+    "peak_vram_bytes": 19628183552
    },
    "output_stats": {
     "latent_absmax": 8.125,
@@ -361,7 +380,8 @@
    },
    "repeat": 1,
    "status": "OK",
-   "variant": "candidate"
+   "variant": "candidate",
+   "wall_s": 9.166038513183594
   },
   {
    "cell": "t5-encode/1024/bf16",
@@ -394,10 +414,10 @@
    },
    "impl": "cuda",
    "metrics": {
-    "iters": 10,
-    "latency_s": 0.127518562,
+    "iters": 5,
+    "latency_s": 0.127465426,
     "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 19628204032
+    "peak_vram_bytes": 19628572672
    },
    "output_stats": {
     "latent_absmax": 8.125,
@@ -406,7 +426,8 @@
    },
    "repeat": 2,
    "status": "OK",
-   "variant": "base"
+   "variant": "base",
+   "wall_s": 9.135641813278198
   },
   {
    "cell": "t5-encode/1024/bf16",
@@ -439,10 +460,10 @@
    },
    "impl": "cuda-tile1024",
    "metrics": {
-    "iters": 10,
-    "latency_s": 0.133139262,
+    "iters": 5,
+    "latency_s": 0.132835993,
     "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 19628470272
+    "peak_vram_bytes": 19627356160
    },
    "output_stats": {
     "latent_absmax": 8.125,
@@ -451,187 +472,8 @@
    },
    "repeat": 2,
    "status": "OK",
-   "variant": "candidate"
-  },
-  {
-   "cell": "t5-encode/1024/bf16",
-   "config_id": "default",
-   "effective": {
-    "batch": "2",
-    "caption_len": "300",
-    "device": "cuda",
-    "dtype": "bf16",
-    "impl": "cuda",
-    "impl.activation": "cuda",
-    "impl.add": "cuda",
-    "impl.attention": "cuda",
-    "impl.chunk": "cuda",
-    "impl.conv2d": "cuda",
-    "impl.device": "cuda",
-    "impl.gather": "cuda",
-    "impl.gemm": "cuda",
-    "impl.guidance": "cuda",
-    "impl.modulate": "cuda",
-    "impl.norm": "cuda",
-    "impl.patch": "cuda",
-    "impl.repeat": "cuda",
-    "impl.scale": "cuda",
-    "impl.transpose": "cuda",
-    "impl.upsample": "cuda",
-    "resolution": "1024",
-    "stage": "t5-encode",
-    "weights": "checkpoint"
-   },
-   "impl": "cuda",
-   "metrics": {
-    "iters": 10,
-    "latency_s": 0.127764735,
-    "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 19628531712
-   },
-   "output_stats": {
-    "latent_absmax": 8.125,
-    "latent_mean": 0.0001536867825,
-    "latent_std": 0.1635312151
-   },
-   "repeat": 3,
-   "status": "OK",
-   "variant": "base"
-  },
-  {
-   "cell": "t5-encode/1024/bf16",
-   "config_id": "default",
-   "effective": {
-    "batch": "2",
-    "caption_len": "300",
-    "device": "cuda",
-    "dtype": "bf16",
-    "impl": "cuda-tile1024",
-    "impl.activation": "cuda",
-    "impl.add": "cuda",
-    "impl.attention": "cuda-tile1024",
-    "impl.chunk": "cuda",
-    "impl.conv2d": "cuda",
-    "impl.device": "cuda",
-    "impl.gather": "cuda",
-    "impl.gemm": "cuda",
-    "impl.guidance": "cuda",
-    "impl.modulate": "cuda",
-    "impl.norm": "cuda",
-    "impl.patch": "cuda",
-    "impl.repeat": "cuda",
-    "impl.scale": "cuda",
-    "impl.transpose": "cuda",
-    "impl.upsample": "cuda",
-    "resolution": "1024",
-    "stage": "t5-encode",
-    "weights": "checkpoint"
-   },
-   "impl": "cuda-tile1024",
-   "metrics": {
-    "iters": 10,
-    "latency_s": 0.133081871,
-    "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 19629903872
-   },
-   "output_stats": {
-    "latent_absmax": 8.125,
-    "latent_mean": 0.0001713013459,
-    "latent_std": 0.1633060367
-   },
-   "repeat": 3,
-   "status": "OK",
-   "variant": "candidate"
-  },
-  {
-   "cell": "t5-encode/1024/bf16",
-   "config_id": "default",
-   "effective": {
-    "batch": "2",
-    "caption_len": "300",
-    "device": "cuda",
-    "dtype": "bf16",
-    "impl": "cuda",
-    "impl.activation": "cuda",
-    "impl.add": "cuda",
-    "impl.attention": "cuda",
-    "impl.chunk": "cuda",
-    "impl.conv2d": "cuda",
-    "impl.device": "cuda",
-    "impl.gather": "cuda",
-    "impl.gemm": "cuda",
-    "impl.guidance": "cuda",
-    "impl.modulate": "cuda",
-    "impl.norm": "cuda",
-    "impl.patch": "cuda",
-    "impl.repeat": "cuda",
-    "impl.scale": "cuda",
-    "impl.transpose": "cuda",
-    "impl.upsample": "cuda",
-    "resolution": "1024",
-    "stage": "t5-encode",
-    "weights": "checkpoint"
-   },
-   "impl": "cuda",
-   "metrics": {
-    "iters": 10,
-    "latency_s": 0.127427305,
-    "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 19629051904
-   },
-   "output_stats": {
-    "latent_absmax": 8.125,
-    "latent_mean": 0.0001536867825,
-    "latent_std": 0.1635312151
-   },
-   "repeat": 4,
-   "status": "OK",
-   "variant": "base"
-  },
-  {
-   "cell": "t5-encode/1024/bf16",
-   "config_id": "default",
-   "effective": {
-    "batch": "2",
-    "caption_len": "300",
-    "device": "cuda",
-    "dtype": "bf16",
-    "impl": "cuda-tile1024",
-    "impl.activation": "cuda",
-    "impl.add": "cuda",
-    "impl.attention": "cuda-tile1024",
-    "impl.chunk": "cuda",
-    "impl.conv2d": "cuda",
-    "impl.device": "cuda",
-    "impl.gather": "cuda",
-    "impl.gemm": "cuda",
-    "impl.guidance": "cuda",
-    "impl.modulate": "cuda",
-    "impl.norm": "cuda",
-    "impl.patch": "cuda",
-    "impl.repeat": "cuda",
-    "impl.scale": "cuda",
-    "impl.transpose": "cuda",
-    "impl.upsample": "cuda",
-    "resolution": "1024",
-    "stage": "t5-encode",
-    "weights": "checkpoint"
-   },
-   "impl": "cuda-tile1024",
-   "metrics": {
-    "iters": 10,
-    "latency_s": 0.133132094,
-    "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 19629080576
-   },
-   "output_stats": {
-    "latent_absmax": 8.125,
-    "latent_mean": 0.0001713013459,
-    "latent_std": 0.1633060367
-   },
-   "repeat": 4,
-   "status": "OK",
-   "variant": "candidate"
+   "variant": "candidate",
+   "wall_s": 9.22839879989624
   },
   {
    "cell": "dit-step/1024/bf16",
@@ -664,10 +506,10 @@
    },
    "impl": "cuda",
    "metrics": {
-    "iters": 10,
-    "latency_s": 3.561349182,
+    "iters": 5,
+    "latency_s": 3.5611446,
     "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 3044945920
+    "peak_vram_bytes": 3044773888
    },
    "output_stats": {
     "latent_absmax": 3.609375,
@@ -676,7 +518,8 @@
    },
    "repeat": 0,
    "status": "OK",
-   "variant": "base"
+   "variant": "base",
+   "wall_s": 25.891891956329346
   },
   {
    "cell": "dit-step/1024/bf16",
@@ -709,10 +552,10 @@
    },
    "impl": "cuda-tile1024",
    "metrics": {
-    "iters": 10,
-    "latency_s": 5.691229768,
+    "iters": 5,
+    "latency_s": 5.682593726,
     "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 3045031936
+    "peak_vram_bytes": 3044257792
    },
    "output_stats": {
     "latent_absmax": 3.8125,
@@ -721,7 +564,8 @@
    },
    "repeat": 0,
    "status": "OK",
-   "variant": "candidate"
+   "variant": "candidate",
+   "wall_s": 40.81319785118103
   },
   {
    "cell": "dit-step/1024/bf16",
@@ -754,10 +598,10 @@
    },
    "impl": "cuda",
    "metrics": {
-    "iters": 10,
-    "latency_s": 3.578382373,
+    "iters": 5,
+    "latency_s": 3.575503711,
     "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 3044737024
+    "peak_vram_bytes": 3044720640
    },
    "output_stats": {
     "latent_absmax": 3.609375,
@@ -766,7 +610,8 @@
    },
    "repeat": 1,
    "status": "OK",
-   "variant": "base"
+   "variant": "base",
+   "wall_s": 26.062377214431763
   },
   {
    "cell": "dit-step/1024/bf16",
@@ -799,10 +644,10 @@
    },
    "impl": "cuda-tile1024",
    "metrics": {
-    "iters": 10,
-    "latency_s": 5.695339095,
+    "iters": 5,
+    "latency_s": 5.688234538,
     "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 3045023744
+    "peak_vram_bytes": 3044700160
    },
    "output_stats": {
     "latent_absmax": 3.8125,
@@ -811,7 +656,8 @@
    },
    "repeat": 1,
    "status": "OK",
-   "variant": "candidate"
+   "variant": "candidate",
+   "wall_s": 40.86166572570801
   },
   {
    "cell": "dit-step/1024/bf16",
@@ -844,10 +690,10 @@
    },
    "impl": "cuda",
    "metrics": {
-    "iters": 10,
-    "latency_s": 3.579692176,
+    "iters": 5,
+    "latency_s": 3.57824119,
     "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 3044855808
+    "peak_vram_bytes": 3044540416
    },
    "output_stats": {
     "latent_absmax": 3.609375,
@@ -856,7 +702,8 @@
    },
    "repeat": 2,
    "status": "OK",
-   "variant": "base"
+   "variant": "base",
+   "wall_s": 26.069581747055054
   },
   {
    "cell": "dit-step/1024/bf16",
@@ -889,10 +736,10 @@
    },
    "impl": "cuda-tile1024",
    "metrics": {
-    "iters": 10,
-    "latency_s": 5.693532236,
+    "iters": 5,
+    "latency_s": 5.69112362,
     "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 3044941824
+    "peak_vram_bytes": 3044818944
    },
    "output_stats": {
     "latent_absmax": 3.8125,
@@ -901,187 +748,8 @@
    },
    "repeat": 2,
    "status": "OK",
-   "variant": "candidate"
-  },
-  {
-   "cell": "dit-step/1024/bf16",
-   "config_id": "default",
-   "effective": {
-    "batch": "2",
-    "caption_len": "300",
-    "device": "cuda",
-    "dtype": "bf16",
-    "impl": "cuda",
-    "impl.activation": "cuda",
-    "impl.add": "cuda",
-    "impl.attention": "cuda",
-    "impl.chunk": "cuda",
-    "impl.conv2d": "cuda",
-    "impl.device": "cuda",
-    "impl.gather": "cuda",
-    "impl.gemm": "cuda",
-    "impl.guidance": "cuda",
-    "impl.modulate": "cuda",
-    "impl.norm": "cuda",
-    "impl.patch": "cuda",
-    "impl.repeat": "cuda",
-    "impl.scale": "cuda",
-    "impl.transpose": "cuda",
-    "impl.upsample": "cuda",
-    "resolution": "1024",
-    "stage": "dit-step",
-    "weights": "checkpoint"
-   },
-   "impl": "cuda",
-   "metrics": {
-    "iters": 10,
-    "latency_s": 3.579922184,
-    "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 3044646912
-   },
-   "output_stats": {
-    "latent_absmax": 3.609375,
-    "latent_mean": 0.03176279077,
-    "latent_std": 0.6475375314
-   },
-   "repeat": 3,
-   "status": "OK",
-   "variant": "base"
-  },
-  {
-   "cell": "dit-step/1024/bf16",
-   "config_id": "default",
-   "effective": {
-    "batch": "2",
-    "caption_len": "300",
-    "device": "cuda",
-    "dtype": "bf16",
-    "impl": "cuda-tile1024",
-    "impl.activation": "cuda",
-    "impl.add": "cuda",
-    "impl.attention": "cuda-tile1024",
-    "impl.chunk": "cuda",
-    "impl.conv2d": "cuda",
-    "impl.device": "cuda",
-    "impl.gather": "cuda",
-    "impl.gemm": "cuda",
-    "impl.guidance": "cuda",
-    "impl.modulate": "cuda",
-    "impl.norm": "cuda",
-    "impl.patch": "cuda",
-    "impl.repeat": "cuda",
-    "impl.scale": "cuda",
-    "impl.transpose": "cuda",
-    "impl.upsample": "cuda",
-    "resolution": "1024",
-    "stage": "dit-step",
-    "weights": "checkpoint"
-   },
-   "impl": "cuda-tile1024",
-   "metrics": {
-    "iters": 10,
-    "latency_s": 5.694390727,
-    "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 3044659200
-   },
-   "output_stats": {
-    "latent_absmax": 3.8125,
-    "latent_mean": 0.02879248772,
-    "latent_std": 0.6472918977
-   },
-   "repeat": 3,
-   "status": "OK",
-   "variant": "candidate"
-  },
-  {
-   "cell": "dit-step/1024/bf16",
-   "config_id": "default",
-   "effective": {
-    "batch": "2",
-    "caption_len": "300",
-    "device": "cuda",
-    "dtype": "bf16",
-    "impl": "cuda",
-    "impl.activation": "cuda",
-    "impl.add": "cuda",
-    "impl.attention": "cuda",
-    "impl.chunk": "cuda",
-    "impl.conv2d": "cuda",
-    "impl.device": "cuda",
-    "impl.gather": "cuda",
-    "impl.gemm": "cuda",
-    "impl.guidance": "cuda",
-    "impl.modulate": "cuda",
-    "impl.norm": "cuda",
-    "impl.patch": "cuda",
-    "impl.repeat": "cuda",
-    "impl.scale": "cuda",
-    "impl.transpose": "cuda",
-    "impl.upsample": "cuda",
-    "resolution": "1024",
-    "stage": "dit-step",
-    "weights": "checkpoint"
-   },
-   "impl": "cuda",
-   "metrics": {
-    "iters": 10,
-    "latency_s": 3.581461862,
-    "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 3045027840
-   },
-   "output_stats": {
-    "latent_absmax": 3.609375,
-    "latent_mean": 0.03176279077,
-    "latent_std": 0.6475375314
-   },
-   "repeat": 4,
-   "status": "OK",
-   "variant": "base"
-  },
-  {
-   "cell": "dit-step/1024/bf16",
-   "config_id": "default",
-   "effective": {
-    "batch": "2",
-    "caption_len": "300",
-    "device": "cuda",
-    "dtype": "bf16",
-    "impl": "cuda-tile1024",
-    "impl.activation": "cuda",
-    "impl.add": "cuda",
-    "impl.attention": "cuda-tile1024",
-    "impl.chunk": "cuda",
-    "impl.conv2d": "cuda",
-    "impl.device": "cuda",
-    "impl.gather": "cuda",
-    "impl.gemm": "cuda",
-    "impl.guidance": "cuda",
-    "impl.modulate": "cuda",
-    "impl.norm": "cuda",
-    "impl.patch": "cuda",
-    "impl.repeat": "cuda",
-    "impl.scale": "cuda",
-    "impl.transpose": "cuda",
-    "impl.upsample": "cuda",
-    "resolution": "1024",
-    "stage": "dit-step",
-    "weights": "checkpoint"
-   },
-   "impl": "cuda-tile1024",
-   "metrics": {
-    "iters": 10,
-    "latency_s": 5.695349286,
-    "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 3044483072
-   },
-   "output_stats": {
-    "latent_absmax": 3.8125,
-    "latent_mean": 0.02879248772,
-    "latent_std": 0.6472918977
-   },
-   "repeat": 4,
-   "status": "OK",
-   "variant": "candidate"
+   "variant": "candidate",
+   "wall_s": 40.87940168380737
   },
   {
    "cell": "vae-decode/1024/bf16",
@@ -1114,379 +782,20 @@
    },
    "impl": "cuda",
    "metrics": {
-    "iters": 10,
-    "latency_s": 5.428847489,
+    "iters": 5,
+    "latency_s": 5.44230014,
     "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 697991168
-   },
-   "output_stats": {
-    "latent_absmax": 0.4375,
-    "latent_mean": 0.05386423693,
-    "latent_std": 0.04552880954
-   },
-   "repeat": 0,
-   "status": "OK",
-   "variant": "base"
-  },
-  {
-   "cell": "vae-decode/1024/bf16",
-   "config_id": "default",
-   "effective": {
-    "batch": "1",
-    "caption_len": "300",
-    "device": "cuda",
-    "dtype": "bf16",
-    "impl": "cuda-tile1024",
-    "impl.activation": "cuda",
-    "impl.add": "cuda",
-    "impl.attention": "cuda-tile1024",
-    "impl.chunk": "cuda",
-    "impl.conv2d": "cuda",
-    "impl.device": "cuda",
-    "impl.gather": "cuda",
-    "impl.gemm": "cuda",
-    "impl.guidance": "cuda",
-    "impl.modulate": "cuda",
-    "impl.norm": "cuda",
-    "impl.patch": "cuda",
-    "impl.repeat": "cuda",
-    "impl.scale": "cuda",
-    "impl.transpose": "cuda",
-    "impl.upsample": "cuda",
-    "resolution": "1024",
-    "stage": "vae-decode",
-    "weights": "checkpoint"
-   },
-   "impl": "cuda-tile1024",
-   "metrics": {
-    "iters": 10,
-    "latency_s": 5.434722877,
-    "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 697827328
-   },
-   "output_stats": {
-    "latent_absmax": 0.435546875,
-    "latent_mean": 0.05386258437,
-    "latent_std": 0.04552827724
-   },
-   "repeat": 0,
-   "status": "OK",
-   "variant": "candidate"
-  },
-  {
-   "cell": "vae-decode/1024/bf16",
-   "config_id": "default",
-   "effective": {
-    "batch": "1",
-    "caption_len": "300",
-    "device": "cuda",
-    "dtype": "bf16",
-    "impl": "cuda",
-    "impl.activation": "cuda",
-    "impl.add": "cuda",
-    "impl.attention": "cuda",
-    "impl.chunk": "cuda",
-    "impl.conv2d": "cuda",
-    "impl.device": "cuda",
-    "impl.gather": "cuda",
-    "impl.gemm": "cuda",
-    "impl.guidance": "cuda",
-    "impl.modulate": "cuda",
-    "impl.norm": "cuda",
-    "impl.patch": "cuda",
-    "impl.repeat": "cuda",
-    "impl.scale": "cuda",
-    "impl.transpose": "cuda",
-    "impl.upsample": "cuda",
-    "resolution": "1024",
-    "stage": "vae-decode",
-    "weights": "checkpoint"
-   },
-   "impl": "cuda",
-   "metrics": {
-    "iters": 10,
-    "latency_s": 5.428543829,
-    "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 697540608
-   },
-   "output_stats": {
-    "latent_absmax": 0.4375,
-    "latent_mean": 0.05386423693,
-    "latent_std": 0.04552880954
-   },
-   "repeat": 1,
-   "status": "OK",
-   "variant": "base"
-  },
-  {
-   "cell": "vae-decode/1024/bf16",
-   "config_id": "default",
-   "effective": {
-    "batch": "1",
-    "caption_len": "300",
-    "device": "cuda",
-    "dtype": "bf16",
-    "impl": "cuda-tile1024",
-    "impl.activation": "cuda",
-    "impl.add": "cuda",
-    "impl.attention": "cuda-tile1024",
-    "impl.chunk": "cuda",
-    "impl.conv2d": "cuda",
-    "impl.device": "cuda",
-    "impl.gather": "cuda",
-    "impl.gemm": "cuda",
-    "impl.guidance": "cuda",
-    "impl.modulate": "cuda",
-    "impl.norm": "cuda",
-    "impl.patch": "cuda",
-    "impl.repeat": "cuda",
-    "impl.scale": "cuda",
-    "impl.transpose": "cuda",
-    "impl.upsample": "cuda",
-    "resolution": "1024",
-    "stage": "vae-decode",
-    "weights": "checkpoint"
-   },
-   "impl": "cuda-tile1024",
-   "metrics": {
-    "iters": 10,
-    "latency_s": 5.438634661,
-    "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 697569280
-   },
-   "output_stats": {
-    "latent_absmax": 0.435546875,
-    "latent_mean": 0.05386258437,
-    "latent_std": 0.04552827724
-   },
-   "repeat": 1,
-   "status": "OK",
-   "variant": "candidate"
-  },
-  {
-   "cell": "vae-decode/1024/bf16",
-   "config_id": "default",
-   "effective": {
-    "batch": "1",
-    "caption_len": "300",
-    "device": "cuda",
-    "dtype": "bf16",
-    "impl": "cuda",
-    "impl.activation": "cuda",
-    "impl.add": "cuda",
-    "impl.attention": "cuda",
-    "impl.chunk": "cuda",
-    "impl.conv2d": "cuda",
-    "impl.device": "cuda",
-    "impl.gather": "cuda",
-    "impl.gemm": "cuda",
-    "impl.guidance": "cuda",
-    "impl.modulate": "cuda",
-    "impl.norm": "cuda",
-    "impl.patch": "cuda",
-    "impl.repeat": "cuda",
-    "impl.scale": "cuda",
-    "impl.transpose": "cuda",
-    "impl.upsample": "cuda",
-    "resolution": "1024",
-    "stage": "vae-decode",
-    "weights": "checkpoint"
-   },
-   "impl": "cuda",
-   "metrics": {
-    "iters": 10,
-    "latency_s": 5.44048258,
-    "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 698081280
-   },
-   "output_stats": {
-    "latent_absmax": 0.4375,
-    "latent_mean": 0.05386423693,
-    "latent_std": 0.04552880954
-   },
-   "repeat": 2,
-   "status": "OK",
-   "variant": "base"
-  },
-  {
-   "cell": "vae-decode/1024/bf16",
-   "config_id": "default",
-   "effective": {
-    "batch": "1",
-    "caption_len": "300",
-    "device": "cuda",
-    "dtype": "bf16",
-    "impl": "cuda-tile1024",
-    "impl.activation": "cuda",
-    "impl.add": "cuda",
-    "impl.attention": "cuda-tile1024",
-    "impl.chunk": "cuda",
-    "impl.conv2d": "cuda",
-    "impl.device": "cuda",
-    "impl.gather": "cuda",
-    "impl.gemm": "cuda",
-    "impl.guidance": "cuda",
-    "impl.modulate": "cuda",
-    "impl.norm": "cuda",
-    "impl.patch": "cuda",
-    "impl.repeat": "cuda",
-    "impl.scale": "cuda",
-    "impl.transpose": "cuda",
-    "impl.upsample": "cuda",
-    "resolution": "1024",
-    "stage": "vae-decode",
-    "weights": "checkpoint"
-   },
-   "impl": "cuda-tile1024",
-   "metrics": {
-    "iters": 10,
-    "latency_s": 5.457156117,
-    "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 697774080
-   },
-   "output_stats": {
-    "latent_absmax": 0.435546875,
-    "latent_mean": 0.05386258437,
-    "latent_std": 0.04552827724
-   },
-   "repeat": 2,
-   "status": "OK",
-   "variant": "candidate"
-  },
-  {
-   "cell": "vae-decode/1024/bf16",
-   "config_id": "default",
-   "effective": {
-    "batch": "1",
-    "caption_len": "300",
-    "device": "cuda",
-    "dtype": "bf16",
-    "impl": "cuda",
-    "impl.activation": "cuda",
-    "impl.add": "cuda",
-    "impl.attention": "cuda",
-    "impl.chunk": "cuda",
-    "impl.conv2d": "cuda",
-    "impl.device": "cuda",
-    "impl.gather": "cuda",
-    "impl.gemm": "cuda",
-    "impl.guidance": "cuda",
-    "impl.modulate": "cuda",
-    "impl.norm": "cuda",
-    "impl.patch": "cuda",
-    "impl.repeat": "cuda",
-    "impl.scale": "cuda",
-    "impl.transpose": "cuda",
-    "impl.upsample": "cuda",
-    "resolution": "1024",
-    "stage": "vae-decode",
-    "weights": "checkpoint"
-   },
-   "impl": "cuda",
-   "metrics": {
-    "iters": 10,
-    "latency_s": 5.443395582,
-    "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 697348096
-   },
-   "output_stats": {
-    "latent_absmax": 0.4375,
-    "latent_mean": 0.05386423693,
-    "latent_std": 0.04552880954
-   },
-   "repeat": 3,
-   "status": "OK",
-   "variant": "base"
-  },
-  {
-   "cell": "vae-decode/1024/bf16",
-   "config_id": "default",
-   "effective": {
-    "batch": "1",
-    "caption_len": "300",
-    "device": "cuda",
-    "dtype": "bf16",
-    "impl": "cuda-tile1024",
-    "impl.activation": "cuda",
-    "impl.add": "cuda",
-    "impl.attention": "cuda-tile1024",
-    "impl.chunk": "cuda",
-    "impl.conv2d": "cuda",
-    "impl.device": "cuda",
-    "impl.gather": "cuda",
-    "impl.gemm": "cuda",
-    "impl.guidance": "cuda",
-    "impl.modulate": "cuda",
-    "impl.norm": "cuda",
-    "impl.patch": "cuda",
-    "impl.repeat": "cuda",
-    "impl.scale": "cuda",
-    "impl.transpose": "cuda",
-    "impl.upsample": "cuda",
-    "resolution": "1024",
-    "stage": "vae-decode",
-    "weights": "checkpoint"
-   },
-   "impl": "cuda-tile1024",
-   "metrics": {
-    "iters": 10,
-    "latency_s": 5.449821476,
-    "latent_l2_vs_reference": 0.0002775190405326029,
     "peak_vram_bytes": 698269696
    },
    "output_stats": {
-    "latent_absmax": 0.435546875,
-    "latent_mean": 0.05386258437,
-    "latent_std": 0.04552827724
-   },
-   "repeat": 3,
-   "status": "OK",
-   "variant": "candidate"
-  },
-  {
-   "cell": "vae-decode/1024/bf16",
-   "config_id": "default",
-   "effective": {
-    "batch": "1",
-    "caption_len": "300",
-    "device": "cuda",
-    "dtype": "bf16",
-    "impl": "cuda",
-    "impl.activation": "cuda",
-    "impl.add": "cuda",
-    "impl.attention": "cuda",
-    "impl.chunk": "cuda",
-    "impl.conv2d": "cuda",
-    "impl.device": "cuda",
-    "impl.gather": "cuda",
-    "impl.gemm": "cuda",
-    "impl.guidance": "cuda",
-    "impl.modulate": "cuda",
-    "impl.norm": "cuda",
-    "impl.patch": "cuda",
-    "impl.repeat": "cuda",
-    "impl.scale": "cuda",
-    "impl.transpose": "cuda",
-    "impl.upsample": "cuda",
-    "resolution": "1024",
-    "stage": "vae-decode",
-    "weights": "checkpoint"
-   },
-   "impl": "cuda",
-   "metrics": {
-    "iters": 10,
-    "latency_s": 5.442037225,
-    "latent_l2_vs_reference": 0.0005004137624701083,
-    "peak_vram_bytes": 697827328
-   },
-   "output_stats": {
     "latent_absmax": 0.4375,
     "latent_mean": 0.05386423693,
     "latent_std": 0.04552880954
    },
-   "repeat": 4,
+   "repeat": 0,
    "status": "OK",
-   "variant": "base"
+   "variant": "base",
+   "wall_s": 38.57934260368347
   },
   {
    "cell": "vae-decode/1024/bf16",
@@ -1519,19 +828,204 @@
    },
    "impl": "cuda-tile1024",
    "metrics": {
-    "iters": 10,
-    "latency_s": 5.460972598,
+    "iters": 5,
+    "latency_s": 5.437404151,
     "latent_l2_vs_reference": 0.0002775190405326029,
-    "peak_vram_bytes": 698114048
+    "peak_vram_bytes": 697327616
    },
    "output_stats": {
     "latent_absmax": 0.435546875,
     "latent_mean": 0.05386258437,
     "latent_std": 0.04552827724
    },
-   "repeat": 4,
+   "repeat": 0,
    "status": "OK",
-   "variant": "candidate"
+   "variant": "candidate",
+   "wall_s": 38.503674030303955
+  },
+  {
+   "cell": "vae-decode/1024/bf16",
+   "config_id": "default",
+   "effective": {
+    "batch": "1",
+    "caption_len": "300",
+    "device": "cuda",
+    "dtype": "bf16",
+    "impl": "cuda",
+    "impl.activation": "cuda",
+    "impl.add": "cuda",
+    "impl.attention": "cuda",
+    "impl.chunk": "cuda",
+    "impl.conv2d": "cuda",
+    "impl.device": "cuda",
+    "impl.gather": "cuda",
+    "impl.gemm": "cuda",
+    "impl.guidance": "cuda",
+    "impl.modulate": "cuda",
+    "impl.norm": "cuda",
+    "impl.patch": "cuda",
+    "impl.repeat": "cuda",
+    "impl.scale": "cuda",
+    "impl.transpose": "cuda",
+    "impl.upsample": "cuda",
+    "resolution": "1024",
+    "stage": "vae-decode",
+    "weights": "checkpoint"
+   },
+   "impl": "cuda",
+   "metrics": {
+    "iters": 5,
+    "latency_s": 5.425828168,
+    "latent_l2_vs_reference": 0.0005004137624701083,
+    "peak_vram_bytes": 697589760
+   },
+   "output_stats": {
+    "latent_absmax": 0.4375,
+    "latent_mean": 0.05386423693,
+    "latent_std": 0.04552880954
+   },
+   "repeat": 1,
+   "status": "OK",
+   "variant": "base",
+   "wall_s": 38.415141582489014
+  },
+  {
+   "cell": "vae-decode/1024/bf16",
+   "config_id": "default",
+   "effective": {
+    "batch": "1",
+    "caption_len": "300",
+    "device": "cuda",
+    "dtype": "bf16",
+    "impl": "cuda-tile1024",
+    "impl.activation": "cuda",
+    "impl.add": "cuda",
+    "impl.attention": "cuda-tile1024",
+    "impl.chunk": "cuda",
+    "impl.conv2d": "cuda",
+    "impl.device": "cuda",
+    "impl.gather": "cuda",
+    "impl.gemm": "cuda",
+    "impl.guidance": "cuda",
+    "impl.modulate": "cuda",
+    "impl.norm": "cuda",
+    "impl.patch": "cuda",
+    "impl.repeat": "cuda",
+    "impl.scale": "cuda",
+    "impl.transpose": "cuda",
+    "impl.upsample": "cuda",
+    "resolution": "1024",
+    "stage": "vae-decode",
+    "weights": "checkpoint"
+   },
+   "impl": "cuda-tile1024",
+   "metrics": {
+    "iters": 5,
+    "latency_s": 5.43018146,
+    "latent_l2_vs_reference": 0.0002775190405326029,
+    "peak_vram_bytes": 697737216
+   },
+   "output_stats": {
+    "latent_absmax": 0.435546875,
+    "latent_mean": 0.05386258437,
+    "latent_std": 0.04552827724
+   },
+   "repeat": 1,
+   "status": "OK",
+   "variant": "candidate",
+   "wall_s": 38.46965837478638
+  },
+  {
+   "cell": "vae-decode/1024/bf16",
+   "config_id": "default",
+   "effective": {
+    "batch": "1",
+    "caption_len": "300",
+    "device": "cuda",
+    "dtype": "bf16",
+    "impl": "cuda",
+    "impl.activation": "cuda",
+    "impl.add": "cuda",
+    "impl.attention": "cuda",
+    "impl.chunk": "cuda",
+    "impl.conv2d": "cuda",
+    "impl.device": "cuda",
+    "impl.gather": "cuda",
+    "impl.gemm": "cuda",
+    "impl.guidance": "cuda",
+    "impl.modulate": "cuda",
+    "impl.norm": "cuda",
+    "impl.patch": "cuda",
+    "impl.repeat": "cuda",
+    "impl.scale": "cuda",
+    "impl.transpose": "cuda",
+    "impl.upsample": "cuda",
+    "resolution": "1024",
+    "stage": "vae-decode",
+    "weights": "checkpoint"
+   },
+   "impl": "cuda",
+   "metrics": {
+    "iters": 5,
+    "latency_s": 5.422274975,
+    "latent_l2_vs_reference": 0.0005004137624701083,
+    "peak_vram_bytes": 697331712
+   },
+   "output_stats": {
+    "latent_absmax": 0.4375,
+    "latent_mean": 0.05386423693,
+    "latent_std": 0.04552880954
+   },
+   "repeat": 2,
+   "status": "OK",
+   "variant": "base",
+   "wall_s": 38.39364004135132
+  },
+  {
+   "cell": "vae-decode/1024/bf16",
+   "config_id": "default",
+   "effective": {
+    "batch": "1",
+    "caption_len": "300",
+    "device": "cuda",
+    "dtype": "bf16",
+    "impl": "cuda-tile1024",
+    "impl.activation": "cuda",
+    "impl.add": "cuda",
+    "impl.attention": "cuda-tile1024",
+    "impl.chunk": "cuda",
+    "impl.conv2d": "cuda",
+    "impl.device": "cuda",
+    "impl.gather": "cuda",
+    "impl.gemm": "cuda",
+    "impl.guidance": "cuda",
+    "impl.modulate": "cuda",
+    "impl.norm": "cuda",
+    "impl.patch": "cuda",
+    "impl.repeat": "cuda",
+    "impl.scale": "cuda",
+    "impl.transpose": "cuda",
+    "impl.upsample": "cuda",
+    "resolution": "1024",
+    "stage": "vae-decode",
+    "weights": "checkpoint"
+   },
+   "impl": "cuda-tile1024",
+   "metrics": {
+    "iters": 5,
+    "latency_s": 5.428079486,
+    "latent_l2_vs_reference": 0.0002775190405326029,
+    "peak_vram_bytes": 697335808
+   },
+   "output_stats": {
+    "latent_absmax": 0.435546875,
+    "latent_mean": 0.05386258437,
+    "latent_std": 0.04552827724
+   },
+   "repeat": 2,
+   "status": "OK",
+   "variant": "candidate",
+   "wall_s": 38.4357123374939
   }
  ]
 }
