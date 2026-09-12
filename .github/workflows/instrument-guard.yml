@@ -1,0 +1,38 @@
+name: instrument-guard
+
+# The measuring instrument decides WHAT IS MEASURED. A submission that could edit it could win
+# by editing the ruler -- a one-line change to a noise floor, a confidence level, a ceiling, a
+# tolerance or the model revision. None of those look like cheating in a diff.
+#
+# eval/run_from_base.sh already overlays the instrument from the base ref before scoring, so such
+# an edit cannot affect its own author's score. This check exists because that is the weaker
+# property: a change that lands on main becomes the instrument for everyone after it.
+#
+# It is NOT a blanket ban on touching eval/. Burnisher pays for cartography -- opening a new cell
+# is a scored contribution -- so the guard distinguishes ADDING a new frozen generation from
+# MODIFYING one that exists. See scripts/instrument_guard.py for why that line is the safe one.
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  instrument-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The guard diffs against the base, so it needs the base to exist locally.
+          fetch-depth: 0
+      - name: does this submission change what is measured?
+        run: |
+          python3 scripts/instrument_guard.py \
+            --base "origin/${{ github.base_ref }}" \
+            --json "$RUNNER_TEMP/guard.json"
+      - name: the verdict, for the eval bot to read
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: instrument-guard
+          path: ${{ runner.temp }}/guard.json
+          if-no-files-found: ignore

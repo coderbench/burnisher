@@ -1,0 +1,59 @@
+{
+ "_what_this_is": "Burnisher's scoring model, declared. The payout basis is a MEASURED continuous quantity carried on the pull request itself, not a tier chosen by a bot. Everything here is derivable from artifacts in this repository; nothing needs to be taken on trust.",
+
+ "model": "gap-closed",
+ "payout_basis": "credited_gap_closed",
+ "payout_range": [0.0, 1.0],
+ "scoring": "A merged pull request earns the fraction of this generation's REMAINING arithmetic-roofline gap that it closed, measured. The number is on the PR as `burnish:gap+0.0342` and in the receipt as `score.credited_gap_closed`. There is no tier table and no letter grade: the quantity is already normalised to [0,1], already comparable across cells, models and hardware, and already self-terminating -- the same kernel win is worth less once the gap it closes is smaller. Bucketing it into XS..XL would pay two differently-measured submissions identically and two almost-identical ones differently, and would discard the only property that makes it worth computing.",
+
+ "why_not_a_tier": "Three problems with raw-percent-and-bands, all of which this model exists to fix. (1) A raw percentage pays easy cells: 10% off a stage already at 3% of its ceiling is worth far less than 10% off one at 80%, and paying them the same is an inverted reward. (2) A fixed significance threshold is a guess at the noise; every cell here carries its own MEASURED floor from paired control-vs-control runs. (3) Discrete labels round away information that was expensive to measure.",
+
+ "credited_vs_measured": "`gap_closed` is what was measured and is always published, including when it is negative. `credited_gap_closed` is what pays, and it is zero unless the effect cleared the cell's own measured noise floor AND the frontier grew. A regression credits zero rather than negative: the ledger compounds toward a ceiling, and a mechanism that could be pushed backwards would let anyone move it.",
+
+ "compounding": "Receipts compound toward the ceiling rather than summing. Each closes a fraction of what was left at its own moment, so two contributions of 0.25 close 0.4375 together and not 0.5. Summing would let a generation claim more gap closed than existed. `ledger/<generation>/current.json` carries `gap_remaining_fraction`, which is how much of the whole benchmark is still open.",
+
+ "outcomes": {
+  "burnish:gap+N.NNNN": "PAID. The number is the payout basis: the fraction of the remaining roofline gap closed. Fixed-width and signed, so a list of labels is already ranked.",
+  "burnish:unresolved": "Not paid, and not a judgement about the idea. The effect could not be distinguished from the cell's own measured noise. An axis whose spread sits inside its own noise is open, not solved.",
+  "burnish:no-gain": "Not paid. Resolved, and measurably not an improvement -- which is a real result, not a failure.",
+  "burnish:moved-along-frontier": "Not paid. Faster, but paid for in peak memory or output fidelity; the runtime could already make that trade.",
+  "burnish:shape-overfit": "Not paid. The gain did not survive a shape drawn AFTER the candidate was frozen.",
+  "burnish:partial": "Not paid. An incomplete matrix credits nothing, because dropping the cell a change hurts is the cheapest way to raise a score.",
+  "burnish:correctness-fail": "Rejected before timing was considered. Never traded against a speed win.",
+  "burnish:determinism-fail": "Rejected. Nothing can be attributed to a change against a baseline that does not produce the same bytes twice.",
+  "burnish:cell-opened": "PAID as cartography. A new cell -- its reference, calibration and roofline -- adds a place where future work can be measured.",
+  "burnish:held": "Held, not rejected. An independent re-measurement disagrees beyond the cell's floor, so one of the two receipts is wrong and nobody yet knows which. A score no one else can reproduce does not pay.",
+  "burnish:build-fail": "Not evaluated.",
+  "burnish:eval-error": "Not the submission's fault. Re-run."
+ },
+
+ "cartography": "Opening a cell is scored in its own right. A benchmark whose surface only a maintainer may extend stops growing, and a subnet's health depends on axis supply. The instrument guard distinguishes ADDING a new frozen generation (allowed, paid) from MODIFYING one that exists (blocked) -- an added generation cannot change what any existing receipt meant.",
+
+ "verification": {
+  "_split": "Two tiers, with very different costs, because scoring here is a pure function of recorded measurements -- no device, no clock, no randomness. A receipt measured on a Blackwell part re-derives figure for figure on a laptop.",
+  "arithmetic": "`burnish audit <raw.json> <receipt.json>` -- anyone, no GPU, about two seconds. Checks that the published verdict follows from the published measurements, that the receipt was not edited, and that it was scored against the frozen generation as committed. This catches every scoring bug and every altered receipt, including one whose content digest has been recomputed to cover the edit.",
+  "measurement": "`burnish challenge` -- needs an RTX 5090 and about half an hour. Re-measures the same submission on different silicon and appends a counter-receipt. A disagreement beyond the cell's own floor puts the credit on HOLD.",
+  "honest_boundary": "No amount of arithmetic can prove a measurement happened. That is what the expensive tier and the append-only ledger are for, and saying so is cheaper than being found out."
+ },
+
+ "anti_gaming": [
+  "The instrument -- eval/, configs/, schemas/, tools/burnish -- is overlaid from the base commit before anything is scored, so editing the ruler cannot affect the editor's own score.",
+  "A required CI check blocks a submission that modifies the instrument, and distinguishes that from opening a new cell.",
+  "Every cell is also run at a shape drawn from a held-out list AFTER the candidate is frozen.",
+  "A partial matrix credits nothing.",
+  "The ledger is append-only and written outside the submission's reach; a finalized receipt is never rewritten, and a correction is a new receipt naming what it supersedes.",
+  "A frozen generation cannot be edited. If the meaning of the evaluation should change, the answer is a new generation.",
+  "Correctness and self-determinism are gated BEFORE anything is timed, against reference latents produced by a pinned reference implementation this runtime cannot influence."
+ ],
+
+ "non_scoring_contributions": "Welcome, and they score zero: documentation, tooling, refactors, and correct-but-not-faster changes. That is not a judgement of their worth -- the subnet pays for measured movement toward the roofline, and saying so plainly is better than implying otherwise.",
+
+ "areas": {
+  "_comment": "Categorization for display. These do NOT carry emission weight: a verified gap-closed is worth the same wherever it lands, because the roofline already says how much room each cell had.",
+  "cuda": "device kernels -- src/cuda/",
+  "models": "the three model graphs -- src/models/",
+  "sched": "the sampler -- src/sched/",
+  "core": "tensor, registry, device boundary -- src/core/",
+  "cartography": "opening a new cell -- eval/cells/<new generation>/"
+ }
+}

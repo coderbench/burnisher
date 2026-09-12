@@ -97,6 +97,48 @@ class TestTheVerdictIsAPureFunction(unittest.TestCase):
                              f"{lab} is a letter grade")
 
 
+class TestTheDeclaredModelMatchesTheCode(unittest.TestCase):
+    """`.gittensor/weights.json` declares how this repository pays. The code decides.
+
+    A declaration that drifts from the implementation is worse than none: it is the document a
+    contributor reads before deciding whether to spend a week, and whoever reads it has no way
+    to know it went stale. SparkInfer's own `.gittensor/weights.json` advertises scoring against
+    remaining roofline headroom while its `label.py` scores against a fixed llama.cpp anchor and
+    marks the ceiling argument "display only" -- an honest file that stopped being true.
+    """
+
+    def setUp(self):
+        self.decl = json.loads((ROOT / ".gittensor" / "weights.json").read_text())
+
+    def test_every_label_the_code_can_apply_is_declared(self):
+        for lab in V.all_labels():
+            self.assertIn(lab, self.decl["outcomes"],
+                          f"the code can apply {lab} and the declaration does not explain it")
+
+    def test_the_paying_label_is_declared_with_its_shape(self):
+        pattern = "burnish:gap+N.NNNN"
+        self.assertIn(pattern, self.decl["outcomes"])
+        rec = json.loads(RECEIPT.read_text())
+        rec["status"] = "FRONTIER_EXPANDED"
+        rec["score"]["credited_gap_closed"] = 0.0342
+        actual = V.label_for(rec)
+        self.assertEqual(len(actual), len(pattern),
+                         f"the declared shape {pattern} is not the width of {actual}")
+
+    def test_the_declared_payout_basis_is_the_field_the_code_pays_on(self):
+        rec = json.loads(RECEIPT.read_text())
+        rec["status"] = "FRONTIER_EXPANDED"
+        rec["score"]["credited_gap_closed"] = 0.25
+        self.assertEqual(self.decl["payout_basis"], "credited_gap_closed")
+        self.assertEqual(V.verdict(rec)["payout_fraction"],
+                         rec["score"][self.decl["payout_basis"]])
+
+    def test_the_declaration_names_no_tier(self):
+        blob = json.dumps(self.decl)
+        for tier in ('"XL"', '"XS"', '"tier"'):
+            self.assertNotIn(tier, blob, f"{tier} appears in a declaration that says it has none")
+
+
 class TestTheAuditCatchesAReceiptThatLies(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
