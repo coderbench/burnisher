@@ -43,12 +43,30 @@ class TestAProposedCell(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def propose(self, name, *, resolution=512, inflate_ceiling=False, duplicate=False,
+    # A resolution no COMMITTED generation uses. The fixtures proposed 512px until BG-2 landed
+    # at 512px, and then "declares a cell that does not already exist" correctly started failing
+    # -- the test was right and the fixture had become a duplicate. Read from the tree rather
+    # than hardcoded, so the next real generation does not break it again.
+    @staticmethod
+    def _unused_resolution():
+        import json as _json
+        taken = set()
+        for g in (ROOT / "eval" / "cells").iterdir():
+            doc = g / "generation.json"
+            if doc.exists():
+                taken.add(int(_json.loads(doc.read_text())["model"]["resolution"]))
+        for r in (2048, 1536, 768, 256, 4096):
+            if r not in taken:
+                return r
+        raise AssertionError(f"every candidate resolution is taken: {sorted(taken)}")
+
+    def propose(self, name, *, resolution=None, inflate_ceiling=False, duplicate=False,
                 with_refs=True, claim_calibration=True, missing_oracle=None):
         d = self.root / name
         d.mkdir(parents=True, exist_ok=True)
         doc = json.loads((SRC / "generation.json").read_text())
         doc["name"] = name
+        resolution = resolution or self._unused_resolution()
         if not duplicate:
             doc["model"] = dict(doc["model"], resolution=resolution)
             for c in doc["cells"]:
@@ -96,10 +114,10 @@ class TestAProposedCell(unittest.TestCase):
         # `implemented: false` (fp8, nvfp4). A declared-but-unimplemented cell is still new
         # surface: it publishes a ceiling so the room is visible, and carries weight 0 so it
         # cannot drag an aggregate it is not part of.
-        self.assertIn("dit-step/512/bf16", r["novel_cells"])
-        self.assertIn("t5-encode/512/bf16", r["novel_cells"])
-        self.assertIn("vae-decode/512/bf16", r["novel_cells"])
-        self.assertTrue(all("/512/" in c for c in r["novel_cells"]))
+        res = self._unused_resolution()
+        for stage in ("dit-step", "t5-encode", "vae-decode"):
+            self.assertIn(f"{stage}/{res}/bf16", r["novel_cells"])
+        self.assertTrue(all(f"/{res}/" in c for c in r["novel_cells"]))
 
     def test_it_is_not_opened_until_it_has_been_measured(self):
         """A cell is opened by measurement, never by declaration.
@@ -179,11 +197,13 @@ class TestAProposedCell(unittest.TestCase):
         self.propose("BG-NEW")
         r = self._check("BG-NEW")
         v = CG.verdict_for(r, measured={
-            "dit-step/512/bf16": {"resolvable": False, "achieved": 0.1, "floor_pct": 9.0,
-                                  "floors_of_room": 3.0}})
+            f"dit-step/{self._unused_resolution()}/bf16": {
+                "resolvable": False, "achieved": 0.1, "floor_pct": 9.0,
+                "floors_of_room": 3.0}})
         self.assertEqual(v["outcome"], "OPENED")
         self.assertTrue(v["pays"], "an unresolvable cell is a result, not a failure")
-        self.assertEqual(v["unresolvable_cells"], ["dit-step/512/bf16"])
+        self.assertEqual(v["unresolvable_cells"],
+                         [f"dit-step/{self._unused_resolution()}/bf16"])
 
 
 class TestTheOverlayKeepsAnAddedGeneration(unittest.TestCase):

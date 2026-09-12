@@ -148,10 +148,31 @@ class TestTestsDoNotPolluteTheTree(unittest.TestCase):
             self.assertFalse((ROOT / "eval" / "cells" / "BG-INVARIANT").exists())
 
     def test_the_committed_tree_holds_only_real_generations(self):
+        """Every committed generation must be a DELIBERATE one, not a leaked scratch directory.
+
+        This asserted `== ["BG-1"]` while there was only one. That made it a test of the count
+        rather than of the property, so landing BG-2 -- a real 512px generation -- failed it, and
+        the obvious repair is to append "BG-2" and wait to be surprised again by BG-3.
+
+        The property is that anything here is a generation somebody meant to commit: named BG-N,
+        carrying a generation.json, and known to configs/tolerance.json. A scratch directory from
+        an interrupted test run has none of those.
+        """
+        import re as _re
+        import json as _json
         present = sorted(p.name for p in (ROOT / "eval" / "cells").iterdir() if p.is_dir())
-        self.assertEqual(present, ["BG-1"],
-                         f"eval/cells holds {present}; a scratch generation leaked into the "
-                         f"repository")
+        self.assertTrue(present, "eval/cells is empty")
+        tolerances = _json.loads((ROOT / "configs" / "tolerance.json").read_text())
+        for name in present:
+            self.assertRegex(name, r"^BG-\d+$",
+                             f"eval/cells holds {name!r}, which is not a generation name; a "
+                             f"scratch directory probably leaked out of a test run")
+            self.assertTrue((ROOT / "eval" / "cells" / name / "generation.json").exists(),
+                            f"{name} has no generation.json")
+            self.assertIn(name, tolerances,
+                          f"{name} is committed with no correctness tolerance. A generation "
+                          f"that cannot say how far a correct implementation may drift cannot "
+                          f"reject anything.")
 
 
 class TestGenerationCli(unittest.TestCase):
