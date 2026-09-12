@@ -61,17 +61,18 @@ CONTRIBUTOR = ("src/", "include/", "tests/", "CMakeLists.txt", "scripts/build")
 CELL_DIR = re.compile(r"^eval/cells/([^/]+)/")
 
 
-def changed(base: str) -> list:
+def changed(base: str, repo: Path = None) -> list:
     """(status, path) for every file this branch changes against the base.
 
     `--diff-filter` is deliberately not used: the statuses are the whole point, and a rename is
     reported as its own letter rather than being silently split into an add and a delete.
     """
+    repo = Path(repo or ROOT)
     out = subprocess.run(
-        ["git", "-C", str(ROOT), "diff", "--name-status", f"{base}...HEAD"],
+        ["git", "-C", str(repo), "diff", "--name-status", f"{base}...HEAD"],
         capture_output=True, text=True)
     if out.returncode != 0:
-        out = subprocess.run(["git", "-C", str(ROOT), "diff", "--name-status", base],
+        out = subprocess.run(["git", "-C", str(repo), "diff", "--name-status", base],
                              capture_output=True, text=True, check=True)
     rows = []
     for line in out.stdout.splitlines():
@@ -81,8 +82,8 @@ def changed(base: str) -> list:
     return rows
 
 
-def existing_generations(base: str) -> set:
-    out = subprocess.run(["git", "-C", str(ROOT), "ls-tree", "-d", "--name-only",
+def existing_generations(base: str, repo: Path = None) -> set:
+    out = subprocess.run(["git", "-C", str(repo or ROOT), "ls-tree", "-d", "--name-only",
                           f"{base}:eval/cells"], capture_output=True, text=True)
     return set(out.stdout.split()) if out.returncode == 0 else set()
 
@@ -122,14 +123,19 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base", default="origin/main")
+    # Which checkout to diff. Defaults to this script's own repository, which is right when a
+    # contributor runs it by hand -- and wrong when the bot runs it against a worktree, because
+    # the script would then diff ITSELF and report a clean tree for somebody else's changes.
+    # That is not hypothetical: it is how the first PR this bot evaluated slipped past the guard.
+    ap.add_argument("--repo", help="the checkout to diff (default: this script's own)")
     ap.add_argument("--json")
     a = ap.parse_args()
 
-    rows = changed(a.base)
+    rows = changed(a.base, a.repo)
     if not rows:
         print(f"ok: nothing changed against {a.base}")
         return 0
-    r = classify(rows, existing_generations(a.base))
+    r = classify(rows, existing_generations(a.base, a.repo))
 
     if r["cartography"]:
         gens = sorted({CELL_DIR.match(p).group(1) for p in r["cartography"]})

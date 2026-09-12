@@ -116,9 +116,12 @@ def comment(repo, num, body, *, dry_run=False):
 
 def guard(worktree: Path, base: str) -> dict:
     out = Path(tempfile.mkdtemp()) / "guard.json"
+    # --repo, not cwd. The guard script resolves its own repository from __file__, so running
+    # it with a different working directory diffs the WRONG tree and reports clean. The
+    # instrument copy is deliberately this repo's (the base one), not the submission's.
     subprocess.run([sys.executable, str(ROOT / "scripts" / "instrument_guard.py"),
-                    "--base", base, "--json", str(out)],
-                   cwd=str(worktree), capture_output=True, text=True)
+                    "--base", base, "--repo", str(worktree), "--json", str(out)],
+                   capture_output=True, text=True)
     return json.loads(out.read_text()) if out.exists() else {"ok": True, "outcome": "CONTRIBUTOR"}
 
 
@@ -192,6 +195,18 @@ def evaluate(repo, pr, args) -> dict:
         if args.dry_run:
             print(f"   [dry-run] would evaluate: {g['outcome']}")
             return {"pr": num, "outcome": "DRY_RUN", "guard": g}
+
+        # Checked HERE rather than at startup. The guard runs first and costs nothing, so a pass
+        # over a queue of instrument-only pull requests needs no checkpoint, no noise file and
+        # no ledger -- and demanding them up front would stop an operator from running the
+        # cheap half of the loop on a machine that has no GPU attached to it.
+        missing = [n for n in ("ledger", "weights", "noise") if not getattr(args, n)]
+        if missing:
+            raise RuntimeError(
+                "this submission needs a measurement, and "
+                + ", ".join(f"--{m}" for m in missing) + " "
+                + ("is" if len(missing) == 1 else "are") + " not set. The guard pass before "
+                "this point needs none of them, which is why they are not required at startup.")
 
         build = subprocess.run(["./scripts/build_cuda.sh"], cwd=str(wt),
                                capture_output=True, text=True, timeout=3600)
@@ -275,10 +290,6 @@ def main():
     ap.add_argument("--json", help="write the pass result here")
     a = ap.parse_args()
 
-    if not a.dry_run:
-        for need in ("ledger", "weights", "noise"):
-            if not getattr(a, need):
-                ap.error(f"--{need} is required unless --dry-run")
 
     prs = ([p for p in open_prs(a.repo) if p["number"] == a.pr] if a.pr
            else [p for p in open_prs(a.repo) if not already_labelled(p)])

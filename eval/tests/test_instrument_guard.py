@@ -95,6 +95,31 @@ class TestTheLineBetweenOpeningACellAndEditingTheRuler(unittest.TestCase):
                           f"{path} is guarded but not overlaid from the base ref")
 
 
+class TestTheGuardDiffsTheTreeItWasPointedAt(unittest.TestCase):
+    """The bug that let the first pull request this bot ever saw slip past the guard.
+
+    `instrument_guard.py` resolves its own repository from `__file__`, which is right when a
+    contributor runs it by hand in their checkout. The bot runs it against a temporary worktree,
+    and passing `cwd=` does not change where `git -C` looks -- so the guard diffed ITSELF,
+    found a clean tree, and reported the submission clean. It had edited `floor.py`.
+
+    Nothing about the classifier was wrong. The guard was simply looking at the wrong repo, which
+    is the failure mode a guard cannot report on itself.
+    """
+
+    def test_changed_accepts_the_repository_to_diff(self):
+        import inspect
+        for fn in (G.changed, G.existing_generations):
+            self.assertIn("repo", inspect.signature(fn).parameters,
+                          f"{fn.__name__} cannot be pointed at another checkout, so the bot "
+                          f"would diff its own tree instead of the submission's")
+
+    def test_the_bot_points_the_guard_at_the_worktree(self):
+        bot = (ROOT / "eval" / "pr_bot.py").read_text()
+        self.assertIn('"--repo", str(worktree)', bot,
+                      "the bot runs the guard without telling it which tree to diff")
+
+
 class TestTheGuardRunsAsACommand(unittest.TestCase):
     def test_it_reports_a_clean_tree_against_itself(self):
         r = subprocess.run([sys.executable, str(ROOT / "scripts" / "instrument_guard.py"),

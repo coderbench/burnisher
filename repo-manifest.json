@@ -30,6 +30,7 @@
   "docs/ARCHITECTURE.md",
   "docs/CARTOGRAPHY.md",
   "docs/CORRECTNESS.md",
+  "docs/EVAL.md",
   "docs/HARDWARE.md",
   "docs/ROOFLINE.md",
   "docs/SCORING.md",
