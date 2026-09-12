@@ -73,6 +73,7 @@
   "eval/roofline_table.py",
   "eval/run_from_base.sh",
   "eval/runner.py",
+  "eval/score_submission.sh",
   "eval/screen.py",
   "eval/tests/__init__.py",
   "eval/tests/fakes/burnisher",

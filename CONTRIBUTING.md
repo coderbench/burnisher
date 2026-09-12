@@ -56,17 +56,33 @@ A disagreement far above the tolerance with an **identical mean and standard dev
 permutation, not an arithmetic error. That is how the output patch ordering was found, and no
 self-consistency test in this repository could see it.
 
-Then, on the pinned hardware:
+Then, on the pinned hardware, one command:
 
 ```bash
-burnish gate --impl <your-impl> --repeats 10 --output gate.json   # correctness first, always
-burnish bench --impl-candidate <your-impl> \
-    --gate-result gate.json --gate-base-result gate-base.json --output raw.json
-burnish score raw.json
+eval/score_submission.sh --base <the commit you branched from> --worktree . \
+    --impl-base cuda --impl-candidate <your-impl> \
+    --pr <n> --ledger <a directory OUTSIDE this worktree> \
+    --weights <checkpoint dir> --noise <the pinned noise .npy>
 ```
 
-`burnish bench` refuses to time a build that has not passed the gate. That is not a convenience
-check — correctness precedes speed and is never traded against it.
+That runs the four stages in the order they have to happen in: gate the base arm, gate yours,
+bench both paired and interleaved, score into the ledger. It is a script rather than a list of
+instructions because two people following the same prose write two different drivers, and the
+difference shows up as a difference in scores that no receipt can explain.
+
+The stages underneath it are `burnish gate | bench | score` and you can run them by hand while
+iterating. Two things about the order are not negotiable:
+
+- **`burnish bench` refuses to time a build that has not passed the gate.** Correctness precedes
+  speed and is never traded against it.
+- **The base arm is gated too.** A baseline that does not reproduce itself makes every delta
+  measured against it noise.
+
+**One name, fifteen ops.** `--impl-candidate <your-impl>` applies to whichever ops register that
+name; the rest fall back to the baseline for the device the run is placed on. Registering one
+kernel is the normal case, not an edge case. The runtime reports the resolved implementation for
+every op and the harness refuses a run whose report disagrees with what was asked for, so a
+fallback you did not intend shows up as a rejected run rather than a wrong number.
 
 ## What will get your submission rejected, and why
 
