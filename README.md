@@ -17,17 +17,24 @@ burnish bench ... | burnish score   # a number with an interval on it
 
 ## Read this first
 
-**The instrument is complete and tested. The runtime runs end to end on the CPU, reproduces itself
-byte for byte, loads and runs the real pinned checkpoint, and agrees with the reference
-implementation on all four stages — scheduler 1.7e-07, VAE 6.9e-06, T5 2.4e-06, DiT 7.3e-04
-relative L2. Nothing has been measured on a GPU.** No Blackwell device and no CUDA
-toolkit were available when this was built, so every cell's achieved fraction and noise floor is
-`null`, every ceiling stands on a vendor device peak rather than a probed one, and the CUDA op
-backend does not exist yet.
+**The instrument is complete, and it has scored a real run on the pinned hardware.** The runtime
+runs end to end on CPU and CUDA, reproduces itself byte for byte, loads the real pinned
+checkpoint, and passes the correctness gate against committed reference latents. Every
+implemented cell has a measured achieved fraction and its own measured noise floor. The device
+peaks behind those cells are probed, not vendor.
 
-`docs/STATUS.md` is the complete list, with what a first session on the pinned hardware would fill
-in and in what order. Overselling the surface is the single failure mode that kills a subnet, so
-that page comes before the pitch.
+**What that measurement says is that the runtime is very slow, which is the plan.** `dit-step` is
+at **1.5%** of its arithmetic ceiling, `vae-decode`
+at **0.8%**, `t5-encode` at
+**18.2%**. v0 ships a correct, complete, *slow*
+pipeline; contributors make it fast and are paid for the fraction of the remaining gap they
+close. The kernels are deliberately naive — no tiling, no tensor cores, every GEMM epilogue a
+separate pass.
+
+**What is not known** is in `docs/STATUS.md`, along with the six defects the runtime had, how
+each was found, and the first receipt the instrument ever produced — which was a regression, and
+which found a bug in the runtime on its way to saying so. Overselling the surface is the single
+failure mode that kills a subnet, so that page comes before the pitch.
 
 ---
 
@@ -205,10 +212,17 @@ implementation stays runnable forever; and `--impl <name>` fails loudly if the n
 registered rather than silently measuring something else. The harness compares the impl the
 runtime *reports* against the one it asked for and refuses a run that fell back.
 
+**One name, fifteen ops.** `--impl flash-sm120` applies to whichever ops register that name and
+leaves the rest on the baseline **for the device the run is placed on** — `cuda` on a CUDA run,
+the host kernels on CPU. So a submission that registers one attention variant takes the fallback
+for the other fourteen ops, which is the normal case rather than an edge case, and the fallback
+has to be device-correct or nothing runs. The runtime reports the resolved name for every op in
+`effective.impls`, and the harness refuses a run whose report disagrees with the request.
+
 ```
 include/burnisher/     tensor, dtype, op registry, models, scheduler, pipeline
 src/cpu/               reference implementations — the correctness ORACLE, not the product
-src/cuda/              device probe. The op backend does not exist yet (issues/cuda-op-backend.md)
+src/cuda/              device allocator and probe (device.cu), and the op backend (ops_cuda.cu)
 src/models/            T5 encoder, PixArt DiT, VAE decoder as explicit graphs over the registry
 eval/burnscore/        the scorer: geometry, roofline, floor, bootstrap, frontier, receipt, ledger
 eval/cells/BG-1/       the frozen generation: definition, calibration, prompts, receipts
@@ -224,13 +238,17 @@ the thing that runs and nothing else would notice.
 
 ## Where the work is
 
-`issues/README.md` — twelve items, each carrying its own arithmetic. The two that block everything:
+`issues/README.md` — twelve open items, each carrying its own arithmetic, plus two closed ones
+kept for the record of what they cost.
 
-- **`cuda-op-backend`** — there is no CUDA implementation of any op, so nothing can be measured.
-- **`checkpoint-load`** — the load path and the pinned reference latents do not exist yet. (The
-  962 tensor names and shapes the runtime requires *are* verified against the pinned revisions.)
+**Read `weight-formats` before picking a quantization cell.** A measurement there says one DiT
+step costs 3.266 s at fp32 and 3.576 s at bf16 — halving the weight traffic made it *slower*. At
+1.5% of its ceiling the step is bound by neither bytes nor flops, so an fp8 or NVFP4 cell is
+worth much less than its published ceiling until the work that makes this path bandwidth-bound
+lands first. That is the difference between a `basis: model` number and a `basis: measured` one,
+and it is the whole reason the distinction is enforced.
 
-Then: DiT attention at 4k–16k tokens (fp8/NVFP4), VAE decode tiling and the 16384-token mid-block
+The rest: DiT attention at 4k–16k tokens (fp8/NVFP4), VAE decode tiling and the 16384-token mid-block
 attention, T5 quantization and caching, fused AdaLN, weight formats on silicon with no reference
 tuning, step caching, CUDA-graph capture of the 571-launch denoise loop, offload and streaming,
 per-resolution shape specialisation, temporal and sparse attention for video.
