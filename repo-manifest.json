@@ -122,6 +122,7 @@
   "scripts/build.sh",
   "scripts/build_cuda.sh",
   "scripts/check.sh",
+  "scripts/check_links.py",
   "scripts/differential_test.py",
   "scripts/dtype_latency.py",
   "scripts/make_issues.py",
