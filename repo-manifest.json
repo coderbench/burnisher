@@ -15,7 +15,9 @@
  "files": [
   ".github/PULL_REQUEST_TEMPLATE.md",
   ".github/workflows/ci.yml",
+  ".github/workflows/instrument-guard.yml",
   ".gitignore",
+  ".gittensor/weights.json",
   "CMakeLists.txt",
   "CONTRIBUTING.md",
   "LICENSE",
@@ -89,6 +91,7 @@
   "eval/tests/test_documented_figures.py",
   "eval/tests/test_example_receipt.py",
   "eval/tests/test_gate.py",
+  "eval/tests/test_instrument_guard.py",
   "eval/tests/test_instrument_overlay.py",
   "eval/tests/test_runner.py",
   "eval/tests/test_schemas.py",

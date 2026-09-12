@@ -17,6 +17,7 @@ noise -- pressing it smooth until the image emerges. This is the command that do
     burnish verdict                a receipt's payable outcome, and the label that carries it
     burnish audit                  re-derive a published verdict from its own measurements
     burnish receipt verify|show    check a receipt against itself and its generation
+    burnish challenge              dispute a published result with your own measurement
     burnish ledger show|audit      the append-only history
 
 The split is deliberate. Everything above the line is arithmetic or bookkeeping and runs
@@ -265,6 +266,47 @@ def cmd_audit(args, rest):
     return A.main_with(argv)
 
 
+def cmd_challenge(args, rest):
+    """Attach an independent re-measurement to a submission already in the ledger."""
+    from burnscore import cells as C, challenge as CH, ledger as L
+    counter = json.loads(Path(args.counter).read_text())
+    gen_name = counter.get("benchmark_generation")
+    gpath = generation_path(gen_name, args.cells_root)
+    gen = C.load(gpath) if gpath.exists() else None
+    rid = args.receipt_id or L.default_receipt_id(counter)
+    canonical_path = L.receipt_path(args.ledger, gen_name, rid)
+    if not canonical_path.exists():
+        print(f"!! {args.ledger} has no canonical receipt {rid} for {gen_name}.\n"
+              f"   A challenge disputes a published result; there is nothing here to dispute.",
+              file=sys.stderr)
+        return 2
+    canonical = json.loads(canonical_path.read_text())
+    try:
+        path = CH.attach(args.ledger, canonical, counter, receipt_id=rid)
+    except CH.ChallengeError as exc:
+        print(f"!! {exc}", file=sys.stderr)
+        return 2
+    print(f">> filed {path}")
+    if gen is None:
+        print("   (the generation is not in this tree, so agreement was not evaluated)")
+        return 0
+    d = CH.disagreement(canonical, counter, gen)
+    print(f"\n   {'AGREES' if d['agree'] else 'DISAGREES'} with the canonical receipt\n")
+    print(f"   {'cell':26s} {'canonical':>10s} {'counter':>10s} {'floor':>10s}  verdict")
+    for r in d["per_cell"]:
+        if r.get("delta") is None:
+            continue
+        print(f"   {r['cell']:26s} {r['canonical']:+10.4f} {r['counter']:+10.4f} "
+              f"{r['floor_as_gap_closed']:10.5f}  "
+              f"{'within floor' if r['within_floor'] else 'DISAGREE'}")
+    if not d["agree"]:
+        print(f"\n   This submission's credit is now HELD. One of the two receipts is wrong and")
+        print(f"   the ledger does not know which, so it pays neither. A third measurement")
+        print(f"   breaks the tie.")
+    L.update_current(args.ledger, gen_name, gen)
+    return 0
+
+
 def cmd_ledger(args, rest):
     from burnscore import cells as C, ledger as L
     root = args.root or cells_root(args.cells_root)
@@ -373,6 +415,14 @@ def build_parser():
     p.add_argument("--json")
     p.add_argument("--cells-root")
     p.set_defaults(fn=cmd_audit)
+
+    p = sub.add_parser("challenge",
+                       help="attach an independent re-measurement to a published result")
+    p.add_argument("counter", help="a receipt for the SAME submission, measured elsewhere")
+    p.add_argument("--ledger", required=True)
+    p.add_argument("--receipt-id", help="defaults to the one the counter-receipt names")
+    p.add_argument("--cells-root")
+    p.set_defaults(fn=cmd_challenge)
 
     p = sub.add_parser("ledger", help="the append-only receipt history")
     p.add_argument("action", choices=["show", "audit"])
