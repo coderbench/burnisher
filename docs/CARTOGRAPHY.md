@@ -61,6 +61,49 @@ gap-closed number. It is scored against the generation it creates:
 - Because a generation is frozen for its lifetime, a cell landed badly is expensive to fix — which
   is why (1) through (4) are all required before it counts, rather than being filled in later.
 
+## How a cartography submission is actually evaluated
+
+```bash
+burnish cartography check --generation BG-2 --base origin/main --measure \
+    --binary build-cuda/burnisher --weights <ckpt> --noise <noise.npy>
+```
+
+The evaluator asks a different question than it asks a speedup — *is this cell real, and can
+anybody be credited on it?* — and the work is split deliberately:
+
+| | |
+|:--|:--|
+| **you supply** | the cell definition and the **oracle** — what a correct runtime must reproduce |
+| **the evaluator supplies** | every **measurement**. Your `reference.json` is read, reported, and discarded; the cell is gated and recalibrated here. |
+
+That asymmetry is the security argument, and it is why the structural checks can afford to be
+permissive about what you propose. **A submission arriving with a floor of 0.00001% gains nothing
+by it** — the floor that ends up frozen into the generation is the one this box measured.
+
+What is checked before anything is run:
+
+- the generation does not already exist on the base (an existing one is an edit wearing a new name);
+- it declares at least one cell that does not already exist (re-measuring covered ground is not cartography);
+- **every submitted ceiling recomputes from the base configs**, to floating-point noise — a submission that could pick its own ceiling would pick its own denominator for every score in that cell, forever;
+- reference latents are present with a manifest.
+
+Then, on the hardware: the cell runs, reproduces itself byte for byte, passes the gate against
+your oracle, and is calibrated. A cell that fails any of those is not opened.
+
+**`eval/run_from_base.sh` keeps a generation the submission adds** — and only one that is absent
+from the base. Everything else in the instrument still comes from the base commit. An added
+generation is safe precisely because it cannot change what any existing receipt meant.
+
+### A new model is not automatable, and is not pretended to be
+
+Requirement (1) above puts a new op enumeration in `eval/burnscore/geometry.py`, which is
+instrument — the guard blocks it, correctly, because a geometry that miscounts a stage moves every
+ceiling computed from it. That path needs a maintainer.
+
+A new **resolution, dtype or stage of a model already enumerated** needs no code at all: the
+geometry is parameterised, so `pixart_stages(..., resolution=512)` already produces the right
+ceilings. That is the case this evaluates end to end.
+
 ## What does not count
 
 - Adding a cell to an existing frozen generation. Generations do not change; receipts stay

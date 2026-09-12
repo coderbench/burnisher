@@ -57,6 +57,40 @@ git -C "$REPO" archive "$BASE" "${present[@]}" | tar -x -C "$STAGE"
 BASE_SHA="$(git -C "$REPO" rev-parse --short "$BASE")"
 echo ">> instrument: ${present[*]} from $BASE_SHA"
 
+# Cartography: a generation the submission ADDS survives the overlay. Nothing else does.
+#
+# Without this the guard and the payout contradicted each other. Opening a cell is allowed and
+# is declared payable, but the overlay stripped the new generation before anything could look at
+# it -- so a cartography submission was evaluated as an ordinary speedup against BG-1, found to
+# change nothing, and labelled `unresolved`. Declared payable, no path to payment.
+#
+# Safe for the same reason the guard allows the add at all: a generation that did not exist on
+# the base cannot change what any existing receipt meant. The restriction is exact -- only
+# directories under eval/cells/ that are absent from BASE are copied, so a submission cannot
+# smuggle an edit to a frozen generation or to any other part of the instrument through here.
+#
+# And it does NOT make the submission's numbers trustworthy. `burnish cartography check`
+# recalibrates the cell itself and discards whatever the submission claimed: the contributor
+# supplies the geometry and the oracle, the evaluator supplies the measurement.
+BASE_CELLS="$(git -C "$REPO" ls-tree -d --name-only "$BASE:eval/cells" 2>/dev/null || true)"
+ADDED=()
+if [ -d "$SUB/eval/cells" ]; then
+    for d in "$SUB"/eval/cells/*/; do
+        [ -d "$d" ] || continue
+        n="$(basename "$d")"
+        if ! printf '%s\n' $BASE_CELLS | grep -qx "$n"; then
+            mkdir -p "$STAGE/eval/cells"
+            cp -a "$d" "$STAGE/eval/cells/$n"
+            ADDED+=("$n")
+        fi
+    done
+fi
+if [ ${#ADDED[@]} -gt 0 ]; then
+    echo ">> cartography: ${ADDED[*]} kept from the submission (absent from $BASE_SHA)"
+    echo "   Its calibration is NOT trusted -- the evaluator measures the cell itself."
+    export BURNISH_CARTOGRAPHY="${ADDED[*]}"
+fi
+
 # Report what the submission tried to change about the instrument rather than dropping it
 # silently. A submission may legitimately want to improve the evaluator -- that is a
 # contribution, and it is scored as a change to what is measured, in its own PR, against the

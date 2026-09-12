@@ -196,6 +196,13 @@ def evaluate(repo, pr, args) -> dict:
             print(f"   [dry-run] would evaluate: {g['outcome']}")
             return {"pr": num, "outcome": "DRY_RUN", "guard": g}
 
+        # A cartography submission is a different evaluation, not a harder speedup. Routing it
+        # through the speedup path is what the repository did until now: the overlay stripped the
+        # new generation, the submission changed nothing measurable in BG-1, and it came back
+        # `unresolved`. Declared payable, no path to payment.
+        if g["outcome"] == "CARTOGRAPHY":
+            return _evaluate_cartography(repo, num, wt, g, args)
+
         # Checked HERE rather than at startup. The guard runs first and costs nothing, so a pass
         # over a queue of instrument-only pull requests needs no checkpoint, no noise file and
         # no ledger -- and demanding them up front would stop an operator from running the
@@ -254,6 +261,69 @@ def evaluate(repo, pr, args) -> dict:
         subprocess.run(["git", "-C", str(ROOT), "worktree", "remove", "--force",
                         str(work / "src")], capture_output=True)
         shutil.rmtree(work, ignore_errors=True)
+
+
+def _evaluate_cartography(repo, num, wt, g, args) -> dict:
+    """Ask whether the cell is real and measurable, not whether it got faster."""
+    import re as _re
+    names = sorted({m.group(1) for m in
+                    (_re.match(r"eval/cells/([^/]+)/", p) for p in g["cartography"]) if m})
+    out = Path(tempfile.mkdtemp()) / "cartography.json"
+    cmd = [sys.executable, str(ROOT / "eval" / "cartography.py"), "check",
+           "--generation", names[0], "--base", args.base, "--repo", str(wt),
+           "--cells-root", str(wt / "eval" / "cells"), "--json", str(out)]
+    if args.weights and args.noise:
+        cmd += ["--measure", "--binary", str(wt / "build-cuda" / "burnisher"),
+                "--weights", args.weights, "--noise", args.noise]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=args.timeout)
+    print(r.stdout[-2000:])
+    result = json.loads(out.read_text()) if out.exists() else {"pass": False, "checks": []}
+    v = result.get("verdict") or {}
+
+    if v.get("outcome") == "OPENED":
+        label = f"{V.PREFIX}:cell-opened"
+    elif v.get("outcome") == "UNMEASURED":
+        label = f"{V.PREFIX}:eval-error"
+    else:
+        label = f"{V.PREFIX}:partial"
+    set_label(repo, num, label, dry_run=args.dry_run)
+    comment(repo, num, _cartography_note(names, result, v), dry_run=args.dry_run)
+    print(f"   {label}   {v.get('outcome')}")
+    return {"pr": num, "outcome": v.get("outcome"), "label": label, "generations": names}
+
+
+def _cartography_note(names, result, v) -> str:
+    rows = "\n".join(
+        f"- {'PASS' if c['pass'] else '**FAIL**'} — {c['check']}"
+        + (f"  \n  `{c['detail']}`" if c.get("detail") else "")
+        for c in result.get("checks", []))
+    measured = result.get("measured") or {}
+    table = ""
+    if measured:
+        table = "\n\n| cell | achieved | floor | room | resolvable |\n|:--|--:|--:|--:|:--:|\n" + \
+            "\n".join(f"| `{c}` | `{100 * m['achieved']:.1f}%` | `{m['floor_pct']:.3f}%` | "
+                       f"`{m['floors_of_room']:.0f} floors` | "
+                       f"{'yes' if m['resolvable'] else '**no**'} |"
+                       for c, m in sorted(measured.items()))
+    claimed = result.get("claimed_calibration") or {}
+    claim_note = ""
+    if claimed:
+        claim_note = (
+            "\n\nThis submission shipped a calibration of its own. It was read and **not "
+            "used** — every number above was measured here, by this evaluator, on this box. "
+            "That asymmetry is deliberate: you supply the cell definition and the oracle, the "
+            "evaluator supplies the measurement, so a favourable floor cannot be submitted.")
+    tail = ""
+    if v.get("unresolvable_cells"):
+        tail = ("\n\n**Some of these cells cannot resolve a contribution at their measured "
+                "floor, and that is published as a result rather than as a failure.** It is "
+                "worth more than a cell that looks open and is not — the alternative is "
+                "somebody spending a week inside a noise floor.")
+    return (f"### `{v.get('outcome', 'REJECTED')}` — cartography: {', '.join(names)}\n\n"
+            f"This submission opens a new cell rather than closing a gap in an existing one, so "
+            f"it is asked a different question: *is this cell real, and can anybody be credited "
+            f"on it?*\n\n{rows}{table}{claim_note}{tail}\n\n"
+            f"See `docs/CARTOGRAPHY.md` for what a cell has to come with.")
 
 
 def _skip_note(g) -> str:

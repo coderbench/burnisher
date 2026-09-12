@@ -13,6 +13,7 @@
   "python_tests": 122
  },
  "files": [
+  ".github/CODEOWNERS",
   ".github/PULL_REQUEST_TEMPLATE.md",
   ".github/workflows/ci.yml",
   ".github/workflows/instrument-guard.yml",

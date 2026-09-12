@@ -161,7 +161,7 @@ the guard distinguishes:
 
 | | |
 |:--|:--|
-| **adding** a new generation under `eval/cells/<new>/` | cartography. Allowed, and paid. |
+| **adding** a new generation under `eval/cells/<new>/` | cartography. Allowed, and paid — `burnish cartography check` is the gate, and it measures the cell itself rather than believing what was submitted. |
 | **modifying** a generation that already exists | blocked. Editing one silently re-scores history. |
 | **modifying** anything else in the instrument | blocked. |
 | **adding** a file elsewhere in the instrument | blocked — a second scorer beside the first is a modification wearing a hat. |

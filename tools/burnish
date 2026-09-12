@@ -17,6 +17,7 @@ noise -- pressing it smooth until the image emerges. This is the command that do
     burnish verdict                a receipt's payable outcome, and the label that carries it
     burnish audit                  re-derive a published verdict from its own measurements
     burnish receipt verify|show    check a receipt against itself and its generation
+    burnish cartography check      evaluate a submission that OPENS a cell
     burnish challenge              dispute a published result with your own measurement
     burnish ledger show|audit      the append-only history
 
@@ -266,6 +267,20 @@ def cmd_audit(args, rest):
     return A.main_with(argv)
 
 
+def cmd_cartography(args, rest):
+    """A submission that opens a cell is asked a different question than one that closes a gap."""
+    import cartography as CG
+    argv = [args.action, "--generation", args.generation, "--base", args.base]
+    for flag in ("repo", "json", "cells_root", "binary", "weights", "noise"):
+        val = getattr(args, flag, None)
+        if val:
+            argv += [f"--{flag.replace('_', '-')}", str(val)]
+    if args.measure:
+        argv.append("--measure")
+    sys.argv = ["cartography"] + argv
+    return CG.main()
+
+
 def cmd_challenge(args, rest):
     """Attach an independent re-measurement to a submission already in the ledger."""
     from burnscore import cells as C, challenge as CH, ledger as L
@@ -419,6 +434,21 @@ def build_parser():
     p.add_argument("--json")
     p.add_argument("--cells-root")
     p.set_defaults(fn=cmd_audit)
+
+    p = sub.add_parser("cartography",
+                       help="evaluate a submission that OPENS a cell rather than closing a gap")
+    p.add_argument("action", choices=["check"])
+    p.add_argument("--generation", required=True)
+    p.add_argument("--base", default="origin/main")
+    p.add_argument("--repo")
+    p.add_argument("--measure", action="store_true",
+                   help="gate and recalibrate the cell here [needs a GPU]")
+    p.add_argument("--binary")
+    p.add_argument("--weights")
+    p.add_argument("--noise")
+    p.add_argument("--json")
+    p.add_argument("--cells-root")
+    p.set_defaults(fn=cmd_cartography)
 
     p = sub.add_parser("challenge",
                        help="attach an independent re-measurement to a published result")
