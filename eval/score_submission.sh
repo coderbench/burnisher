@@ -33,7 +33,10 @@ set -euo pipefail
 
 BASE=""; SUB=""; IMPL_BASE="cuda"; IMPL_CAND=""; PR=""; LEDGER=""
 WEIGHTS="${BURNISH_WEIGHTS:-}"; NOISE="${BURNISH_NOISE:-}"
-GEN="BG-1"; REPEATS=5; GATE_REPEATS=2; DTYPE="fp32"; DEVICE="cuda"; OUT=""
+# Empty means "whatever the generation declares". The declared count is the sampling plan the
+# evaluation is defined by and the scorer enforces it as a minimum, so hardcoding a number here
+# would be a second opinion about a frozen parameter.
+GEN="BG-1"; REPEATS=""; GATE_REPEATS=2; DTYPE="fp32"; DEVICE="cuda"; OUT=""
 
 usage() {
     sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
@@ -134,10 +137,11 @@ BURNISH_ENTRY=gate "$RUN" "$BASE" "$SUB" -- \
     --dtype "$DTYPE" --noise "$NOISE" --reference "$REF" \
     --repeats "$GATE_REPEATS" --output "$OUT/gate-cand.json"
 
-say "3/4  paired interleaved bench, $REPEATS repeats, both arms"
+say "3/4  paired interleaved bench, ${REPEATS:-declared} repeats, both arms"
 BURNISH_ENTRY=bench "$RUN" "$BASE" "$SUB" -- \
     --binary "$BIN" --weights "$WEIGHTS" --device "$DEVICE" \
-    --impl-base "$IMPL_BASE" --impl-candidate "$IMPL_CAND" --repeats "$REPEATS" \
+    --impl-base "$IMPL_BASE" --impl-candidate "$IMPL_CAND" \
+    ${REPEATS:+--repeats "$REPEATS"} \
     --gate-result "$OUT/gate-cand.json" --gate-base-result "$OUT/gate-base.json" \
     --output "$OUT/raw.json"
 

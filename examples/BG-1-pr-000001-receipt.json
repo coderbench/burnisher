@@ -1,6 +1,6 @@
 {
  "benchmark_generation": "BG-1",
- "content_digest": "sha256:13e6b08a7d82b82201f42236a21c88fb471e5e96a551234df619a4f09f707436",
+ "content_digest": "sha256:4b7d06fa13f4f5dbc959ea2ef9be0beae2ad8dbb045ebc5785321601e6aede07",
  "correctness": "PASS",
  "coverage": {
   "_note": "A partial matrix credits nothing. Dropping the cell a change hurts is the cheapest way to raise a score, and a rule that stops a drop from PAYING removes the incentive rather than policing it.",
@@ -160,7 +160,7 @@
    }
   }
  },
- "generation_digest": "sha256:88144507ce9f850fb925bf5350303e066bcd106986c48fa2464ba24748875d39",
+ "generation_digest": "sha256:58fc52740e75b059798531b3cc40a8baf08491a25ec2c34bbdd3baf5d36c2aa3",
  "held_out_survived": true,
  "per_cell": {
   "dit-step/1024/bf16": {
@@ -385,5 +385,5 @@
  "status": "UNRESOLVED",
  "supersede_reason": null,
  "supersedes": [],
- "timestamp_utc": "2026-09-12T02:35:52.235034+00:00"
+ "timestamp_utc": "2026-09-12T05:33:47.394917+00:00"
 }

@@ -378,6 +378,31 @@ class TestComputeAndReceipt(unittest.TestCase):
             B.instrument_settings(blind)
         self.assertIn("calibrated", str(cm.exception))
 
+    def test_fewer_repeats_than_the_generation_declares_are_refused(self):
+        """`repeats` was in the frozen definition and enforced nowhere -- decoration.
+
+        A declared parameter nobody checks is worse than an undeclared one, because a reader
+        takes it for a guarantee. The runner's own `--repeats` flag decided the real number and
+        the generation's declaration had no effect on anything.
+
+        Enforced as a MINIMUM: more repeats is a better-sampled run of the same experiment and
+        there is no reason to refuse it. Fewer is a different experiment wearing this
+        generation's name -- and specifically, two repeats cannot support the paired bootstrap,
+        which resamples repeat indices with replacement and gets three distinct resamples out of
+        two indices.
+        """
+        self.assertEqual(self.gen.repeats, 3)
+        recs = fixtures.records(self.gen, speedups={"dit-step/1024/bf16": 1.15})
+
+        # Exactly what the generation declares: fine.
+        CP.compute(self.gen, [r for r in recs if r["repeat"] < 3])
+        # More than it declares: also fine, it is the same experiment sampled better.
+        CP.compute(self.gen, recs)
+        # Fewer: refused, and the message says the number and where it came from.
+        with self.assertRaises(CP.ComputeError) as cm:
+            CP.compute(self.gen, [r for r in recs if r["repeat"] < 2])
+        self.assertIn("declares 3", str(cm.exception))
+
     def test_a_real_speedup_scores_and_resolves(self):
         out, _ = self._score(speedups={"dit-step/1024/bf16": 1.15})
         cell = out["per_cell"]["dit-step/1024/bf16"]

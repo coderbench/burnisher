@@ -95,17 +95,70 @@ class TestNoPredictedFigureIsEverAGain(unittest.TestCase):
             R.verify_receipt(rec, self.gen)
         self.assertIn("arithmetic", str(cm.exception))
 
-    def test_the_screen_output_is_entirely_modelled(self):
+    def test_every_screen_figure_declares_a_basis_and_can_back_it_up(self):
+        """A modelled figure must never read as a measurement. The converse must also hold.
+
+        This asserted that EVERY basis in the screen was `model`, because the screen could not
+        measure anything -- there was no hardware. Three of its six questions are now answered
+        from the pinned part, and an assertion that the screen measures nothing would now force
+        those answers to be mislabelled as predictions, which is the same failure pointing the
+        other way.
+
+        So the invariant is the one that actually matters: every basis is one of two known
+        values, the ceilings stay modelled, and anything claiming to be a measurement says
+        which device produced it. A `basis: measured` with no device behind it is a prediction
+        that has been relabelled.
+        """
         import subprocess
         with tempfile.NamedTemporaryFile(suffix=".json") as f:
             subprocess.run([sys.executable, str(ROOT / "eval" / "screen.py"),
                             "--json", f.name], check=True, capture_output=True)
             doc = json.loads(Path(f.name).read_text())
+        # The top-level basis describes the stage ceilings, which are arithmetic and stay so.
         self.assertEqual(doc["basis"], "model")
         for path, key, value in walk(doc):
             if key == "basis":
-                self.assertEqual(value, "model", f"{path} claims basis {value!r}; the screen "
-                                                 f"runs no model and measures nothing")
+                self.assertIn(value, ("model", "measured"),
+                              f"{path} claims basis {value!r}, which is neither")
+        # Anything measured names its hardware.
+        for cand in doc["results"].values():
+            for qkey in ("dominance", "regeneration", "reach", "score_cost",
+                         "resolution_gate", "determinism"):
+                q = cand.get(qkey)
+                if isinstance(q, dict) and q.get("basis") == "measured":
+                    self.assertTrue(q.get("device"),
+                                    f"{qkey} claims to be measured and does not say on what. "
+                                    f"A measurement with no device behind it is a prediction "
+                                    f"wearing a better label.")
+        # And every stage ceiling stays arithmetic -- those are bounds, never observations.
+        for cand in doc["results"].values():
+            for row in cand.get("stage_table") or []:
+                self.assertIn("ceiling_seconds", row)
+
+    def test_the_cost_question_is_answered_from_measurement_now_that_one_exists(self):
+        """The screen question that was wrong by 12x, pinned so it cannot quietly revert.
+
+        SCORE_COST asks whether the subnet can afford to score a submission. It is the one
+        question in the screen where a model is not an acceptable answer -- it was modelled at
+        2.5 GPU-minutes assuming a first implementation reaches 35% of its roofline, the
+        implementation landed at 1.5%, and a receipt measures about half an hour.
+        """
+        import subprocess
+        with tempfile.NamedTemporaryFile(suffix=".json") as f:
+            subprocess.run([sys.executable, str(ROOT / "eval" / "screen.py"),
+                            "--json", f.name], check=True, capture_output=True)
+            doc = json.loads(Path(f.name).read_text())
+        pinned = doc["results"]["pixart-sigma-xl2-1024"]
+        sc = pinned["score_cost"]
+        self.assertEqual(sc["basis"], "measured",
+                         "the pinned candidate has been calibrated, so what a receipt costs is "
+                         "a measurable quantity and must not be answered by assumption")
+        self.assertGreater(sc["predicted_receipt_seconds"], 0)
+        # Unmeasured candidates keep the modelled answer -- one model's cost says nothing about
+        # another's, and attaching it would be a measurement of one thing published as another.
+        other = doc["results"]["sdxl-base-1.0"]
+        if other.get("supported"):
+            self.assertEqual(other["score_cost"]["basis"], "model")
 
 
 class TestNoLetterGrades(unittest.TestCase):

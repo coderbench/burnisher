@@ -115,7 +115,7 @@ def q1_dominance(stage_rows, total_s) -> dict:
     }
 
 
-def q2_resolution(stage_rows, assumed_achieved=ASSUMED_ACHIEVED) -> dict:
+def q2_resolution(stage_rows, assumed_achieved=ASSUMED_ACHIEVED, measured=None) -> dict:
     """Is the room in a cell big enough to be measured against that cell's own noise?
 
     The room is `1 - achieved`, and `achieved` needs a measurement. So this question cannot be
@@ -123,6 +123,33 @@ def q2_resolution(stage_rows, assumed_achieved=ASSUMED_ACHIEVED) -> dict:
     the noise floor that stage would have to come in under for its room to be resolvable. A
     calibration run then either clears that bar or does not, and either way nobody has guessed.
     """
+    if measured:
+        # Settled. Every cell has a measured achieved fraction and a measured floor, so the
+        # question this block used to SIZE -- "what floor would a cell need for its room to be
+        # resolvable?" -- is answered by division instead of assumption.
+        # Through burnscore.floor.resolution_gate, which is where this question is defined.
+        # Computing it here from achieved and floor_pct would be a SECOND definition of
+        # "floors of room" -- and the first draft of this block was one, giving 22x where the
+        # calibration's own record says 116x for the same cell. Two formulas for one quantity
+        # is the drift this repository generates documents to avoid.
+        from burnscore.floor import resolution_gate
+        rows, worst = [], None
+        for cid, c in measured["cells"].items():
+            g = resolution_gate(c["floor_pct"], c["achieved"], ratio=RESOLUTION_RATIO)
+            worst = g["floors_of_room"] if worst is None else min(worst, g["floors_of_room"])
+            rows.append({"cell": cid, "floor_decided_by": c.get("floor_decided_by"), **g})
+        return {
+            "question": "RESOLUTION", "pass": all(r["resolvable"] for r in rows),
+            "ratio_required": RESOLUTION_RATIO, "per_cell": rows, "basis": "measured",
+            "device": measured.get("device"),
+            "why": (f"every cell's room clears its own measured floor by at least "
+                    f"{worst:.0f}x, against a {RESOLUTION_RATIO:.0f}x bar"),
+            "_trap": ("Resolvable is not the same as worth doing. These cells clear their "
+                      "floors by four orders of magnitude because the runtime is slow, not "
+                      "because the instrument is good. The ratio falls as the gap closes, and "
+                      "an axis whose spread sits inside its own noise is open, not solved."),
+        }
+
     rows = []
     for r in stage_rows:
         room = 1.0 - assumed_achieved
@@ -224,7 +251,38 @@ def q4_reach(stages, top_fraction=0.90) -> dict:
     }
 
 
-def q5_determinism() -> dict:
+def _committed_determinism_evidence():
+    """Whether a real run on the pinned part is committed showing byte-identical replays.
+
+    The evidence is the raw measurements in `examples/`, not a claim in a document. A gate run
+    records `determinism` alongside the digests it compared, and that file is committed with the
+    receipt derived from it -- so this question is answered by the same artifact anyone else can
+    re-score, rather than by a sentence somebody remembered to update.
+    """
+    raw = ROOT / "examples" / "BG-1-pr-000001-raw.json"
+    if not raw.exists():
+        return None
+    doc = json.loads(raw.read_text())
+    if doc.get("determinism") is not True:
+        return None
+    return {"device": (doc.get("provenance") or {}).get("device", {}).get("name"),
+            "impl": (doc.get("provenance") or {}).get("impl_base"),
+            "source": "examples/BG-1-pr-000001-raw.json"}
+
+
+def q5_determinism(evidence=None) -> dict:
+    if evidence:
+        return {
+            "question": "DETERMINISM", "pass": True, "basis": "measured",
+            "device": evidence.get("device"), "evidence": evidence["source"],
+            "why": (f"replays of the same build on {evidence.get('device')} were "
+                    f"byte-identical, recorded in {evidence['source']}"),
+            "_trap": ("Determinism is a property of a BUILD, not of the repository. It is "
+                      "re-checked at the top of every gate for exactly that reason, and a "
+                      "submission that loses it is rejected before anything is timed -- "
+                      "nothing downstream of a build that cannot reproduce itself means "
+                      "anything."),
+        }
     return {
         "question": "DETERMINISM", "pass": None,
         "why": ("UNANSWERABLE FROM A CONFIG FILE, and it is the gate everything else depends "
@@ -244,14 +302,101 @@ def q5_determinism() -> dict:
     }
 
 
-def q6_score_cost(stage_rows, generation, assumed_achieved=ASSUMED_ACHIEVED) -> dict:
-    per_generation_s = sum(r["seconds"] for r in stage_rows) / assumed_achieved
+def _measured_calibration():
+    """Per-cell measured seconds from the pinned part, if this candidate has been calibrated.
+
+    Returns None when nothing has been measured, which is the state every candidate but the
+    pinned one is in and the state the pinned one was in until hardware arrived.
+    """
+    ref = ROOT / "eval" / "cells" / "BG-1" / "reference.json"
+    if not ref.exists():
+        return None
+    doc = json.loads(ref.read_text())
+    cells = {k: v for k, v in (doc.get("cells") or {}).items()
+             if v.get("measured_seconds") and v.get("basis") == "measured"}
+    if not cells:
+        return None
+    gen = json.loads((ROOT / "eval" / "cells" / "BG-1" / "generation.json").read_text())
+    return {"cells": cells, "calibrated_with": doc.get("calibrated_with") or {},
+            "device": (doc.get("device_probe") or {}).get("name"),
+            "steps": gen["model"].get("steps") or gen.get("steps") or 20,
+            # Which model these seconds belong to. A cost measured on PixArt says nothing about
+            # what scoring FLUX would cost, and attaching it to the wrong candidate would be a
+            # measurement of one thing published as a measurement of another.
+            "repo": gen["model"].get("repo")}
+
+
+# What one record costs the evaluator BEYOND the arithmetic it measures: process spawn plus the
+# checkpoint map. Measured, not assumed -- 42 records of a real scoring run averaged 11 s each,
+# which was 36% of that run's bench stage. A cost model that counted only kernel time would say
+# a cheap cell is free, and the cheapest cell here (t5-encode, 0.13 s of work) actually costs
+# about eleven seconds a record.
+MEASURED_RECORD_OVERHEAD_S = 11.0
+
+
+def q6_score_cost(stage_rows, generation, assumed_achieved=ASSUMED_ACHIEVED,
+                  measured=None) -> dict:
+    """What one receipt costs in GPU time, and whether that is affordable per submission.
+
+    This question is different in kind from the other five. They ask whether a surface is worth
+    opening, and a modelled answer is the right tool -- arithmetic is how you decide where to
+    look before you have anything to measure. This one asks whether the SUBNET can afford to
+    run, and it is answered in wall clock on real hardware or it is not answered.
+
+    It was modelled, and the model was wrong by a factor of twelve. It assumed a first
+    implementation reaches 35% of its roofline and predicted 2.5 GPU-minutes per receipt. The
+    implementation landed at 1.5%, and a receipt takes about half an hour. The assumption was
+    labelled, published and visible in the output the whole time, which is the part worth
+    keeping in mind: a clearly-labelled prediction is still a prediction, and the label does not
+    make the schedule it implies come true.
+    """
     cells = generation["cells"]
     repeats = generation["repeats"]
     arms = 2
+    gate_gens = generation["gate_generations"]
+
+    if measured:
+        cal = measured["cells"]
+        warmup = int(measured["calibrated_with"].get("warmup", 2))
+        iters = int(measured["calibrated_with"].get("iters", 5))
+        invocations = warmup + iters
+        # One record = one process: (warmup + iters) invocations plus the load overhead.
+        record_s = {c: v["measured_seconds"] * invocations + MEASURED_RECORD_OVERHEAD_S
+                    for c, v in cal.items()}
+        # The held-out shape is run too, at two paired repeats per arm, and it is not free.
+        held_repeats = max(2, repeats // 2)
+        bench = sum(r * arms * (repeats + held_repeats) for r in record_s.values())
+        # A gate generation is the whole pipeline once: every DiT step, plus the encoder and
+        # the decoder. Read the step count from the cell ids' own generation definition.
+        steps = int(measured.get("steps") or 20)
+        per_gen = sum(v["measured_seconds"] * (steps if "dit-step" in c else 1)
+                      for c, v in cal.items()) + MEASURED_RECORD_OVERHEAD_S
+        gate = gate_gens * per_gen
+        total = bench + gate
+        return {
+            "question": "SCORE_COST", "pass": total <= SCORE_COST_BUDGET_S,
+            "budget_seconds": SCORE_COST_BUDGET_S,
+            "predicted_seconds_per_generation": per_gen,
+            "predicted_receipt_seconds": total,
+            "breakdown": {"cells": len(cal), "repeats": repeats, "arms": arms,
+                          "held_out_repeats": held_repeats,
+                          "invocations_per_record": invocations,
+                          "record_overhead_seconds": MEASURED_RECORD_OVERHEAD_S,
+                          "correctness_gate_generations": gate_gens,
+                          "bench_seconds": bench, "gate_seconds": gate},
+            "basis": "measured", "device": measured.get("device"),
+            "why": (f"a full receipt MEASURES {total / 60:.0f} GPU-minutes against a "
+                    f"{SCORE_COST_BUDGET_S / 60:.0f}-minute budget"),
+            "_trap": ("This is the one screen question a model cannot answer. It scales with how "
+                      "fast the runtime actually is, and v0 ships deliberately slow -- so the "
+                      "cost of scoring falls as contributors do the work the scoring pays for. "
+                      "It is the only line in this document that gets better on its own."),
+        }
+
+    per_generation_s = sum(r["seconds"] for r in stage_rows) / assumed_achieved
     prompts = generation["prompts_per_cell"]
     total = per_generation_s * cells * repeats * arms * prompts
-    gate = generation["gate_generations"] * per_generation_s
+    gate = gate_gens * per_generation_s
     return {
         "question": "SCORE_COST", "pass": (total + gate) <= SCORE_COST_BUDGET_S,
         "budget_seconds": SCORE_COST_BUDGET_S,
@@ -259,14 +404,16 @@ def q6_score_cost(stage_rows, generation, assumed_achieved=ASSUMED_ACHIEVED) -> 
         "predicted_receipt_seconds": total + gate,
         "breakdown": {"cells": cells, "repeats": repeats, "arms": arms,
                       "prompts_per_cell": prompts,
-                      "correctness_gate_generations": generation["gate_generations"],
+                      "correctness_gate_generations": gate_gens,
                       "bench_seconds": total, "gate_seconds": gate},
         "basis": "model", "assumed_achieved": assumed_achieved,
-        "why": (f"a full receipt is predicted at {(total + gate) / 60:.1f} GPU-minutes against a "
-                f"{SCORE_COST_BUDGET_S / 60:.0f}-minute budget"),
-        "_trap": ("Scales inversely with `assumed_achieved`. If the pipeline lands at half the "
-                  "assumed fraction this doubles, which is a reason to keep the cell count "
-                  "honest rather than a reason to adjust the constant."),
+        "why": (f"a full receipt is PREDICTED at {(total + gate) / 60:.1f} GPU-minutes against a "
+                f"{SCORE_COST_BUDGET_S / 60:.0f}-minute budget, assuming a first implementation "
+                f"reaches {assumed_achieved:.0%} of its roofline"),
+        "_trap": ("Scales inversely with `assumed_achieved`, and that constant is a guess. On "
+                  "the pinned candidate the guess was 35% and the answer was 1.5%, so this "
+                  "prediction came out twelve times cheaper than the measurement. Treat it as "
+                  "an ordering between candidates, never as a schedule."),
     }
 
 
@@ -296,12 +443,22 @@ def screen_candidate(key, candidate, device, axes, generation, *, resolution, st
     stages = pixart_stages(candidate, resolution=resolution, steps=steps)
     sh = shares(stages, device)
     rows = sh["rows"]
+    # Looked up once, before any question uses it. Only the PINNED candidate has been measured;
+    # screening another against this one's calibration would attribute one model's cost and
+    # noise to a different model entirely.
+    cal = _measured_calibration()
+    is_pinned = bool(cal and candidate.get("repo") == cal.get("repo"))
+
     result["dominance"] = q1_dominance(rows, sh["total_seconds"])
-    result["resolution_gate"] = q2_resolution(rows)
+    result["resolution_gate"] = q2_resolution(rows, measured=cal if is_pinned else None)
     result["regeneration"] = q3_regeneration(candidate, axes)
     result["reach"] = q4_reach(stages)
-    result["determinism"] = q5_determinism()
-    result["score_cost"] = q6_score_cost(rows, generation)
+    result["determinism"] = q5_determinism(
+        _committed_determinism_evidence() if is_pinned else None)
+    # Only the PINNED candidate has been measured. Screening another one against this one's
+    # calibration would attribute its cost to a different model entirely, so the measurement is
+    # passed in only where it belongs and every other candidate keeps the modelled answer.
+    result["score_cost"] = q6_score_cost(rows, generation, measured=cal if is_pinned else None)
     result["residency"] = resident_bytes(stages)
     result["stage_table"] = [
         {"stage": r["stage"], "invocations": r["invocations"], "share": r["share"],
@@ -342,10 +499,17 @@ def render_markdown(out, cands, axes):
     pinned = out["results"]["pixart-sigma-xl2-1024"]
     dev = out["device"]
     w = [f"# Which model v0 pins, and why", "",
-         "Generated by `eval/screen.py --markdown`. Every figure is computed from `configs/` by",
-         "the same geometry the scorer uses. **Nothing here is a measurement** — every duration",
-         "is an arithmetic ceiling, `basis: model`, and the two questions arithmetic cannot reach",
-         "are marked OPEN rather than answered.", "",
+         "Generated by `eval/screen.py --markdown`. **Every ceiling here is `basis: model`** —",
+         "arithmetic from a config file and a device peak, never a measurement. The three",
+         "questions arithmetic can answer are answered that way.",
+         "",
+         "The other three are not, and two of them used to be printed as OPEN no matter what",
+         "they contained. Where the pinned candidate has been measured on the pinned part —",
+         "resolution, determinism, and what a receipt costs — the answer below is `basis:",
+         "measured` and names the artifact it came from. The difference is not cosmetic: the",
+         "cost question was modelled at 2.5 GPU-minutes per receipt on an assumption that a",
+         "first implementation reaches 35% of its roofline. It reached 1.5%, and a receipt",
+         "measures about half an hour.", "",
          f"Screened on **{pinned['device']}** at {out['resolution']}px, {out['steps']} steps.",
          "", "## The answer", "",
          f"**`{pinned['repo']}`** — PixArt-Sigma XL-2 at 1024px, 20 steps, classifier-free",
@@ -354,7 +518,7 @@ def render_markdown(out, cands, axes):
          "SD-family VAE, which means the backlog the repository was commissioned around — DiT",
          "attention at 4k tokens, a text encoder larger than the DiT, VAE decode, AdaLN fusion,",
          "weight formats, shape specialisation — all have a home in it. It is ungated and",
-         "redistributable. And it is small enough that a receipt costs minutes.", "",
+         "redistributable.", "",
          "## Candidates, and why each was ruled in or out", "",
          "| candidate | licence | gated | outcome |", "|:--|:--|:--:|:--|"]
     for key, r in out["results"].items():
@@ -393,46 +557,83 @@ def render_markdown(out, cands, axes):
           "of the clock. A distilled model reopens both cells, which is the REGENERATION property",
           "the screen is looking for.", "",
           "## The six questions", ""]
-    for key in ("dominance", "regeneration", "reach", "score_cost"):
+    for key in ("dominance", "regeneration", "reach", "score_cost",
+                "resolution_gate", "determinism"):
         b = pinned[key]
         mark = {True: "PASS", False: "FAIL", None: "OPEN"}[b["pass"]]
-        w += [f"### {b['question']} — {mark}", "", b["why"], ""]
+        w += [f"### {b['question']} — {mark}", ""]
+        w += [f"*basis: {b.get('basis', 'model')}"
+              + (f", measured on {b['device']}*" if b.get("device") else "*"), ""]
+        w += [b["why"], ""]
+        if b["pass"] is None and b.get("settled_by"):
+            w += [f"Settled by: `{b['settled_by']}`", ""]
+        if b.get("evidence"):
+            w += [f"Evidence: `{b['evidence']}` — the raw measurements, committed, so this can "
+                  f"be re-checked rather than taken on trust.", ""]
         if b.get("_trap"):
             w += [f"> **Trap.** {b['_trap']}", ""]
-    for key in ("resolution_gate", "determinism"):
-        b = pinned[key]
-        w += [f"### {b['question']} — OPEN", "", b["why"], "",
-              f"Settled by: `{b['settled_by']}`", ""]
-        if key == "determinism":
+        if key == "determinism" and b.get("known_risks_for_this_workload"):
             w += ["Known risks for this workload, in the order worth checking:", ""]
             w += [f"- {r}" for r in b["known_risks_for_this_workload"]]
             w += [""]
     sc = pinned["score_cost"]
+    b = sc["breakdown"]
+    measured_cost = sc.get("basis") == "measured"
+    verb = "measured" if measured_cost else "predicted"
     w += ["## What a receipt costs", "",
           f"| term | value |", "|:--|--:|",
-          f"| predicted seconds per generation | {sc['predicted_seconds_per_generation']:.2f} s |",
-          f"| cells x repeats x arms x prompts | {sc['breakdown']['cells']} x "
-          f"{sc['breakdown']['repeats']} x {sc['breakdown']['arms']} x "
-          f"{sc['breakdown']['prompts_per_cell']} |",
-          f"| correctness gate generations | {sc['breakdown']['correctness_gate_generations']} |",
-          f"| **predicted total per receipt** | "
-          f"**{sc['predicted_receipt_seconds'] / 60:.1f} GPU-minutes** |",
-          f"| budget | {sc['budget_seconds'] / 60:.0f} minutes |", "",
-          f"Assumes a first implementation reaches **{sc['assumed_achieved']:.0%}** of the",
-          "arithmetic ceiling. That constant is a guess, it is labelled a guess in the code, and",
-          "every number in this section scales inversely with it. `burnish bench` replaces it with",
-          "the measured figure the first time the pipeline runs.", "",
-          "## Regeneration: how much standing work the axes hold", ""]
+          f"| {verb} seconds per gate generation | "
+          f"{sc['predicted_seconds_per_generation']:.1f} s |"]
+    if measured_cost:
+        w += [f"| cells x repeats x arms | {b['cells']} x {b['repeats']} x {b['arms']} "
+              f"(+{b['held_out_repeats']} held-out repeats per arm) |",
+              f"| invocations per record | {b['invocations_per_record']} "
+              f"(the counts the noise floors were calibrated with) |",
+              f"| per-record overhead | {b['record_overhead_seconds']:.0f} s "
+              f"(process start and the 21.8 GB checkpoint map) |"]
+    else:
+        w += [f"| cells x repeats x arms x prompts | {b['cells']} x {b['repeats']} x "
+              f"{b['arms']} x {b['prompts_per_cell']} |"]
+    w += [f"| correctness gate generations | {b['correctness_gate_generations']} |",
+          f"| bench | {b['bench_seconds'] / 60:.0f} min |",
+          f"| gate | {b['gate_seconds'] / 60:.0f} min |",
+          f"| **{verb} total per receipt** | "
+          f"**{sc['predicted_receipt_seconds'] / 60:.0f} GPU-minutes** |",
+          f"| budget | {sc['budget_seconds'] / 60:.0f} minutes |", ""]
+    if measured_cost:
+        w += ["**This is the one question in the screen that a model got badly wrong.** It was",
+              "answered at 2.5 GPU-minutes on an assumption that a first implementation reaches",
+              "35% of its roofline. The implementation landed at 1.5%, and the real figure is",
+              "twelve times the prediction — over budget rather than comfortably inside it.",
+              "",
+              "The assumption was labelled, published, and visible in this document the whole",
+              "time, which is the part worth keeping: a clearly-marked prediction is still a",
+              "prediction, and marking it does not make the schedule it implies come true.",
+              "",
+              "It is also the only line here that improves on its own. The cost of scoring is",
+              "proportional to how slow the runtime is, so every contribution the benchmark pays",
+              "for makes the benchmark cheaper to run.", ""]
+    else:
+        w += [f"Assumes a first implementation reaches **{sc['assumed_achieved']:.0%}** of the",
+              "arithmetic ceiling. That constant is a guess, it is labelled a guess in the code,",
+              "and every number in this section scales inversely with it. On the pinned",
+              "candidate the guess was 35% and the measured answer was 1.5%.", ""]
+    w += ["## Regeneration: how much standing work the axes hold", ""]
     reg = pinned["regeneration"]
     w += [f"- {len(reg['axes']['resolutions'])} resolutions x {len(reg['axes']['dtypes'])} dtypes "
           f"x {len(reg['axes']['stages'])} stages = **{reg['cells_from_declared_axes']} cells**",
           "- DiT token counts across those resolutions: " +
           ", ".join(f"{k}px → {v}" for k, v in sorted(reg["dit_tokens_per_resolution"].items())),
           "", reg["_why_this_matters"], "",
-          "## What this screen could not answer", "",
-          "Two of the six questions need hardware, and this page says OPEN rather than guessing.",
-          "That is the entire discipline: a screen that printed a confident answer to a question",
-          "it cannot reach would be worse than no screen, because somebody would act on it.", "",
+          "## What this screen could not answer from arithmetic", "",
+          "Three of the six questions need hardware. They were printed as OPEN rather than",
+          "guessed at, which is the discipline: a screen that printed a confident answer to a",
+          "question it cannot reach is worse than no screen, because somebody acts on it.",
+          "",
+          "All three have since been measured on the pinned part, and the answers are above with",
+          "`basis: measured` and the artifact each came from. One of them — what a receipt costs",
+          "— came back over budget, and it had a modelled answer that said comfortably inside.",
+          "",
           "See `docs/STATUS.md` for the full list of what has and has not been measured.", ""]
     return "\n".join(w)
 
@@ -474,7 +675,8 @@ def main():
         out["results"][k] = r
 
     print(f"burnisher screen -- {device.get('name')}, {args.resolution}px, {args.steps} steps")
-    print(f"basis: model (arithmetic). No measurement appears below.\n")
+    print("basis: ceilings are model (arithmetic); questions arithmetic cannot reach are "
+          "answered\n       from measurement where the pinned part has been measured.\n")
     for k, r in out["results"].items():
         acc = r["access"]
         mark = "PASS" if acc["pass"] else "FAIL"
@@ -486,13 +688,15 @@ def main():
             print()
             continue
         print(_fmt_table(r))
-        for q in ("dominance", "regeneration", "reach", "score_cost"):
+        # All six printed the same way. Two of them used to be hardcoded as OPEN regardless of
+        # what they contained, so they went on reporting "settled by `burnish calibrate`" after
+        # `burnish calibrate` had settled them.
+        for q in ("dominance", "regeneration", "reach", "score_cost",
+                  "resolution_gate", "determinism"):
             b = r[q]
             m = {True: "PASS", False: "FAIL", None: "OPEN"}[b["pass"]]
-            print(f"       [{m}] {b['question']}: {b['why']}")
-        for q in ("resolution_gate", "determinism"):
-            b = r[q]
-            print(f"       [OPEN] {b['question']}: settled by `{b['settled_by']}`")
+            why = b["why"] if b["pass"] is not None else f"settled by `{b['settled_by']}`"
+            print(f"       [{m}] {b['question']}: {why}")
         print()
 
     if args.json:

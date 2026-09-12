@@ -90,9 +90,22 @@ def compute(generation, records, *, held_out_records=None, allow_partial=False,
                  f"{sorted(cand)}. Repeat k of each arm is ONE interleaved measurement; an arm "
                  f"with extra repeats is not better sampled, it is unpaired, and clocks cannot "
                  f"be pinned in a container so an unpaired delta means nothing.")
-        _require(len(shared) >= 2,
-                 f"{cell_id}: {len(shared)} paired repeat(s). One pair carries no information "
-                 f"about spread and would qualify on a quiet afternoon.")
+        # The generation DECLARES its sampling plan, and until this check existed nothing
+        # enforced it: `repeats` sat in the frozen definition as decoration while the runner's
+        # own flag decided the real number. A declared parameter nobody checks is worse than an
+        # undeclared one, because it reads as a guarantee.
+        #
+        # Enforced as a minimum rather than an exact count: more repeats is a better-sampled run
+        # of the same experiment and there is no reason to refuse it. Fewer is a different
+        # experiment wearing this generation's name.
+        want = max(2, int(generation.repeats or 2))
+        _require(len(shared) >= want,
+                 f"{cell_id}: {len(shared)} paired repeat(s), but {generation.name} declares "
+                 f"{want}. That number is part of the frozen definition because it decides what "
+                 f"resolves: the paired bootstrap resamples repeat INDICES, and two of them "
+                 f"admit three distinct resamples, so an interval over them is the larger and "
+                 f"smaller of two numbers wearing a confidence level. Run more repeats, or "
+                 f"score against a generation that declares fewer.")
 
         b_times, c_times = [], []
         for k in shared:

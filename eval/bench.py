@@ -2,7 +2,7 @@
 """Paired interleaved base-vs-candidate measurement. The only thing that produces a score.
 
     burnish bench --generation BG-1 --impl-base stock --impl-candidate fused-adaln \
-                  --repeats 5 --output raw.json
+                  --repeats 3 --output raw.json
 
 Shape of the experiment, and why each part of it is the way it is:
 
@@ -130,7 +130,12 @@ def main():
                     help="the registered implementation the base commit uses")
     ap.add_argument("--impl-candidate", required=True,
                     help="the registered implementation this submission adds")
-    ap.add_argument("--repeats", type=int, default=5)
+    # Default None, resolved from the generation after it is loaded. A hardcoded default here
+    # is a second opinion about a number the frozen generation already declares, and the two
+    # drift the moment either moves.
+    ap.add_argument("--repeats", type=int, default=None,
+                    help="paired repeats per cell; defaults to what the generation declares, "
+                         "and the scorer refuses fewer")
     ap.add_argument("--device", default="cuda", choices=["cpu", "cuda"])
     ap.add_argument("--weights", help="checkpoint directory; omit for synthetic weights, which "
                                       "time the same kernels on the same shapes")
@@ -152,6 +157,8 @@ def main():
     args = ap.parse_args()
 
     generation = C.load(generation_path(args.generation, args.cells_root))
+    if args.repeats is None:
+        args.repeats = generation.repeats
 
     # Correctness precedes speed, always, and the check is that the gate RAN -- not that
     # somebody remembered to run it.

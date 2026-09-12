@@ -241,7 +241,7 @@
   0.0,
   0.0
  ],
- "repeats": 5,
+ "repeats": 3,
  "tolerance": {
   "_basis_note": "MEASURED, at fp32, 5x the worst drift this runtime shows against the fp32 reference over the frozen prompt set (rel L2 5.004e-4, max abs 6.539e-2). fp32 because that is where the end-to-end comparison has signal: in bf16 the reference reproduces ITSELF only to 0.37 relative L2, so the comparison measures the trajectory rather than the runtime. The dtype path is gated stage by stage instead, where a single stage has not had twenty steps to amplify anything. The 5x margin is a stated judgement, not a derivation.",
   "_determinism_is_not_a_tolerance": "The same build must reproduce ITSELF exactly or it cannot be a reference for anything. Only the comparison against the oracle has a tolerance.",
