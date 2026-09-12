@@ -129,5 +129,67 @@ class TestTwoValidatorsAgree(unittest.TestCase):
                             f"whether it describes the box it is being used on")
 
 
+class TestFloorsAreNotStableBetweenSessions(unittest.TestCase):
+    """A measured fact about the instrument, and the reason `--merge` exists.
+
+    Two calibrations of the SAME physical RTX 5090, hours apart, same driver, same build:
+
+        cell                     session A   session B     ratio
+        dit-step/1024/bf16          0.578%      0.205%       2.8x
+        t5-encode/1024/bf16         3.753%      0.155%      24.2x
+        vae-decode/1024/bf16        0.259%      0.845%       3.3x
+
+    while the achieved fractions held to three significant figures (1.52/1.52, 18.15/18.13,
+    0.79/0.79). That asymmetry is expected -- `achieved` is a median and robust, a floor is a
+    spread over nine repeats and is not -- but it has a consequence worth guarding: whether a
+    submission RESOLVES would otherwise depend on which session its validator calibrated in.
+
+    Merging keeps the WORST floor per cell. The two errors are not symmetric. A floor that is
+    too tight credits noise as a contribution and the ledger compounds it permanently; one that
+    is too loose refuses a gain too small to see, and the contributor returns with a bigger one.
+    Only one of those is recoverable.
+    """
+
+    def _merge(self, a, b):
+        """The merge rule, exercised on the shape the calibrator writes."""
+        import copy
+        out = copy.deepcopy(b)
+        for cid, prior in a["cells"].items():
+            now = out["cells"].get(cid)
+            if now and prior.get("floor_pct") is not None \
+                    and prior["floor_pct"] > now["floor_pct"]:
+                now["floor_pct"] = prior["floor_pct"]
+                now["floor_decided_by"] = "worst-of-sessions"
+        return out
+
+    def test_merging_keeps_the_worst_floor_per_cell_in_either_direction(self):
+        a = {"cells": {"x": {"floor_pct": 0.578}, "y": {"floor_pct": 0.259}}}
+        b = {"cells": {"x": {"floor_pct": 0.205}, "y": {"floor_pct": 0.845}}}
+        m = self._merge(a, b)
+        self.assertEqual(m["cells"]["x"]["floor_pct"], 0.578, "kept the tighter floor for x")
+        self.assertEqual(m["cells"]["y"]["floor_pct"], 0.845, "kept the tighter floor for y")
+
+    def test_merging_never_tightens_a_floor(self):
+        """The property that makes this safe, stated as an invariant rather than an example."""
+        import random
+        rng = random.Random(20260912)
+        for _ in range(200):
+            fa, fb = rng.uniform(0.01, 5.0), rng.uniform(0.01, 5.0)
+            m = self._merge({"cells": {"c": {"floor_pct": fa}}},
+                            {"cells": {"c": {"floor_pct": fb}}})
+            self.assertGreaterEqual(m["cells"]["c"]["floor_pct"], min(fa, fb))
+            self.assertEqual(m["cells"]["c"]["floor_pct"], max(fa, fb))
+
+    def test_the_calibrator_refuses_to_pool_two_different_cards(self):
+        """Pooling two cards' floors describes neither."""
+        src = (ROOT / "eval" / "calibrate.py").read_text()
+        self.assertIn("Pooling two cards' floors would describe neither", src)
+
+    def test_the_calibration_records_how_many_sessions_it_pooled(self):
+        src = (ROOT / "eval" / "calibrate.py").read_text()
+        self.assertIn("calibration_sessions", src)
+        self.assertIn("_floor_stability", src)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

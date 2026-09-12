@@ -69,6 +69,14 @@ def main():
                     help="update the committed reference.json in place. This is the reference "
                          "device's calibration and part of the instrument -- if you are a "
                          "validator calibrating your own box, use --output.")
+    ap.add_argument("--merge", metavar="FILE",
+                    help="fold this calibration into an earlier one, keeping the WORST floor "
+                         "per cell. A floor is a spread statistic and a spread estimated from "
+                         "nine repeats is not a stable number -- measured twice on one card, "
+                         "hours apart, these floors moved by up to 24x while the achieved "
+                         "fractions held to three figures. Taking the worst can only refuse a "
+                         "real gain that was too small to see; taking the best would credit "
+                         "noise, and only one of those two errors is recoverable.")
     ap.add_argument("--output",
                     help="write this box's calibration here, to pass to `burnish score "
                          "--calibration`. Keep it beside your ledger: it describes YOUR card, "
@@ -140,8 +148,46 @@ def main():
             if not gate["resolvable"]:
                 print(f"       {gate['verdict']}")
 
+    sessions = 1
+    if args.merge:
+        prev = json.loads(Path(args.merge).read_text())
+        prev_probe = (prev.get("device_probe") or {})
+        if prev_probe.get("uuid") and fp.get("uuid") and prev_probe["uuid"] != fp["uuid"]:
+            print(f"!! --merge names a calibration of {prev_probe['uuid']} and this box is "
+                  f"{fp['uuid']}.\n   Pooling two cards' floors would describe neither. "
+                  f"Calibrate each box separately.", file=sys.stderr)
+            return 2
+        sessions = int(prev.get("calibration_sessions", 1)) + 1
+        for cid, prior in (prev.get("cells") or {}).items():
+            now = out_cells.get(cid)
+            if not now or prior.get("floor_pct") is None:
+                continue
+            if prior["floor_pct"] > now["floor_pct"]:
+                # The WORST floor across sessions, deliberately. A floor is a spread statistic,
+                # and one estimated from nine repeats carries large uncertainty -- measured
+                # twice on one card, hours apart, these moved by up to 24x while the achieved
+                # fractions held to three figures. Which session a validator happened to
+                # calibrate in would otherwise decide what counts as resolved.
+                #
+                # Worst rather than mean because the two errors are not symmetric: too tight
+                # credits noise as a contribution and the ledger compounds it permanently; too
+                # loose refuses a gain too small to see, and the contributor can come back with
+                # a bigger one. Only one of those is recoverable.
+                now["floor_pct"] = prior["floor_pct"]
+                now["floor_decided_by"] = "worst-of-sessions"
+                now["floor_sessions_max_from"] = prior.get("_session") or "earlier session"
+
     doc = {
         "generation": generation.name,
+        "calibration_sessions": sessions,
+        "_floor_stability": (
+            "A floor is a spread statistic and is not stable between sessions: measured twice "
+            "on one RTX 5090, hours apart, the per-cell floors here moved by up to 24x while "
+            "the achieved fractions held to three significant figures. That is expected -- a "
+            "median is robust and a spread over nine repeats is not -- but it means whether a "
+            "submission RESOLVES can depend on which session the box was calibrated in. "
+            "`--merge` folds sessions together keeping the worst floor per cell, which can only "
+            "refuse a gain too small to see rather than credit noise as a contribution."),
         "device": args.device,
         "weights": args.weights or "synthetic",
         "_what_this_is": ("Per-cell calibration: the fraction of the arithmetic ceiling "

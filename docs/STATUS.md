@@ -288,6 +288,14 @@ with the card and cancel: the same 3% difference produces **0.0000%**. Every val
 their own box, the scorer refuses a run whose GPU UUID does not match its calibration, and every
 receipt records which calibration produced it. `docs/EVAL.md` has the setup.
 
+**0b. How stable a noise floor is between sessions — MEASURED, and it is not very.** Two
+calibrations of the same card, hours apart: floors moved by up to **24×** (`t5-encode`, 3.753% →
+0.155%), in both directions, while every achieved fraction held to three significant figures. A
+median is robust and a spread over nine repeats is not. The consequence is that whether a
+submission *resolves* could depend on which session its validator calibrated in, so
+`burnish calibrate --merge` folds sessions together keeping the worst floor per cell — which can
+only refuse a gain too small to see, never credit noise as a contribution.
+
 **1. Whether the fp8 and NVFP4 peaks are reachable.** Those two cells still read
 `peak_basis: vendor`. Every implemented cell reads `measured`.
 

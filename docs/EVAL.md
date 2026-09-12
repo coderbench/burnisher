@@ -225,6 +225,36 @@ committed `eval/cells/BG-1/reference.json` is the reference device's, kept so th
 own published tables have something to stand on — it is not a default that happens to work for
 you.
 
+### The floor is not a permanent property of your box
+
+Two calibrations of the same RTX 5090, hours apart, same driver, same build:
+
+| cell | session A | session B | ratio |
+|:--|--:|--:|--:|
+| `dit-step/1024/bf16` | 0.578% | 0.205% | 2.8× |
+| `t5-encode/1024/bf16` | 3.753% | 0.155% | **24.2×** |
+| `vae-decode/1024/bf16` | 0.259% | 0.845% | 3.3× |
+
+Meanwhile the achieved fractions held to three significant figures — 1.52/1.52, 18.15/18.13,
+0.79/0.79.
+
+That asymmetry is expected rather than alarming: `achieved` is a median and robust, a floor is a
+spread over nine repeats and is not. But it means **whether a submission resolves can depend on
+which session you happened to calibrate in**, which is not a property a benchmark should have.
+
+So calibrate more than once and fold the sessions together:
+
+```bash
+burnish calibrate --repeats 9 --output cal.json
+# later, on the same box
+burnish calibrate --repeats 9 --merge cal.json --output cal.json
+```
+
+`--merge` keeps the **worst** floor per cell. The two errors are not symmetric: a floor that is
+too tight credits noise as a contribution and the ledger compounds it permanently, while one that
+is too loose refuses a gain too small to see and the contributor comes back with a bigger one.
+Only one of those is recoverable.
+
 ### Recalibrate when the box changes
 
 A driver update, a different card, a new thermal regime. You do not have to guess when: the drift
