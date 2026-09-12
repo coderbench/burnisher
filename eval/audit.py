@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -61,7 +62,16 @@ def audit_one(raw_path, receipt_path, *, cells_root=None, calibration=None,
     raw = json.loads(Path(raw_path).read_text())
     published = json.loads(Path(receipt_path).read_text())
     gen_name = published.get("benchmark_generation") or raw.get("generation")
-    gen = C.load(generation_path(gen_name, cells_root), calibration=calibration)
+    # The calibration the receipt was scored against, in order of preference: one the auditor
+    # named, the one EMBEDDED in the raw file, then the committed reference device's. The
+    # embedded copy is what makes this check portable -- every validator calibrates their own
+    # box, so without it only the validator who produced a receipt could re-derive it, and
+    # "anyone can check this" would be a claim rather than a fact.
+    embedded = None
+    if not calibration and raw.get("calibration", {}).get("cells"):
+        embedded = Path(tempfile.mkdtemp()) / "calibration.json"
+        embedded.write_text(json.dumps(raw["calibration"]))
+    gen = C.load(generation_path(gen_name, cells_root), calibration=calibration or embedded)
     checks = []
 
     def check(name, ok, detail=""):

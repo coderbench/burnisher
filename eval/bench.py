@@ -269,6 +269,30 @@ def main():
 
     doc = {
         "generation": args.generation,
+        # The calibration these measurements were scored against, embedded rather than
+        # referenced. Every validator has their own, so a raw file that merely NAMED one could
+        # be re-derived by exactly one person -- the validator who produced it -- and the
+        # "anyone can check this without a GPU" property would be a claim rather than a fact.
+        #
+        # Self-contained is the requirement: this file plus the frozen generation is everything
+        # needed to reproduce the receipt, on any machine, forever.
+        "calibration": {
+            "device_probe": generation.raw.get("_calibration_probe") or {
+                "uuid": generation.calibration_device,
+                "name": generation.calibration_device_name,
+                "driver_version": generation.calibration_driver,
+            },
+            "calibrated_with": {"warmup": warmup, "iters": iters},
+            "cells": {c.id: {"achieved": c.achieved, "floor_pct": c.floor_pct,
+                             "ceiling_seconds": c.ceiling_seconds,
+                             "floor_repeats": c.floor_repeats}
+                      for c in generation.cells.values() if c.calibrated},
+            "_why_embedded": (
+                "A calibration describes one physical card, so every validator has a different "
+                "one. Embedded here so this file alone re-derives the receipt: an auditor with "
+                "no GPU and no access to the validator's machine can still check that the "
+                "published verdict follows from the published measurements."),
+        },
         "records": records,
         "held_out": held_records or None,
         "held_out_shape": held_choice,

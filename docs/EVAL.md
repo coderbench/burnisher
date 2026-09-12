@@ -18,6 +18,12 @@ burnish audit pr-000042-raw.json pr-000042.json
 That re-scores the published measurements and compares the result to the published receipt, field
 for field. It needs no GPU, no network, and no trust in whoever produced the receipt.
 
+**The raw file is self-contained on purpose.** It carries the validator's calibration inside it,
+not a reference to one. Every validator calibrates their own card, so a file that merely *named*
+a calibration could be re-derived by exactly one person — the validator who produced it — and the
+free tier would be a tier of one. Raw file plus frozen generation is everything needed, on any
+machine, forever.
+
 ---
 
 ## The two tiers, and what each one actually proves

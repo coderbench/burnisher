@@ -208,6 +208,75 @@ class TestTheAuditCatchesAReceiptThatLies(unittest.TestCase):
         self.assertFalse(r["pass"])
 
 
+class TestAnAuditWorksWithoutTheValidatorsMachine(unittest.TestCase):
+    """The property that makes "anyone can check this" true rather than aspirational.
+
+    Every validator calibrates their own card, so a receipt is scored against a calibration
+    that exists on one machine. If the raw file merely NAMED it, exactly one person could
+    re-derive the receipt -- the validator who produced it -- and the free verification tier
+    would be a tier of one.
+
+    So the calibration travels inside the raw file. This file plus the frozen generation is
+    everything needed to reproduce the receipt, on any machine, forever.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.raw = Path(self.tmp.name) / "raw.json"
+        self.rec = Path(self.tmp.name) / "receipt.json"
+        self.rec.write_text(RECEIPT.read_text())
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_a_receipt_from_another_box_audits_from_its_own_embedded_calibration(self):
+        raw = json.loads(RAW.read_text())
+        cal = json.loads((ROOT / "eval" / "cells" / "BG-1" / "reference.json").read_text())
+        other = "GPU-aaaaaaaa-0000-0000-0000-000000000000"
+
+        # Another validator's run: their card, their calibration, travelling together.
+        raw["provenance"] = dict(raw["provenance"])
+        raw["provenance"]["device"] = dict(raw["provenance"]["device"], uuid=other)
+        raw["calibration"] = {
+            "device_probe": dict(cal["device_probe"], uuid=other),
+            "cells": {k: {"achieved": v["achieved"], "floor_pct": v["floor_pct"],
+                          "ceiling_seconds": v["ceiling_seconds"],
+                          "floor_repeats": v["floor_repeats"]}
+                      for k, v in cal["cells"].items()},
+        }
+        self.raw.write_text(json.dumps(raw))
+
+        # The receipt as that validator would have published it.
+        rec = json.loads(RECEIPT.read_text())
+        rec["provenance"] = dict(rec["provenance"])
+        rec["provenance"]["device"] = dict(rec["provenance"]["device"], uuid=other)
+        rec["provenance"]["calibration"] = dict(rec["provenance"]["calibration"],
+                                                device_uuid=other)
+        rec.pop("content_digest")
+        rec["content_digest"] = R.content_digest(rec)
+        self.rec.write_text(json.dumps(rec))
+
+        r = A.audit_one(self.raw, self.rec, verbose=False)
+        self.assertTrue(r["pass"],
+                        [c for c in r["checks"] if not c["pass"]])
+
+    def test_without_an_embedded_calibration_a_foreign_receipt_cannot_be_audited(self):
+        """The failure the embedding prevents, kept so the reason is not forgotten."""
+        raw = json.loads(RAW.read_text())
+        raw["provenance"] = dict(raw["provenance"])
+        raw["provenance"]["device"] = dict(raw["provenance"]["device"],
+                                           uuid="GPU-bbbbbbbb-0000-0000-0000-000000000000")
+        raw.pop("calibration", None)
+        self.raw.write_text(json.dumps(raw))
+        r = A.audit_one(self.raw, self.rec, verbose=False)
+        self.assertFalse(r["pass"])
+
+    def test_the_bench_embeds_it(self):
+        src = (ROOT / "eval" / "bench.py").read_text()
+        self.assertIn('"calibration": {', src)
+        self.assertIn("_why_embedded", src)
+
+
 class TestTheAuditRunsFromTheCli(unittest.TestCase):
     def test_burnish_audit_exits_zero_on_the_committed_example(self):
         r = subprocess.run([sys.executable, str(ROOT / "tools" / "burnish"), "audit",
