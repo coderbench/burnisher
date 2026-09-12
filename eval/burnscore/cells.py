@@ -83,10 +83,24 @@ class Generation:
     confidence_level: float = 0.99
     bootstrap_resamples: int = 20000
     bootstrap_seed: int = 20260911
-    repeats: int = 5
+    repeats: int = 3
     tolerance: dict = field(default_factory=dict)
     held_out: dict = field(default_factory=dict)
     raw: dict = field(default_factory=dict)
+    # The instrument settings the NOISE FLOOR was measured with, read from reference.json.
+    #
+    # These are not tuning knobs. A cell's floor describes the run-to-run spread of a particular
+    # measurement procedure -- a median over `iters` timed invocations after `warmup` untimed
+    # ones -- and averaging over more invocations produces a quieter measurement than the floor
+    # describes. Comparing an effect measured one way against a floor measured another way is
+    # comparing two different instruments, so the bench reads these and refuses to run with
+    # anything else.
+    #
+    # They disagreed for a while: the floor was calibrated at warmup 2 / iters 5 and the bench
+    # had 3 / 10 hardcoded with no flag to change it. That made every scored measurement twice
+    # as expensive as it needed to be AND quieter than the floor it was judged against.
+    calibrated_warmup: int = None
+    calibrated_iters: int = None
 
     @property
     def digest(self) -> str:
@@ -143,8 +157,10 @@ def load(path) -> Generation:
         confidence_level=float(doc.get("confidence_level", 0.99)),
         bootstrap_resamples=int(doc.get("bootstrap_resamples", 20000)),
         bootstrap_seed=int(doc.get("bootstrap_seed", 20260911)),
-        repeats=int(doc.get("repeats", 5)),
-        tolerance=doc.get("tolerance", {}), held_out=doc.get("held_out", {}), raw=doc)
+        repeats=int(doc.get("repeats", 3)),
+        tolerance=doc.get("tolerance", {}), held_out=doc.get("held_out", {}), raw=doc,
+        calibrated_warmup=(calib.get("calibrated_with") or {}).get("warmup"),
+        calibrated_iters=(calib.get("calibrated_with") or {}).get("iters"))
     if gen.raw.get("_status"):
         # Kept loadable so the ceiling table still prints; refused by the scorer.
         pass

@@ -99,11 +99,34 @@ if command -v nvidia-smi >/dev/null 2>&1; then
         "once; they race for VRAM and both results are wrong. Kill by PID."; exit 2; }
 fi
 
+# The base arm's gate is a property of the BASE COMMIT, not of the submission: it is the same
+# implementation, the same weights, the same prompts and the same reference latents for every PR
+# opened against that base. Recomputing it per submission cost 7.5 minutes of GPU time per PR to
+# re-derive a byte-identical answer.
+#
+# So it is cached, keyed on everything that could change it. Nothing about the comparison is
+# weakened -- a cache hit is the same file the run would have produced -- and a miss simply runs
+# it. The key deliberately includes the weights and noise digests: a cache that ignored them
+# would serve a gate result for a different experiment, which is worse than no cache.
+BASE_COMMIT="$(git -C "$SUB" rev-parse "$BASE" 2>/dev/null || echo unknown)"
+CACHE="${BURNISH_GATE_CACHE:-$HOME/.cache/burnish/gate}"
+KEY="$(printf '%s' "$BASE_COMMIT|$IMPL_BASE|$DTYPE|$DEVICE|$GEN|$GATE_REPEATS|$(sha256sum "$NOISE" | cut -c1-16)|$(readlink -f "$WEIGHTS")" | sha256sum | cut -c1-32)"
+HIT="$CACHE/gate-base-$KEY.json"
+
 say "1/4  gate the BASE arm ($IMPL_BASE)"
-BURNISH_ENTRY=gate "$RUN" "$BASE" "$SUB" -- \
-    --binary "$BIN" --weights "$WEIGHTS" --impl "$IMPL_BASE" --device "$DEVICE" \
-    --dtype "$DTYPE" --noise "$NOISE" --reference "$REF" \
-    --repeats "$GATE_REPEATS" --output "$OUT/gate-base.json"
+if [ -s "$HIT" ]; then
+    echo ">> cached: the base arm at $BASE_COMMIT already passed this exact gate"
+    echo "   $HIT"
+    echo "   (delete that file, or set BURNISH_GATE_CACHE, to force a re-run)"
+    cp "$HIT" "$OUT/gate-base.json"
+else
+    BURNISH_ENTRY=gate "$RUN" "$BASE" "$SUB" -- \
+        --binary "$BIN" --weights "$WEIGHTS" --impl "$IMPL_BASE" --device "$DEVICE" \
+        --dtype "$DTYPE" --noise "$NOISE" --reference "$REF" \
+        --repeats "$GATE_REPEATS" --output "$OUT/gate-base.json"
+    mkdir -p "$CACHE"
+    cp "$OUT/gate-base.json" "$HIT"
+fi
 
 say "2/4  gate the CANDIDATE arm ($IMPL_CAND)"
 BURNISH_ENTRY=gate "$RUN" "$BASE" "$SUB" -- \

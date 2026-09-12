@@ -264,18 +264,34 @@ def main():
 
         print(f">> correctness: {len(prompts['prompts'])} frozen prompts against {ref_dir.name}")
         per_prompt, worst_l2, worst_abs = [], 0.0, 0.0
+        # The determinism replays above ARE the first prompt's generation: same token ids, seed,
+        # implementation, dtype, noise and step count. They were run to prove the build
+        # reproduces itself, and they did -- byte-identical, which is stronger than the
+        # assumption being made here. Regenerating that prompt a third time to compare it
+        # against the reference re-derives a latent this gate has already produced twice, at a
+        # full twenty-step generation each time.
+        #
+        # Reused only when the determinism check actually passed and actually ran on this
+        # prompt; otherwise `first` is None and the loop generates as before.
+        det_prompt_id = prompts["prompts"][0]["id"]
         for p in prompts["prompts"]:
             label = f"gate-{p['id']}"
-            r = generate(args.binary, generation, ids_dir / f"token-ids-{p['id']}.txt", seed,
-                         args.impl, out_dir=work, label=label, weights=args.weights,
-                         device=args.device, dtype=args.dtype, noise=args.noise,
-                         steps=args.steps)
+            if p["id"] == det_prompt_id and first is not None:
+                print(f"   {p['id']:14s} (reusing the determinism replay -- same ids, seed, "
+                      f"impl, dtype and noise, and proven byte-identical)")
+                latent_path = first
+            else:
+                latent_path = generate(
+                    args.binary, generation, ids_dir / f"token-ids-{p['id']}.txt", seed,
+                    args.impl, out_dir=work, label=label, weights=args.weights,
+                    device=args.device, dtype=args.dtype, noise=args.noise,
+                    steps=args.steps)["latent_path"]
             ref = ref_dir / f"{p['id']}.npy"
             if not ref.exists():
                 raise RunnerError(f"the frozen prompt set names {p['id']} and the reference "
                                   f"directory has no {ref.name}. A prompt set and a reference "
                                   f"that disagree is a gate that checks nothing.")
-            d = compare(ref, r["latent_path"])
+            d = compare(ref, latent_path)
             per_prompt.append({"id": p["id"], **d})
             worst_l2 = max(worst_l2, d["relative_l2"])
             worst_abs = max(worst_abs, d["max_abs"])

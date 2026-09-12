@@ -12,8 +12,10 @@ def calibrated_generation(tmpdir, *, achieved=None, floor_pct=None):
     """BG-1's real frozen definition plus a SYNTHETIC calibration, so the scorer can run.
 
     The calibration is invented and is labelled as invented in the file it writes. It exists so
-    the evaluator's own logic can be tested without hardware; it must never be confused with the
-    real `eval/cells/BG-1/reference.json`, which is null on purpose until a 5090 fills it in.
+    the evaluator's own logic can be tested without hardware, and so that an effect can be put
+    exactly where a test wants it -- which real measurements will not do on request. It must
+    never be confused with the real `eval/cells/BG-1/reference.json`, which holds measurements
+    from the pinned part.
     """
     achieved = achieved or {"t5-encode/1024/bf16": 0.42, "dit-step/1024/bf16": 0.55,
                             "vae-decode/1024/bf16": 0.18}
@@ -27,6 +29,11 @@ def calibrated_generation(tmpdir, *, achieved=None, floor_pct=None):
         "generation": "BG-1",
         "_status": "SYNTHETIC TEST FIXTURE -- these numbers were invented to exercise the "
                    "scorer and are not measurements of anything.",
+        # A floor is the spread of ONE measurement procedure, so a calibration that does not
+        # say which procedure produced it cannot be compared against anything. The fixture
+        # records it for the same reason the real thing does -- and because a fixture that is
+        # shaped differently from the real artifact tests a file nobody will ever have.
+        "calibrated_with": {"impl": "cuda", "warmup": 2, "iters": 5, "repeats": 9},
         "cells": {cid: {"achieved": achieved.get(cid), "floor_pct": floor_pct.get(cid),
                         "floor_repeats": 9, "measured_seconds": None}
                   for cid in [c["id"] for c in src["cells"]]},

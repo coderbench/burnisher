@@ -347,6 +347,37 @@ class TestComputeAndReceipt(unittest.TestCase):
         self.assertEqual(rec2["provenance"]["code_provenance_missing"], [])
         self.assertNotIn("_code_provenance_note", rec2["provenance"])
 
+    def test_the_bench_measures_with_the_instrument_that_measured_the_noise(self):
+        """A floor and an effect from two different instruments do not compare.
+
+        A cell's floor is the run-to-run spread of one procedure: the median of `iters` timed
+        invocations after `warmup` untimed ones. Average over more and the measurement is
+        quieter than its floor describes; average over fewer and it is noisier. Neither is a
+        little bit wrong -- the comparison is between two different instruments.
+
+        This was wrong in both directions at once. The floors were calibrated at warmup 2 /
+        iters 5; `bench.measure()` had 3 / 10 hardcoded with no flag to change it. Every scored
+        run did 13 invocations per record where 7 would have done -- roughly twice the GPU time
+        per submission -- to produce a number quieter than the floor it was judged against.
+        """
+        import bench as B
+        self.assertEqual(B.instrument_settings(self.gen), (2, 5))
+
+        real = C.load(HERE.parent / "cells" / "BG-1" / "generation.json")
+        ref = json.loads((HERE.parent / "cells" / "BG-1" / "reference.json").read_text())
+        cal = ref["calibrated_with"]
+        self.assertEqual(B.instrument_settings(real), (cal["warmup"], cal["iters"]),
+                         "the bench would measure BG-1 with settings its floors were not "
+                         "calibrated with")
+
+        # And a generation that cannot say how its floors were measured is refused outright,
+        # rather than quietly falling back to a default that means nothing.
+        blind = C.load(HERE.parent / "cells" / "BG-1" / "generation.json")
+        blind.calibrated_warmup = None
+        with self.assertRaises(Exception) as cm:
+            B.instrument_settings(blind)
+        self.assertIn("calibrated", str(cm.exception))
+
     def test_a_real_speedup_scores_and_resolves(self):
         out, _ = self._score(speedups={"dit-step/1024/bf16": 1.15})
         cell = out["per_cell"]["dit-step/1024/bf16"]

@@ -45,9 +45,41 @@ from runner import (GpuLock, RunnerError, device_fingerprint, interleave, parse_
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def instrument_settings(generation):
+    """The warmup and iteration counts the cell's NOISE FLOOR was measured with.
+
+    Not a default and not a tuning knob. A floor is the run-to-run spread of one particular
+    measurement procedure: the median of `iters` timed invocations after `warmup` untimed ones.
+    Average over more invocations and the measurement gets quieter than the floor describes;
+    average over fewer and it gets noisier. Either way the effect and the floor it is judged
+    against come from two different instruments, and the comparison means nothing.
+
+    This was wrong in the cheap direction and the expensive one at once: the floors were
+    calibrated at warmup 2 / iters 5 while `measure()` had 3 / 10 hardcoded with no flag. Every
+    scored run therefore did 13 invocations per record where 7 would do -- roughly twice the GPU
+    time -- to produce a number quieter than the floor it was compared with.
+    """
+    w, i = generation.calibrated_warmup, generation.calibrated_iters
+    if w is None or i is None:
+        raise RunnerError(
+            f"{generation.name} has no record of the warmup and iteration counts its noise "
+            f"floors were calibrated with, so a measurement cannot be made with the same "
+            f"instrument that measured the noise. Re-run `burnish calibrate`, which writes "
+            f"`calibrated_with` into reference.json.")
+    return int(w), int(i)
+
+
 def measure(binary, generation, cell, impl, repeat, *, shape_override=None, timeout=1800,
-            fidelity=None, device="cuda", weights=None, warmup=3, iters=10):
-    """One arm, one cell, one repeat."""
+            fidelity=None, device="cuda", weights=None, warmup=None, iters=None):
+    """One arm, one cell, one repeat.
+
+    `warmup` and `iters` default to whatever the floor was calibrated with; passing something
+    else is for calibration itself, which is the run that DEFINES them.
+    """
+    if warmup is None or iters is None:
+        cw, ci = instrument_settings(generation)
+        warmup = cw if warmup is None else warmup
+        iters = ci if iters is None else iters
     label = f"{cell.id} {impl} r{repeat}"
     shape = dict(cell.shape)
     if shape_override:
@@ -80,6 +112,11 @@ def measure(binary, generation, cell, impl, repeat, *, shape_override=None, time
     # exactly zero for both arms and every result would read MOVED_ALONG_FRONTIER.
     if fidelity is not None:
         result["metrics"]["latent_l2_vs_reference"] = float(fidelity)
+    # What the record COST, alongside what it measured. `run_once` already has it and was
+    # throwing it away. It is not a metric -- nothing is scored on it -- but the gap between it
+    # and `latency_s` is the evaluator's own overhead, and a subnet that cannot say what
+    # scoring costs cannot tell whether it can afford the submissions it is asking for.
+    result["wall_s"] = wall
     return result
 
 
@@ -181,7 +218,11 @@ def main():
     with GpuLock():
         require_idle_device()
         fp = device_fingerprint()
+        warmup, iters = instrument_settings(generation)
         print(f">> {fp.get('name')} driver {fp.get('driver_version')}")
+        print(f">> instrument: {warmup} warmup + {iters} timed invocations per record, "
+              f"{args.repeats} paired repeats -- the settings the noise floors were "
+              f"calibrated with")
         if held_choice:
             print(f">> held-out shape for this run: {held_choice}px "
                   f"(chosen now, after the candidate was frozen)")
@@ -193,6 +234,14 @@ def main():
                 records.append({"cell": cell.id, "variant": variant, "repeat": repeat,
                                 "config_id": "default", "status": "OK",
                                 "impl": arms[variant], "metrics": r["metrics"],
+                                # What this record cost the evaluator, as opposed to what it
+                                # measured. The difference is process startup and the
+                                # checkpoint map, and it is most of why a scoring run takes
+                                # longer than the arithmetic says. Recorded rather than
+                                # estimated, because the cost of scoring is a property of the
+                                # subnet worth knowing and "never type a benchmark number by
+                                # hand" applies to the harness's own bill too.
+                                "wall_s": r.get("wall_s"),
                                 "effective": r.get("effective"),
                                 "output_stats": r.get("output_stats")})
                 print(f"   {cell.id:26s} {variant:9s} r{repeat} "
@@ -205,6 +254,7 @@ def main():
                                 weights=args.weights)
                     held_records.append({"cell": cell.id, "variant": variant, "repeat": repeat,
                                          "config_id": f"held-{held_choice}", "status": "OK",
+                                         "wall_s": r.get("wall_s"),
                                          "metrics": r["metrics"]})
 
     doc = {
@@ -221,7 +271,15 @@ def main():
             "candidate_commit": gate.get("candidate_commit"),
             "instrument_from": gate.get("instrument_from"),
             "repeats": args.repeats,
-            "_pairing": "interleaved base/candidate, one process, one model load",
+            "warmup": warmup,
+            "iters": iters,
+            "_instrument_note": ("warmup and iters are the counts the cell noise floors were "
+                                 "calibrated with. A measurement averaged over a different "
+                                 "number of invocations than its floor was is a different "
+                                 "instrument, and the comparison does not mean anything."),
+            "wall_seconds_total": round(sum(r.get("wall_s") or 0 for r in records)
+                                        + sum(r.get("wall_s") or 0 for r in held_records), 1),
+            "_pairing": "interleaved base/candidate, one process per record",
         },
     }
     Path(args.output).write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n")
