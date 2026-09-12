@@ -88,6 +88,11 @@ chmod +x "$STAGE/tools/burnish" 2>/dev/null || true
 # The runtime under test comes from the SUBMISSION; the instrument driving it comes from base.
 export BURNISHER_BIN="${BURNISHER_BIN:-$SUB/build/burnisher}"
 export BURNISH_INSTRUMENT_FROM="$BASE_SHA"
+# A scoring run takes tens of minutes and its output is almost always redirected to a log, which
+# means Python block-buffers it and the log stays empty until the stage ends. Somebody watching a
+# forty-minute bench cannot tell a working run from a hung one, and the reasonable thing to do
+# about a run that looks hung is kill it. Line-buffered costs nothing here.
+export PYTHONUNBUFFERED=1
 # The instrument runs from a staging directory that is not a git repository -- `git archive`
 # extracts files, not history -- so the evaluator cannot find out what it is scoring by asking
 # git about its own location. It would get nothing, and it did: the first receipts this harness
