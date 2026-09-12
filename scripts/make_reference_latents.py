@@ -146,7 +146,11 @@ def main():
                     help="defaults to the generation's PINNED guidance_scale; override only to "
                          "explore, never to produce an oracle")
     ap.add_argument("--prompts", nargs="*", help="subset, for a smoke run")
-    ap.add_argument("--dtype", default="float32")
+    # Accepts the repository's spelling as well as torch's. Everything else here says fp32 and
+    # bf16; this one script said float32/bfloat16 and turned a muscle-memory flag into an
+    # AttributeError from inside torch.
+    ap.add_argument("--dtype", default="float32",
+                    help="float32/fp32 or bfloat16/bf16")
     ap.add_argument("--device", default="cpu",
                     help="cuda makes this minutes instead of hours. The REFERENCE may run "
                          "wherever it likes -- it is the oracle, not the thing being timed.")
@@ -171,7 +175,8 @@ def main():
         args.guidance = gen["model"]["guidance_scale"]
     noise = np.load(args.noise)
     prompt_ids = args.prompts or list(ids_doc["prompts"])
-    dtype = getattr(torch, args.dtype)
+    dtype = getattr(torch, {"fp32": "float32", "bf16": "bfloat16",
+                            "fp16": "float16"}.get(args.dtype, args.dtype))
 
     print(f"reference: {json.dumps(versions())}")
     print(f"checkpoint: {gen['model']['repo']} @ {gen['model']['revision'][:12]}")
