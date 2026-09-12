@@ -38,11 +38,11 @@ good and it is the obvious BG-2.
 
 | stage | runs per generation | ceiling | share | bound by | resident params |
 |:--|--:|--:|--:|:--|--:|
-| `t5-encode` | 1 | 23.8 ms | 2.0% | compute | 9.53 GB |
-| `dit-step` | 20 | 1121.1 ms | 94.3% | compute | 1.22 GB |
-| `vae-decode` | 1 | 44.3 ms | 3.7% | compute | 0.10 GB |
+| `t5-encode` | 1 | 23.1 ms | 2.0% | compute | 9.53 GB |
+| `dit-step` | 20 | 1089.0 ms | 94.3% | compute | 1.22 GB |
+| `vae-decode` | 1 | 43.0 ms | 3.7% | compute | 0.10 GB |
 
-Total predicted ceiling: **1189 ms** for one
+Total predicted ceiling: **1155 ms** for one
 1024px generation at 20 steps.
 
 ### The non-obvious result, and the one that should change how you spend time
@@ -81,7 +81,7 @@ every stage's hot ops are either implemented in this repository or are GEMM/conv
 
 ### SCORE_COST — PASS
 
-a full receipt is predicted at 4.1 GPU-minutes against a 30-minute budget
+a full receipt is predicted at 4.0 GPU-minutes against a 30-minute budget
 
 > **Trap.** Scales inversely with `assumed_achieved`. If the pipeline lands at half the assumed fraction this doubles, which is a reason to keep the cell count honest rather than a reason to adjust the constant.
 
@@ -108,10 +108,10 @@ Known risks for this workload, in the order worth checking:
 
 | term | value |
 |:--|--:|
-| predicted seconds per generation | 3.40 s |
+| predicted seconds per generation | 3.30 s |
 | cells x repeats x arms x prompts | 3 x 5 x 2 x 2 |
 | correctness gate generations | 12 |
-| **predicted total per receipt** | **4.1 GPU-minutes** |
+| **predicted total per receipt** | **4.0 GPU-minutes** |
 | budget | 30 minutes |
 
 Assumes a first implementation reaches **35%** of the
