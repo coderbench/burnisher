@@ -78,6 +78,27 @@ class TestTheCommittedExampleStillReproduces(unittest.TestCase):
                              f"-- in which case past receipts no longer mean what they said, "
                              f"and that is a new generation, not an edit -- or this is a bug.")
 
+    def test_the_raw_file_is_self_contained(self):
+        """It must re-derive the receipt without anything else from the validator's machine.
+
+        Demonstrated on real artifacts rather than argued: a receipt measured on the pinned card
+        and audited against the COMMITTED calibration fails -- differs at `frontier` and
+        `per_cell` -- because the floors came from a different calibration session on that same
+        card. Floors are not stable between sessions (up to 24x, measured), so "same hardware" is
+        not enough. The calibration has to travel with the measurements it scored.
+        """
+        cal = self.raw.get("calibration") or {}
+        self.assertTrue(cal.get("cells"),
+                        "the raw file names no calibration, so only the validator who produced "
+                        "it could re-derive the receipt -- and the free verification tier would "
+                        "be a tier of one")
+        for cid, c in cal["cells"].items():
+            self.assertIsNotNone(c.get("floor_pct"), f"{cid} carries no floor")
+            self.assertIsNotNone(c.get("achieved"), f"{cid} carries no achieved fraction")
+            self.assertIsNotNone(c.get("ceiling_seconds"), f"{cid} carries no ceiling")
+        self.assertTrue((cal.get("device_probe") or {}).get("uuid"),
+                        "the embedded calibration does not say which card it describes")
+
     def test_the_receipt_verifies_against_itself_and_the_generation(self):
         R.verify_receipt(self.want, self.gen)
 

@@ -1,4 +1,42 @@
 {
+ "calibration": {
+  "_why_embedded": "A calibration describes one physical card, so every validator has a different one. Embedded here so this file alone re-derives the receipt: an auditor with no GPU and no access to the validator's machine can still check that the published verdict follows from the published measurements.",
+  "calibrated_with": {
+   "impl": "cuda",
+   "iters": 5,
+   "repeats": 9,
+   "timer_digits": 6,
+   "warmup": 2
+  },
+  "cells": {
+   "dit-step/1024/bf16": {
+    "achieved": 0.015245658417544026,
+    "ceiling_seconds": 0.05444889960495386,
+    "floor_pct": 0.5776947200587813,
+    "floor_repeats": 9
+   },
+   "t5-encode/1024/bf16": {
+    "achieved": 0.18153324094970438,
+    "ceiling_seconds": 0.02307707151940508,
+    "floor_pct": 3.7532580815317766,
+    "floor_repeats": 9
+   },
+   "vae-decode/1024/bf16": {
+    "achieved": 0.007913030168201135,
+    "ceiling_seconds": 0.04299607585791064,
+    "floor_pct": 0.25936641076014877,
+    "floor_repeats": 9
+   }
+  },
+  "device_probe": {
+   "_clocks_note": "Clocks are not pinned and cannot be in a container. Only paired interleaved same-box deltas mean anything; absolute times from two different sessions are not comparable.",
+   "driver_version": "595.91.07",
+   "memory.total": "32607 MiB",
+   "name": "NVIDIA GeForce RTX 5090",
+   "pci.bus_id": "00000000:01:00.0",
+   "uuid": "GPU-da2aa62b-30d9-78a4-d9a1-86a21df7e530"
+  }
+ },
  "correctness": "PASS",
  "determinism": true,
  "generation": "BG-1",
