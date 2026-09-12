@@ -144,6 +144,7 @@
   "scripts/make_issues.py",
   "scripts/make_reference_latents.py",
   "scripts/manifest.py",
+  "scripts/sample_outcomes.py",
   "scripts/step_divergence.py",
   "scripts/tokenize_prompts.py",
   "scripts/verify_checkpoint_layout.py",

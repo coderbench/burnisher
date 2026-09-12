@@ -95,6 +95,71 @@ class TestTheLineBetweenOpeningACellAndEditingTheRuler(unittest.TestCase):
                           f"{path} is guarded but not overlaid from the base ref")
 
 
+class TestASubmissionCannotRaiseItsOwnScore(unittest.TestCase):
+    """The property that actually matters, asserted rather than assumed.
+
+    Two separate questions hide inside "can a miner cheat":
+
+      Can they inflate their OWN score?     No, and not because of this guard. The evaluator runs
+                                            its own copy of the guard against the submission's
+                                            tree, and overlays eval/ configs/ schemas/
+                                            tools/burnish from the BASE commit before measuring.
+                                            Nothing in the pull request reaches either.
+
+      Can they poison the instrument for     Yes, if it merges unreviewed -- which is what the
+      whoever submits next?                  guard and CODEOWNERS are for. Disabling the CI check
+                                             or rewriting the guard's own rules does not help the
+                                             author at all, which is exactly why it is worth
+                                             blocking: it is the slower, better-disguised version
+                                             of the same attack.
+    """
+
+    def c(self, rows, base_generations=("BG-1",)):
+        return G.classify(rows, set(base_generations))
+
+    def test_the_evaluator_runs_its_own_guard_not_the_submissions(self):
+        bot = (ROOT / "eval" / "pr_bot.py").read_text()
+        self.assertIn('str(ROOT / "scripts" / "instrument_guard.py")', bot,
+                      "the bot runs the guard from the SUBMISSION's tree, so a submission could "
+                      "rewrite the rules it is judged by")
+        self.assertIn('"--repo", str(worktree)', bot)
+
+    def test_the_scoring_instrument_comes_from_the_base_commit(self):
+        script = (ROOT / "eval" / "run_from_base.sh").read_text()
+        self.assertIn('git -C "$REPO" archive "$BASE"', script,
+                      "the instrument is not taken from the base ref before scoring")
+
+    def test_governance_paths_are_blocked_even_though_they_cannot_help_the_author(self):
+        """Disabling the check, rewriting the rules, restating the declared model."""
+        for path in (".github/workflows/instrument-guard.yml",
+                     ".github/CODEOWNERS",
+                     "scripts/instrument_guard.py",
+                     "scripts/check.sh",
+                     ".gittensor/weights.json"):
+            r = self.c([("M", path)])
+            self.assertEqual(len(r["blocked"]), 1, f"{path} is not blocked")
+            self.assertIn("helps whoever submits next", r["blocked"][0][1])
+
+    def test_build_scripts_stay_contributor_surface_and_the_limit_is_stated(self):
+        """Building from source means running the submission's build. That is not a guard hole,
+        it is what building from source IS -- and pretending otherwise would be worse than
+        saying so."""
+        for path in ("scripts/build.sh", "scripts/build_cuda.sh", "CMakeLists.txt"):
+            r = self.c([("M", path)])
+            self.assertEqual(r["blocked"], [], f"{path} should be contributor surface")
+        src = (ROOT / "scripts" / "instrument_guard.py").read_text()
+        self.assertIn("do not mistake this guard for a sandbox", src)
+
+    def test_codeowners_covers_everything_the_guard_blocks(self):
+        """Two locks that fail differently. A check can be edited in the commit that needs it
+        edited; an ownership rule is enforced by the forge."""
+        owners = (ROOT / ".github" / "CODEOWNERS").read_text()
+        for path in G.INSTRUMENT + G.GOVERNANCE:
+            self.assertIn(f"/{path.rstrip('/')}", owners,
+                          f"{path} is blocked by the guard but has no owner, so a green CI run "
+                          f"is the only thing standing in front of it")
+
+
 class TestTheGuardDiffsTheTreeItWasPointedAt(unittest.TestCase):
     """The bug that let the first pull request this bot ever saw slip past the guard.
 

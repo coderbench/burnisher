@@ -1,0 +1,33 @@
+# Paths that require review regardless of what CI says.
+#
+# The instrument guard (scripts/instrument_guard.py, enforced by .github/workflows/) already
+# blocks a submission that touches any of this, and the evaluator already runs its own copy of
+# the instrument rather than the submission's -- so none of it can raise a submission's own
+# score. This file is the second lock, and it exists because the first one is a check that a
+# pull request could otherwise disable in the same commit that needs disabling.
+#
+# Two independent mechanisms, failing in different ways: a check can be edited, an ownership
+# rule is enforced by the forge. Neither is sufficient alone.
+
+# --- what is measured -------------------------------------------------------
+# Cells, shapes, tolerances, objectives, the sampling plan, the noise floors, the model pins.
+# Overlaid from the base commit before scoring, so an edit cannot help its author -- it changes
+# what everyone AFTER them is measured against.
+/eval/                      @coderbench
+/configs/                   @coderbench
+/schemas/                   @coderbench
+/tools/burnish              @coderbench
+
+# --- how the evaluation is governed -----------------------------------------
+# The guard, the checks that enforce it, the declared scoring model, and this file.
+/.github/                   @coderbench
+/.gittensor/                @coderbench
+/scripts/                   @coderbench
+
+# --- contributor surface, explicitly ----------------------------------------
+# Build scripts are NOT owned: a submission that adds a source file may need them, and they
+# cannot manufacture a speedup (base and candidate are two registered implementations of one
+# binary, so a compiler flag moves both arms equally). They ARE code execution on the eval box,
+# which is inherent to building from source -- isolate the box, do not rely on this file.
+/scripts/build.sh
+/scripts/build_cuda.sh

@@ -54,6 +54,30 @@ ROOT = Path(__file__).resolve().parent.parent
 # there is a hole, and one overlaid but not guarded is a silent discard.
 INSTRUMENT = ("eval/", "configs/", "schemas/", "tools/burnish")
 
+# Guarded but NOT overlaid, and the distinction is worth stating because it is the difference
+# between two threats that need different answers.
+#
+# A submission cannot inflate its OWN score by touching anything here: the evaluator runs its own
+# copy of this guard against the submission's tree, and overlays INSTRUMENT from the base commit
+# before measuring. Nothing in the pull request reaches either.
+#
+# What it can do, if it merges, is poison the instrument for everybody after it. Disable the CI
+# check that enforces this file; rewrite this file's own rules; neuter the check suite; restate
+# the declared scoring model. None of those help the author and all of them help the next author,
+# which is a slower and better-disguised version of the same attack.
+#
+# `scripts/build*` is deliberately NOT here -- see BUILD_IS_CONTRIBUTOR_SURFACE below.
+GOVERNANCE = (".github/", ".gittensor/", "scripts/")
+
+# The honest limit of all of this. The evaluator builds the submission from source, so
+# `CMakeLists.txt` and `scripts/build*.sh` run attacker-controlled commands on the eval box by
+# design -- that is what "built from source" means, and every benchmark that does it has the same
+# exposure. They cannot manufacture a fake speedup (base and candidate are two registered
+# implementations of ONE binary, so a compiler flag moves both arms equally, and a correctness
+# change is caught by the gate), but they are code execution. Isolate the eval box accordingly;
+# do not mistake this guard for a sandbox.
+BUILD_IS_CONTRIBUTOR_SURFACE = ("scripts/build",)
+
 # The contributor surface: the runtime itself, which is what a submission is scored on.
 CONTRIBUTOR = ("src/", "include/", "tests/", "CMakeLists.txt", "scripts/build")
 
@@ -91,6 +115,17 @@ def existing_generations(base: str, repo: Path = None) -> set:
 def classify(rows, base_generations) -> dict:
     blocked, cartography, contributor, other = [], [], [], []
     for status, path in rows:
+        if any(path.startswith(p) for p in BUILD_IS_CONTRIBUTOR_SURFACE):
+            contributor.append(path)
+            continue
+        if any(path.startswith(p) for p in GOVERNANCE):
+            blocked.append((path, "changes how the evaluation is GOVERNED -- the check that "
+                                  "enforces these rules, the rules themselves, the check suite, "
+                                  "or the declared scoring model. It cannot raise this "
+                                  "submission's own score (the evaluator uses its own copy of "
+                                  "all of it), which is precisely why it is worth blocking: it "
+                                  "helps whoever submits next."))
+            continue
         in_instrument = any(path.startswith(p) for p in INSTRUMENT)
         if not in_instrument:
             (contributor if any(path.startswith(p) for p in CONTRIBUTOR) else other).append(path)

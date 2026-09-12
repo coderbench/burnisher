@@ -174,6 +174,40 @@ Improving the evaluator is a real contribution — the evaluator is where the bu
 one prints a confident number. It is separated, not refused: send it as its own pull request,
 scored as a change to what is measured.
 
+### Can a submission raise its own score by editing something?
+
+**No, and not because of the guard.** Two mechanisms on the validator's side settle it before the
+guard is even consulted:
+
+- the evaluator runs **its own copy** of the guard against the submission's tree, not the
+  submission's copy of it;
+- `run_from_base.sh` **overlays the instrument from the base commit** before anything is measured.
+
+Nothing in a pull request reaches either. A submission that rewrote every rule in this repository
+would be measured by the rules on `main` regardless.
+
+**What a submission can do, if it merges unreviewed, is poison the instrument for whoever submits
+next.** Disable the CI check that enforces the guard; rewrite the guard's own rules; neuter the
+check suite; restate the declared scoring model. None of that helps its author — which is exactly
+why it is worth blocking, because it is the slower and better-disguised version of the same
+attack. So those paths are guarded too, and `.github/CODEOWNERS` is a second lock: a CI check can
+be edited in the same commit that needs it edited, an ownership rule is enforced by the forge.
+
+| | |
+|:--|:--|
+| `eval/` `configs/` `schemas/` `tools/burnish` | **what is measured** — guarded *and* overlaid from base |
+| `.github/` `.gittensor/` `scripts/` | **how the evaluation is governed** — guarded; cannot help the author, can help the next one |
+| `scripts/build*` `CMakeLists.txt` `src/` `include/` `tests/` | contributor surface |
+
+### The honest limit
+
+The evaluator **builds the submission from source**, so `CMakeLists.txt` and the build scripts run
+code the submitter wrote, on the eval box, by design. Every benchmark that builds from source has
+this exposure. It cannot manufacture a speedup — base and candidate are two registered
+implementations of one binary, so a compiler flag moves both arms equally and a correctness change
+is caught by the gate — but it is code execution. Isolate the eval box accordingly. This guard is
+not a sandbox and should not be mistaken for one.
+
 ---
 
 ## What this does not claim

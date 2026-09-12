@@ -11,6 +11,10 @@ name: instrument-guard
 # It is NOT a blanket ban on touching eval/. Burnisher pays for cartography -- opening a new cell
 # is a scored contribution -- so the guard distinguishes ADDING a new frozen generation from
 # MODIFYING one that exists. See scripts/instrument_guard.py for why that line is the safe one.
+#
+# This check cannot be the only lock, because a pull request could disable it in the same commit
+# that needs it disabled. .github/CODEOWNERS is the second one, enforced by the forge rather than
+# by a job the submission can edit. Neither is sufficient alone; both are cheap.
 
 on:
   pull_request:
