@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from . import challenge
 from .receipt import content_digest, verify_receipt, ReceiptError, CREDITING
 
 
@@ -58,7 +59,7 @@ def append_receipt(root, receipt: dict, *, receipt_id=None, generation=None) -> 
             f"write a NEW receipt whose `supersedes` names this one and whose "
             f"`supersede_reason` says why.")
     path.write_text(json.dumps(receipt, indent=1, sort_keys=True) + "\n")
-    update_current(root, name)
+    update_current(root, name, generation)
     return path
 
 
@@ -75,7 +76,7 @@ def load_receipts(root, generation_name) -> list:
     return out
 
 
-def update_current(root, generation_name) -> dict:
+def update_current(root, generation_name, generation=None) -> dict:
     """Recompute the generation's running totals from every canonical receipt.
 
     Gap-closed COMPOUNDS toward the ceiling rather than summing, and this is the arithmetic that
@@ -90,10 +91,20 @@ def update_current(root, generation_name) -> dict:
     canonical = [(i, r) for i, r in receipts if i not in superseded]
 
     remaining = 1.0
-    history = []
+    history, held = [], []
     for rid, r in sorted(canonical, key=lambda x: x[1].get("timestamp_utc") or ""):
         credited = float(r.get("score", {}).get("credited_gap_closed", 0.0) or 0.0)
-        if r.get("status") in CREDITING and credited > 0:
+        # An independent re-measurement that disagrees beyond the cell's own floor puts the
+        # credit on HOLD. Not a rejection: one of the two receipts is wrong and the ledger does
+        # not know which, so it pays neither rather than guessing. A score no one else can
+        # reproduce does not move the frontier, and a contributor is not punished for an
+        # evaluator's bad afternoon either.
+        ch = (challenge.status_for(root, generation_name, rid, r, generation)
+              if generation is not None else
+              {"held": False, "challenges": 0, "confirmations": 0, "disagreements": []})
+        if ch["held"]:
+            held.append(rid)
+        if r.get("status") in CREDITING and credited > 0 and not ch["held"]:
             remaining *= (1.0 - min(credited, 1.0))
         history.append({
             "receipt": rid, "pr": r.get("pr"), "timestamp_utc": r.get("timestamp_utc"),
@@ -101,6 +112,10 @@ def update_current(root, generation_name) -> dict:
             "status": r.get("status"),
             "gap_closed": r.get("score", {}).get("gap_closed"),
             "credited_gap_closed": credited,
+            "paid": bool(r.get("status") in CREDITING and credited > 0 and not ch["held"]),
+            "independent_confirmations": ch["confirmations"],
+            "held": ch["held"],
+            "held_because": ch.get("_why_held"),
             "content_digest": r.get("content_digest"),
         })
 
@@ -108,7 +123,10 @@ def update_current(root, generation_name) -> dict:
         "generation": generation_name,
         "canonical_receipts": len(canonical),
         "superseded_receipts": sorted(superseded),
-        "crediting_receipts": sum(1 for h in history if h["status"] in CREDITING),
+        "crediting_receipts": sum(1 for h in history if h["paid"]),
+        "held_receipts": sorted(held),
+        "independently_confirmed": sum(1 for h in history
+                                       if h["independent_confirmations"] > 0),
         "gap_remaining_fraction": remaining,
         "gap_closed_cumulative": 1.0 - remaining,
         "_compounding_note": (
@@ -123,9 +141,10 @@ def update_current(root, generation_name) -> dict:
     return doc
 
 
-def show(root, generation_name) -> dict:
+def show(root, generation_name, generation=None) -> dict:
     p = Path(root) / generation_name / "current.json"
-    return json.loads(p.read_text()) if p.exists() else update_current(root, generation_name)
+    return (json.loads(p.read_text()) if p.exists()
+            else update_current(root, generation_name, generation))
 
 
 def audit(root, generation_name, generation=None) -> dict:
@@ -140,5 +159,14 @@ def audit(root, generation_name, generation=None) -> dict:
         else:
             if r.get("content_digest") != content_digest(r):
                 problems.append({"receipt": rid, "problem": "digest mismatch"})
+    # Held submissions are not "problems" -- the receipts are fine, the ledger just cannot tell
+    # which of two honest measurements is right. They are surfaced separately so an operator can
+    # see what needs a third measurement without it reading as corruption.
+    held = []
+    if generation is not None:
+        for rid, r in receipts:
+            st = challenge.status_for(root, generation_name, rid, r, generation)
+            if st["held"]:
+                held.append({"receipt": rid, "pr": r.get("pr"), **st})
     return {"generation": generation_name, "checked": len(receipts),
-            "problems": problems, "ok": not problems}
+            "problems": problems, "held": held, "ok": not problems}
