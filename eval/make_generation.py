@@ -71,7 +71,28 @@ def build(name, candidate_key, device_key, *, resolution, steps, caption_len, cf
     cands = json.loads((ROOT / "configs" / "candidates.json").read_text())["candidates"]
     devices = json.loads((ROOT / "configs" / "devices.json").read_text())
     axes = json.loads((ROOT / "configs" / "axes.json").read_text())
-    tolerance = json.loads((ROOT / "configs" / "tolerance.json").read_text())[name]
+    tolerances = json.loads((ROOT / "configs" / "tolerance.json").read_text())
+    if name not in tolerances:
+        # A new generation needs its OWN tolerance, and inheriting one silently is the failure
+        # this refuses. A threshold is a claim about how far a correct implementation may drift
+        # from the oracle, and that drift is a property of the shapes, the dtype and the step
+        # count -- BG-1's 0.0025 was five times a MEASURED 0.0005 at 1024px in fp32, and says
+        # nothing about any other cell.
+        raise SystemExit(
+            f"!! configs/tolerance.json has no entry for {name}.\n\n"
+            f"   A generation's correctness tolerance cannot be inherited: it is a claim about "
+            f"how far a\n   CORRECT implementation drifts from the oracle, and that depends on "
+            f"the shapes, the dtype\n   and the step count. Copying BG-1's would assert "
+            f"something nobody measured.\n\n"
+            f"   Measure it instead:\n"
+            f"     1. add a provisional {name} entry (basis: provisional)\n"
+            f"     2. produce the reference latents for {name}\n"
+            f"     3. burnish gate --generation {name} --calibrate-tolerance\n"
+            f"        -- which measures the drift and refuses to gate on it\n"
+            f"     4. set the threshold from that measurement, with the reasoning, and "
+            f"basis: measured\n\n"
+            f"   docs/CORRECTNESS.md has the argument for why the multiple is what it is.")
+    tolerance = tolerances[name]
     cand = cands[candidate_key]
     device = devices[device_key]
 

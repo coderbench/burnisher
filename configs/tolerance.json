@@ -47,5 +47,30 @@
   }
  },
  "_the_rule_that_was_learned_here": "The gate must compare at the dtype the cell is SCORED in. BG-1 first compared a bf16 pipeline against an fp32 oracle and asked for 2% relative L2. That is unsatisfiable, and not by a little: the reference implementation compared against ITSELF at the two dtypes -- same weights, same pinned noise, same token ids, zero implementation difference -- comes out at 0.371 relative L2 (eval/cells/BG-1/dtype-cost.json). Comparing across dtypes measures the dtype, not the implementation.",
- "_what_this_is": "The correctness gate's thresholds, and where they came from. Kept in configs/ rather than hardcoded in the generation builder for the same reason the device peaks are: they should be set from a MEASUREMENT and regenerated, not typed and defended."
+ "_what_this_is": "The correctness gate's thresholds, and where they came from. Kept in configs/ rather than hardcoded in the generation builder for the same reason the device peaks are: they should be set from a MEASUREMENT and regenerated, not typed and defended.",
+ "BG-2": {
+  "_status": "PROVISIONAL -- these thresholds have not been measured for this generation. `burnish gate --generation BG-2 --calibrate-tolerance` measures the drift of a correct build against the oracle; the thresholds are then set from it, with the reasoning, and the basis becomes `measured`. Until then this generation must not be used to reject anything.",
+  "basis": "provisional",
+  "gate_dtype": "fp32",
+  "_gate_dtype_why": "",
+  "latent_l2_relative": 0.0025,
+  "latent_max_abs": 0.33,
+  "_thresholds_why": "Carried over from BG-1 as a STARTING POINT for the calibration run only. At 512px the DiT sees 1024 tokens instead of 4096, so the accumulated reduction-order disagreement is a different number and there is no reason these should be the right ones.",
+  "determinism_replays": 10,
+  "determinism_rule": "byte-identical latents across replays of the same build",
+  "stage_tolerances_at_scored_dtype": {
+   "_margin": "About 4x each measurement. The DiT's is looser because its disagreement grows with depth -- 0.005 at one block, 0.009 at four, 0.137 at twenty-eight -- so the threshold has to admit the full stack.",
+   "_measured_bf16": {
+    "dit-step": 0.1365,
+    "scheduler": 0.0124,
+    "t5-encode": 0.0124,
+    "vae-decode": 0.0204
+   },
+   "_what": "Per-stage against the reference at the dtype the cells are scored in. These are the checks that cover the reduced-precision path, and they are sharp where the end-to-end comparison is not.",
+   "dit-step": 0.5,
+   "scheduler": 0.06,
+   "t5-encode": 0.06,
+   "vae-decode": 0.1
+  }
+ }
 }

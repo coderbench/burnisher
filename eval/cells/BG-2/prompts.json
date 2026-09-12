@@ -1,0 +1,29 @@
+{
+ "name": "BG-2 frozen prompt set",
+ "seed": 20260911,
+ "_why_frozen": "The gate compares latents, so the prompts are part of the oracle. A prompt set that changed between the reference and a candidate would make every comparison meaningless, and the change would not look like anything in a diff. The set is small on purpose -- the gate runs before every timed submission and its cost is paid whether or not the candidate turns out to be fast.",
+ "_why_these": "Four prompts chosen to exercise different regions of the model rather than to look good: a dense-detail scene that keeps the DiT's attention busy, a flat-colour graphic that makes a degenerate output obvious, a long caption that fills the 300-token T5 window, and a near-empty one that leaves it almost entirely padding. The last two matter because the cross-attention K/V length is the axis a caching or sparsity change is most likely to break, and a prompt set of uniform length would never show it.",
+ "prompts": [
+  {
+   "id": "dense-detail",
+   "text": "a weathered brass astrolabe on a cluttered workbench, engraved rings, shallow depth of field, warm afternoon light through a dusty window",
+   "_role": "dense high-frequency detail; the denoiser has work to do at every token"
+  },
+  {
+   "id": "flat-graphic",
+   "text": "a flat vector illustration of a single red circle centred on a plain white background",
+   "_role": "large uniform regions; a degenerate or collapsed output is obvious here and can hide in a busy image"
+  },
+  {
+   "id": "long-caption",
+   "text": "an expansive panoramic landscape photograph taken at dawn from a high ridge, showing layered mountain silhouettes receding into morning haze, a winding river catching the first light in the valley floor below, scattered pine forest on the near slopes with individual trees distinguishable, a narrow dirt track switchbacking down toward a small stone farmhouse with a slate roof and a single lit window, thin woodsmoke rising vertically in the still air, high cirrus clouds tinted pink and gold above, shot on medium format film with fine grain and natural colour rendition",
+   "_role": "fills the 300-token T5 window; exercises the cross-attention K/V length a caching change is most likely to break"
+  },
+  {
+   "id": "short-caption",
+   "text": "a cat",
+   "_role": "almost all padding; the opposite end of the same axis"
+  }
+ ],
+ "_reused_from": "BG-1. Token ids are tokenizer output and carry no resolution dependence, so the same frozen prompts tokenize identically at any resolution. Reusing them keeps the two generations comparable on the one axis that should not vary."
+}
