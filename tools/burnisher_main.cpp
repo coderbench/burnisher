@@ -345,6 +345,7 @@ int cmd_bench(const Args& a) {
     const std::string stage = a.get("stage", "dit-step");
     const std::string impl = a.get("impl", "stock");
     const DType dt = dtype_arg(a);
+    const Device dev = device_arg(a);
     const int64_t resolution = a.num("resolution", 1024);
     const int64_t caption_len = a.num("caption-len", 300);
     const int64_t batch = a.num("batch", 2);
@@ -352,7 +353,7 @@ int cmd_bench(const Args& a) {
     const int iters = static_cast<int>(a.num("iters", 10));
 
     // Fails here rather than falling back, and the message lists what IS registered.
-    const ImplSelection impls = ImplSelection::from_request(impl);
+    const ImplSelection impls = ImplSelection::from_request(impl, dev);
 
     T5Config t5; DiTConfig dit; VaeConfig vae;
     if (a.has("small")) small_configs(&t5, &dit, &vae);
@@ -360,7 +361,7 @@ int cmd_bench(const Args& a) {
     // Synthetic weights exercise the graph; real ones exercise the loader, the tensor-name
     // mapping and the dtypes. Both are useful and they answer different questions, so which one
     // was used is reported in `effective` rather than inferred.
-    std::shared_ptr<WeightSource> weights;
+    std::shared_ptr<WeightSource> host_weights;
     const std::string weights_dir = a.get("weights");
     if (!weights_dir.empty()) {
         if (a.has("small")) {
@@ -369,13 +370,19 @@ int cmd_bench(const Args& a) {
         }
         const std::string component = (stage == "t5-encode") ? "text_encoder"
                                     : (stage == "vae-decode") ? "vae" : "transformer";
-        weights = std::make_shared<CheckpointWeights>(
+        host_weights = std::make_shared<CheckpointWeights>(
             CheckpointWeights::component(weights_dir, component));
     } else {
         auto synth = std::make_shared<SyntheticWeights>(dt);
         declare_pixart_shapes(*synth, t5, dit, vae);
-        weights = synth;
+        host_weights = synth;
     }
+    // Placed on the device the stage will run on. Every other command does this; `bench` did
+    // not, so a CUDA run here met a host weight table and faulted -- which is the guard working,
+    // but only after the calibration had already started.
+    std::shared_ptr<WeightSource> weights_keep;
+    std::shared_ptr<WeightSource> weights =
+        place(host_weights, dev, dt, &weights_keep);
 
     const int64_t f = vae.scale_factor();
     const int64_t latent = resolution / f;
@@ -383,13 +390,22 @@ int cmd_bench(const Args& a) {
 
     std::vector<double> times;
     OutputStats stats{};
+    // Inputs are built on the HOST -- they are filled with scalar stores -- and then placed.
+    // A tensor filled by a host loop and handed straight to a CUDA kernel is the fault this
+    // runtime's device boundary exists to make loud.
+    const auto place_in = [&](Tensor t) {
+        return (dev == Device::CUDA) ? t.to_device() : t;
+    };
     const auto run_stage = [&]() -> Tensor {
         if (stage == "t5-encode") {
             T5Encoder e(t5, *weights, dt);
             Tensor ids({batch, caption_len}, dt);
             for (int64_t i = 0; i < ids.numel(); ++i)
                 ids.set(i, static_cast<float>((i * 7) % (t5.vocab_size - 1)));
-            return e.forward(ids, impls);
+            Tensor ids_f({batch, caption_len}, DType::F32);
+            for (int64_t i = 0; i < ids.numel(); ++i) ids_f.set(i, ids.get(i));
+            Tensor d_ids = place_in(ids_f);
+            return e.forward(d_ids, impls);
         }
         if (stage == "dit-step") {
             PixArtDiT d(dit, *weights, dt);
@@ -407,25 +423,31 @@ int cmd_bench(const Args& a) {
                 for (int64_t i = 0; i < caption_len; ++i)
                     mask.set(b * caption_len + i,
                              i < std::max<int64_t>(1, caption_len / 4) ? 1.0f : 0.0f);
-            return d.forward(z, 500.0, cap, mask, impls);
+            Tensor dz = place_in(z), dcap = place_in(cap), dmask = place_in(mask);
+            return d.forward(dz, 500.0, dcap, dmask, impls);
         }
         if (stage == "vae-decode") {
             VaeDecoder v(vae, *weights, dt);
             Tensor z({1, vae.latent_channels, latent, latent}, dt);
             for (int64_t i = 0; i < z.numel(); ++i)
                 z.set(i, static_cast<float>(std::sin(static_cast<double>(i) * 0.21)));
-            return v.forward(z, impls);
+            Tensor dz = place_in(z);
+            return v.forward(dz, impls);
         }
         throw std::runtime_error("unknown stage '" + stage + "'");
     };
 
     for (int i = 0; i < warmup; ++i) run_stage();
+    device_sync_if(dev);
     for (int i = 0; i < iters; ++i) {
         const auto t0 = clock::now();
         Tensor out = run_stage();
+        // Timed across a synchronise, or a CUDA measurement times the launch queue rather than
+        // the work -- which reads as a spectacular and entirely fictional speedup.
+        device_sync_if(dev);
         const auto t1 = clock::now();
         times.push_back(std::chrono::duration<double>(t1 - t0).count());
-        if (i == 0) stats = OutputStats::of(out);
+        if (i == 0) stats = OutputStats::of((dev == Device::CUDA) ? out.to_host() : out);
     }
     std::sort(times.begin(), times.end());
     const double median = times[times.size() / 2];
@@ -435,6 +457,7 @@ int cmd_bench(const Args& a) {
         {"resolution", std::to_string(resolution)}, {"batch", std::to_string(batch)},
         {"caption_len", std::to_string(caption_len)},
         {"weights", weights_dir.empty() ? "synthetic" : "checkpoint"},
+        {"device", a.get("device", "cpu")},
     };
     for (const auto& kv : impls.as_map()) effective["impl." + kv.first] = kv.second;
 
