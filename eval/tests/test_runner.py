@@ -8,6 +8,7 @@ correct.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -125,24 +126,47 @@ class TestCliRefusesToEstimate(unittest.TestCase):
             self.assertIn("There is no fallback", p.stderr)
 
     def test_every_entry_point_answers_help(self):
-        """The cheapest possible check that a binary is not simply broken."""
+        """The cheapest possible check that a binary is not simply broken.
+
+        DISCOVERED, not listed. A hand-maintained list is how this test came to cover six entry
+        points while the repository had ten -- and the four it missed included the ones most
+        recently written, which are the ones most likely to be broken.
+
+        It earns its keep: `calibrate.py` once referenced `RunnerError` without importing it, in
+        a handler that only runs when there is no device. Every no-device failure would have
+        been a NameError. Nothing else in the suite would have noticed, because nothing else
+        runs that file on a machine without a GPU.
+        """
         import subprocess
         root = Path(__file__).resolve().parent.parent.parent
-        entries = [root / "tools" / "burnish", root / "eval" / "screen.py",
-                   root / "eval" / "roofline_table.py", root / "eval" / "make_generation.py",
-                   root / "eval" / "bench.py", root / "eval" / "calibrate.py",
-                   root / "eval" / "gate.py"]
+        entries = [root / "tools" / "burnish"]
+        for py in sorted((root / "eval").glob("*.py")) + sorted((root / "scripts").glob("*.py")):
+            src = py.read_text()
+            if 'if __name__ == "__main__"' in src and "argparse" in src:
+                entries.append(py)
+        self.assertGreaterEqual(len(entries), 10,
+                                f"only found {len(entries)} entry points; the discovery is "
+                                f"probably broken rather than the repository shrinking")
         for e in entries:
             p = subprocess.run([sys.executable, str(e), "--help"],
-                               capture_output=True, text=True)
-            self.assertEqual(p.returncode, 0, f"{e.name} --help exited {p.returncode}")
+                               capture_output=True, text=True, timeout=120)
+            self.assertEqual(p.returncode, 0,
+                             f"{e.name} --help exited {p.returncode}\n{p.stderr[-600:]}")
             self.assertTrue(p.stdout.strip(), f"{e.name} --help printed nothing")
-        for sub in ("screen", "roofline", "generation", "score", "receipt", "ledger",
-                    "probe", "calibrate", "gate", "bench"):
-            p = subprocess.run([sys.executable, str(root / "tools" / "burnish"), sub, "--help"],
-                               capture_output=True, text=True)
-            self.assertEqual(p.returncode, 0, f"burnish {sub} --help exited {p.returncode}")
 
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    def test_every_burnish_subcommand_answers_help(self):
+        """Same discipline one level down: the subcommands are read off the parser itself."""
+        import subprocess
+        root = Path(__file__).resolve().parent.parent.parent
+        burnish = root / "tools" / "burnish"
+        out = subprocess.run([sys.executable, str(burnish), "--help"],
+                             capture_output=True, text=True, timeout=120).stdout
+        m = re.search(r"\{([a-z,\-]+)\}", out)
+        self.assertIsNotNone(m, "cannot read the subcommand list off `burnish --help`")
+        subs = m.group(1).split(",")
+        self.assertGreaterEqual(len(subs), 10)
+        for cmd in subs:
+            p = subprocess.run([sys.executable, str(burnish), cmd, "--help"],
+                               capture_output=True, text=True, timeout=120)
+            self.assertEqual(p.returncode, 0,
+                             f"burnish {cmd} --help exited {p.returncode}\n{p.stderr[-400:]}")
