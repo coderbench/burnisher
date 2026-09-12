@@ -59,6 +59,26 @@ class TestProseMatchesTheArtifacts(unittest.TestCase):
             self._want(doc, name, fp32, "eval/cells/BG-1/dtype-latency.json")
             self._want(doc, name, bf16, "eval/cells/BG-1/dtype-latency.json")
 
+    def test_the_documented_scoring_cost_matches_what_the_screen_computes(self):
+        """docs/STATUS.md quotes what a submission costs. The screen computes it.
+
+        Two places carrying one number is how the number goes wrong, and this one matters more
+        than most: it is the figure a validator uses to decide whether it can afford to run.
+        """
+        import subprocess, sys, tempfile
+        with tempfile.NamedTemporaryFile(suffix=".json") as f:
+            subprocess.run([sys.executable, str(ROOT / "eval" / "screen.py"),
+                            "--json", f.name], check=True, capture_output=True)
+            doc = json.loads(Path(f.name).read_text())
+        sc = doc["results"]["pixart-sigma-xl2-1024"]["score_cost"]
+        self.assertEqual(sc["basis"], "measured")
+        minutes = sc["predicted_receipt_seconds"] / 60
+        self._want(self.status, "docs/STATUS.md", f"{minutes:.0f} modelled-from-measurement",
+                   "eval/screen.py SCORE_COST")
+        self.assertFalse(sc["pass"],
+                         "SCORE_COST passes now; docs/STATUS.md says it fails. One of them is "
+                         "wrong and the document cannot be the one that decides.")
+
     def test_neither_document_still_claims_the_repository_is_unmeasured(self):
         """The specific sentences that were true before the hardware arrived and false after.
 

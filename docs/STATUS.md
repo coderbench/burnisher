@@ -301,10 +301,32 @@ traffic made the step *slower*. A path at 1.5%
 of its ceiling is bound by neither bytes nor flops, so narrowing its weights moves the published
 ceiling down and the measurement not at all. `issues/weight-formats.md` carries this.
 
-**3. How this behaves with many miners submitting at once.** Every number here comes from one box
-running one submission at a time. Queueing, scheduling, and the cost of scoring N submissions a
-day are unmeasured. Nothing about the scoring model changes; how long a miner waits for a receipt
-does.
+**3. How this behaves with many miners submitting at once.** Queueing and scheduling across
+submissions are unmeasured. What one submission costs is now measured, and it is the screen
+question that fails:
+
+| stage | cost on the pinned part |
+|:--|--:|
+| gate the base arm | 6.3 min, **cached per base commit** — paid once, not once per PR |
+| gate the candidate | 7.2 min |
+| paired bench, 3 repeats | 17.1 min |
+| **total, typical PR** | **~24 min** |
+
+That was 44 minutes until four things were fixed: the bench was averaging over more invocations
+than the floors were calibrated with (a defect, not a setting — see below), the gate regenerated
+a prompt the determinism replays had already produced, the base arm's gate was recomputed per
+submission although it depends only on the base commit, and the repeat count was five where
+three resolves the same verdict.
+
+**`burnish screen` now reports SCORE_COST as FAIL**, at 31 modelled-from-measurement minutes
+against a 30-minute budget. It read PASS at 2.5 minutes for as long as the question was answered
+from arithmetic — it assumed a first implementation reaches 35% of its roofline, and this one
+reaches 1.5%. The assumption was labelled and published the whole time. A clearly-marked
+prediction is still a prediction.
+
+It is also the only measurement in this repository that improves without anyone working on it
+directly: scoring cost is proportional to how slow the runtime is, so every contribution the
+benchmark pays for makes the benchmark cheaper to run.
 
 **4. Whether the roofline is the right ceiling for every cell.** It is an arithmetic bound:
 `max(flops/peak, unavoidable_bytes/bandwidth)`. For a cell whose real limit is launch overhead —
@@ -365,6 +387,12 @@ of thing a first real run exists to catch, and it would have hit the first miner
   fallback for the other fourteen ops is per-device, and a host baseline under a device run is a
   fault rather than a slow path. This cost the first real scoring run a restart, and
   `tests/test_ops.cpp` now pins it as a property: on a device run, no op resolves to `stock`.
+- **A floor and the effect it judges must come from the same instrument.** A cell's noise floor
+  is the spread of one procedure — the median of `iters` timed invocations after `warmup`
+  untimed ones. The floors were calibrated at 2/5 and the bench ran 3/10 with no flag to change
+  it, so every scored run cost twice the GPU time it needed to produce a number quieter than the
+  floor it was compared against. `bench.py` now reads both from the calibration and refuses a
+  generation that cannot say what measured its floors.
 - **A receipt that cannot name the code it scored is not evidence.** `candidate_commit`,
   `base_commit` and `instrument_from` go null whenever the runner has no git metadata — a tarball
   deploy does it. Null reads as "not applicable" to anybody skimming, and the correct reading is
