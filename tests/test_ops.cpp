@@ -313,6 +313,12 @@ int main() {
     // Stated as a property rather than a list of op names so that adding an op cannot quietly
     // opt out of it: on a device run, NO op may resolve to `stock`.
 #ifdef BURNISHER_CUDA
+    // This file registers only the HOST ops on purpose -- it is the CPU oracle's test, and an
+    // oracle that quietly picked up device kernels would stop being one. So the device backend
+    // is registered here, inside the one block that needs it. Registration touches no device:
+    // it stores function pointers, which is why this block runs on a machine with no GPU as
+    // long as the build had a toolkit.
+    register_cuda_ops();
     for (const auto& kv : ImplSelection::from_request("cuda-tile1024", Device::CUDA).as_map()) {
         if (kv.first == "device") continue;
         CHECK(kv.second != "stock");
