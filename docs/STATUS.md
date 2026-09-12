@@ -52,7 +52,7 @@ measuring the floor instead of guessing it buys.
 |:--|:--|:--|
 | The six-question screen | complete, runs | `burnish screen` |
 | Per-cell arithmetic rooflines | complete, generated from configs | `burnish roofline` |
-| Gap-closed scoring | complete, 79 tests | `python3 -m unittest discover -s eval -t eval` |
+| Gap-closed scoring | complete, and it has scored a real run | `python3 -m unittest discover -s eval -t eval` |
 | Measured noise floor, paired bootstrap | complete, tested | same |
 | Frontier over latency / VRAM / fidelity | complete, tested | same |
 | Receipts and the append-only ledger | complete, tested | same |
@@ -62,16 +62,16 @@ measuring the floor instead of guessing it buys.
 | T5 encoder / PixArt DiT / VAE decoder graphs | complete | `burnisher selftest` |
 | DPM-Solver++ scheduler | complete, pinned against the reference construction | `ctest` |
 | End-to-end pipeline, byte-identical replays | complete | `burnisher selftest` |
-| Correctness gate (determinism + reference) | complete, exercised against a fake device | `python3 -m unittest discover -s eval -t eval` |
-| Paired bench and calibration runners | complete, exercised against a fake device | `python3 -m unittest discover -s eval -t eval` |
+| Correctness gate (determinism + reference) | complete, and it has rejected and passed real builds | `eval/gate.py` |
+| Paired bench and calibration runners | complete, run on the pinned part | `examples/BG-1-pr-000001-raw.json` |
 | CUDA device probe | compiled for sm_120 and run on the pinned part | `burnisher probe` |
-| CUDA op backend | written and compiled; **not yet verified against the CPU oracle** | `issues/cuda-op-backend.md` |
+| CUDA op backend | all 15 ops, gated against the pinned reference | `issues/cuda-op-backend.md` |
 | Checkpoint tensor names and shapes | verified against the pinned revisions, 962/962 | `scripts/verify_checkpoint_layout.py` |
 | Checkpoint load path (mmap, shard search, dtypes) | complete, run against real weights | `burnisher check-weights --weights DIR` |
-| `burnisher generate` on a real checkpoint | wired; needs token ids and the 22 GB download | `issues/checkpoint-load.md` |
-| Reference latents for the gate | **do not exist** | `issues/checkpoint-load.md` |
-| Every cell's achieved fraction | **null** | `burnish roofline` |
-| Every cell's noise floor | **null** | `burnish roofline` |
+| `burnisher generate` on a real checkpoint | run, gated, and calibrated on the pinned part | `issues/checkpoint-load.md` |
+| Reference latents for the gate | committed, 4 prompts in fp32 and bf16 | `eval/cells/BG-1/reference-latents/` |
+| Every implemented cell's achieved fraction | measured, 9 paired repeats | `burnish roofline` |
+| Every implemented cell's noise floor | measured, `spread`-decided in all three | `burnish roofline` |
 | Device peaks behind every implemented cell | measured on the pinned 5090 | `configs/devices.json` |
 | Device peaks behind the fp8/NVFP4 cells | **vendor, not probed** | `configs/devices.json` |
 
@@ -96,16 +96,18 @@ it gives NaNs, or magnitudes in the thousands, or a constant.
 benchmarks of anything and are recorded only to say the runs happened.)
 
 That exercises the mmap, the header parse, the offset arithmetic, the dtype mapping, the shard
-search and the two model graphs against real bytes. It does **not** verify the numerics against
-the reference implementation. That is the correctness gate, and it needs reference latents that do
-not exist yet — so "the output is plausible" is the strongest claim available here, and it is
-weaker than "the output is right".
+search and the two model graphs against real bytes. On its own it establishes only that the
+output is *plausible*, which is weaker than "the output is right" — the difference is the
+correctness gate, and the gate now runs against committed reference latents. Both tiers are kept
+here because they fail differently: a plausible-looking output is what every defect below
+produced.
 
 ### Five correctness defects the runtime had, and how they were found
 
-Both were invisible to every self-consistency check in the repository, which is the point worth
-recording: a deterministic wrong answer passes a determinism test, and two implementations that
-are wrong the same way agree with each other.
+Every one of them was invisible to every self-consistency check in the repository, which is the
+point worth recording: a deterministic wrong answer passes a determinism test, and two
+implementations that are wrong the same way agree with each other. Each produced a plausible
+image.
 
 **Attention was reading the wrong slices.** The op indexed `[batch, heads, seq, head_dim]` while
 every projection GEMM produces `[batch * seq, heads * head_dim]` — which is `[batch, seq, heads,
@@ -175,9 +177,9 @@ attention op now takes a `[batch, kv_len]` key mask, per batch row, because unde
 guidance the negative and positive prompts have different lengths and one shared mask either
 attends to padding or drops real tokens.
 
-Neither would have survived the correctness gate against a reference. Both survived everything
-this repository could check without one, which is the argument for getting the reference latents
-made.
+None of them would have survived the correctness gate against a reference. All of them survived
+everything this repository could check without one. That is the whole argument for the gate, and
+it is why the gate is not negotiable for a submission: correctness before speed, always.
 
 **And the strongest check now available: stage-by-stage against the reference.**
 
@@ -185,10 +187,11 @@ made.
 the same weights and the same input tensor, and compares. That is the correctness gate's question
 at a scale a CPU can answer, and it is what found the patch-ordering and sampler defects.
 
-**All four stages now agree with the reference.** That is the strongest correctness statement this
-repository can make without a GPU, and it is still weaker than the gate: it is one forward pass
-per stage, in fp32, at shapes no receipt is scored on. It says the arithmetic is right. It does
-not say the twenty-step bf16 loop at 1024px is.
+**All four stages agree with the reference.** That is the strongest correctness statement
+available without a GPU, and it is weaker than the gate: one forward pass per stage, in fp32, at
+shapes no receipt is scored on. It says the arithmetic is right. It does not say the twenty-step
+bf16 loop at 1024px is — which is exactly what the gate now checks, against committed latents, on
+the pinned part.
 
 | stage | shape | relative L2 vs reference | verdict |
 |:--|:--|--:|:--|
@@ -210,9 +213,10 @@ workable tolerance**: two correct fp32 implementations already differ by 7.3e-4 
 pass, so a gate set below about 1e-3 would reject a correct implementation. It is recorded in
 `eval/cells/BG-1/generation.json` under `tolerance._measured_floor`.
 
-It does *not* establish the 2% figure itself. That is one forward pass in fp32; the scored path
-is twenty steps in bf16, where both the rounding and the accumulation are larger. 2% remains a
-stated threshold expected to move once, when `burnish gate --calibrate-tolerance` runs.
+It does *not* establish the gate threshold itself. That is one forward pass in fp32; the scored
+path is twenty steps in bf16. The thresholds now in `configs/tolerance.json` are measured rather
+than argued, and the measurement produced a result that changed the gate's design — see
+**How the gate is actually set** below.
 
 **What was done about the rest of that class.** The remaining intricate oracle details are now
 differential-tested against independent implementations written from the reference's published
@@ -243,26 +247,42 @@ that never ends) when choosing a held-out shape, and it never produced the
 `latent_l2_vs_reference` objective the generation declares — so the frontier would have come out
 as exactly zero for both arms and every result would have read `MOVED_ALONG_FRONTIER`.
 
-## The four things that are not known, stated precisely
+## How the gate is actually set, because the obvious way does not work
 
-**1. How full any cell is.** Every cell publishes an arithmetic ceiling and `achieved: null`. A
-ceiling says how big the box is. It says nothing about how full it is, and a cell at 95% of its
-ceiling looks identical in the published table to one at 8%. Nothing in this repository should be
-read as a claim that there is room in a cell — only that there could be, and at most how much.
+The obvious correctness gate is: run the pipeline, compare the final latent against the
+reference, fail if the difference exceeds a threshold. That gate cannot be built at the scored
+dtype, and finding out why changed the design.
 
-**2. What any cell's noise floor is.** The scoring model credits a gain only when it clears that
-cell's own measured run-to-run spread. Those spreads are null. Until `burnish calibrate` runs,
-the scorer refuses to produce a receipt at all — it raises rather than substituting a constant,
-because a guessed floor is precisely the mistake this scoring model exists to replace.
+`eval/cells/BG-1/dtype-cost.json` records the reference implementation compared against
+**itself** across dtypes. Worst relative L2: **0.3713**.
+The oracle disagrees with itself, at bf16, by far more than a real defect needs to produce. A
+threshold above that admits everything; a threshold below it rejects the reference.
 
-**3. ~~Whether the peaks the ceilings stand on are reachable.~~ MEASURED.** `burnish probe` has
-run on the pinned RTX 5090 and the three implemented cells now read `peak_basis: measured`. The
-two declared fp8/NVFP4 cells still read `vendor`, because those peaks were not measured.
+So the gate asks two narrower questions instead:
+
+1. **Is the assembly right?** The whole pipeline in fp32 against the fp32 reference latents,
+   where the same comparison lands at **0.0005**. The
+   threshold is 0.0025 — five times this build's measured drift, not a round
+   number.
+2. **Is the reduced-precision path right?** Stage by stage at the scored dtype, against per-stage
+   tolerances, because a stage's own error is measurable where the composed loop's is not.
+
+Plus determinism — byte-identical replays — which gates both, because a build that does not
+reproduce itself cannot be compared to anything.
+
+**One defect was found and deliberately left in.** The sampler quantises an intermediate of
+magnitude ~300 to bf16 at sigma=157. Fixing it would make this runtime *more* accurate than the
+oracle it is gated against, so the gate would then reject the fix. It is recorded in
+`issues/sampler-precision.md` and belongs to a future generation, not to a tolerance edit.
+
+## What is still not known
+
+**1. Whether the fp8 and NVFP4 peaks are reachable.** Those two cells still read
+`peak_basis: vendor`. Every implemented cell reads `measured`.
 
 **A correction, from the measurement.** This repository previously stated that a vendor peak is
 always optimistic, so every achieved fraction computed against one is a lower bound and the real
-room is smaller. That is a guess about direction, and the probe contradicts half of it. The error
-runs whichever way the assumption was wrong, and it differs *per term*:
+room is smaller. That is a guess about direction, and the probe contradicts half of it:
 
 | term | assumed | measured on the part | effect on the published room |
 |:--|--:|--:|:--|
@@ -270,34 +290,58 @@ runs whichever way the assumption was wrong, and it differs *per term*:
 | bandwidth | 1792 GB/s | **1506.7** | assumed peak was HIGH, so room was **overstated** — the dangerous direction |
 
 Every BG-1 cell is compute-bound, so the first term governed and the published table was
-conservative. That was luck, not design. The general statement is the honest one: **an unmeasured
-peak makes the room wrong in an unknown direction, and only a probe settles it.**
+conservative. That was luck, not design. The honest general statement: **an unmeasured peak makes
+the room wrong in an unknown direction, and only a probe settles it.**
 
+**2. What the fp8/NVFP4 cells are actually worth.** Their ceilings are published, and they carry
+`implemented: false` and weight 0. A measurement says those ceilings are not collectable yet: one
+DiT step costs **3.266 s at fp32** and **3.576 s at
+bf16** (0.913x, 5 paired repeats). Halving the weight
+traffic made the step *slower*. A path at 1.5%
+of its ceiling is bound by neither bytes nor flops, so narrowing its weights moves the published
+ceiling down and the measurement not at all. `issues/weight-formats.md` carries this.
 
-**4. Whether the CUDA code compiles.** It has never been near a compiler. `src/cuda/device.cu` is
-the probe and it is the only CUDA in the tree; there is no CUDA implementation of any op, so the
-runtime cannot currently run on a device at all. The CI job `cuda-compile` exists to make that
-stop being true and is `continue-on-error` today.
+**3. How this behaves with many miners submitting at once.** Every number here comes from one box
+running one submission at a time. Queueing, scheduling, and the cost of scoring N submissions a
+day are unmeasured. Nothing about the scoring model changes; how long a miner waits for a receipt
+does.
 
-## What a first session on the pinned hardware would produce
+**4. Whether the roofline is the right ceiling for every cell.** It is an arithmetic bound:
+`max(flops/peak, unavoidable_bytes/bandwidth)`. For a cell whose real limit is launch overhead —
+which, per (2), `dit-step` currently is — the roofline is correct but distant, and gap-closed
+scoring treats a launch-structure win and a tensor-core win as the same currency. That is
+intentional, and it is worth knowing it is a choice.
 
-In this order, because each step unblocks the next:
+## The first run the instrument ever scored
 
-1. `scripts/build_cuda.sh` — does the probe compile for sm_120? This is the first time anyone
-   will know.
-2. `burnish probe` — sustained bandwidth and achievable bf16 GEMM rate. Copy into
-   `configs/devices.json` with `source: measured`, regenerate the generation and the roofline
-   table. **Every ceiling in the repository changes at this point**, and every one of them
-   changes in the direction of less room.
-3. The CUDA op backend (`issues/cuda-op-backend.md`), then the checkpoint load path
-   (`issues/checkpoint-load.md`). Neither is a measurement; both are prerequisites for one.
-4. `burnish gate --determinism` — ten replays, byte-identical. If this fails, stop: nothing
-   downstream means anything until it passes.
-5. `burnish gate` against the pinned reference latents.
-6. `burnish calibrate --repeats 9 --write` — the achieved fractions and the noise floors. The
-   roofline table becomes real here, and some cells may turn out to be unresolvable, which is a
-   result and should be published as one rather than quietly dropped.
-7. Only now can `burnish bench` produce a receipt.
+It was a regression, and it is committed in `examples/` with the raw measurements behind it.
+
+The candidate was `cuda-tile1024` — the same attention kernel with a 1024-wide key tile instead
+of 64 — chosen because nobody expected it to win. It didn't: one DiT step went from 3.58 s to
+5.69 s. What the receipt did with that is the part worth reading:
+
+```
+  status            UNRESOLVED
+  gap closed        -0.0056   (credited +0.0000)
+  99% interval     [-0.0057, -0.0056]
+
+    dit-step/1024/bf16          -0.0058     1.5% -> 1.0%     0.578%  yes
+    t5-encode/1024/bf16         -0.0094    18.1% -> 17.3%    3.753%  yes
+    vae-decode/1024/bf16        -0.0000     0.8% -> 0.8%     0.259%   NO
+```
+
+Two cells resolved the regression and named it. `vae-decode` differed by about 0.2% against a
+0.259% floor and **did not resolve** — not a small effect, *no measurement* — so it contributed
+zero without blocking the submission. And the regression credited **zero, not negative**: the
+ledger compounds toward a ceiling, and a mechanism that could be pushed backwards would let
+anyone move it.
+
+**It also found a bug in the runtime, which is why it was worth running.** The first attempt died
+in the gate: an implementation name registered by one op fell back to the *host* kernels for the
+other fourteen, so any single-kernel submission — which is what almost every submission is — got
+host kernels handed device pointers. That is fixed (`resolve_impl` takes the device, and
+`tests/test_ops.cpp` pins that no op resolves to `stock` on a device run). It is exactly the class
+of thing a first real run exists to catch, and it would have hit the first miner instead.
 
 ## Things that would be easy to get wrong later
 
@@ -311,5 +355,18 @@ In this order, because each step unblocks the next:
   re-checks it offline. That check found one real defect on its first run.
 - **The 2D position embedding is sin-then-cos and the timestep embedding is cos-then-sin.** Two
   conventions in one model is not a design, it is history. Both are marked `ORACLE` in the source.
-- **The tolerance in BG-1 is a stated, falsifiable threshold and is expected to move once**, the
-  first time `burnish gate --calibrate-tolerance` measures the real bf16-vs-fp32 drift.
+- ~~The tolerance in BG-1 is a stated, falsifiable threshold and is expected to move once.~~
+  **It moved.** Both thresholds were argued from a single fp32 forward pass and both were wrong;
+  `configs/tolerance.json` now carries measured values, the reasoning, and the measurements
+  behind them. A tolerance is now a frozen part of a generation: changing one is a new
+  generation, not an edit, because receipts already scored against it would otherwise mean
+  something different.
+- **An implementation name that only one op registers still has to run on the device.** The
+  fallback for the other fourteen ops is per-device, and a host baseline under a device run is a
+  fault rather than a slow path. This cost the first real scoring run a restart, and
+  `tests/test_ops.cpp` now pins it as a property: on a device run, no op resolves to `stock`.
+- **A receipt that cannot name the code it scored is not evidence.** `candidate_commit`,
+  `base_commit` and `instrument_from` go null whenever the runner has no git metadata — a tarball
+  deploy does it. Null reads as "not applicable" to anybody skimming, and the correct reading is
+  "unknown", so the receipt now states `code_provenance_complete` outright instead of leaving it
+  to be inferred from three absences.
