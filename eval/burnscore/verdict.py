@@ -123,6 +123,70 @@ EXTRA_OUTCOMES = {
 ALL_OUTCOMES = {**OUTCOMES, **EXTRA_OUTCOMES}
 
 
+# Colour by what the outcome MEANS to the person who wrote the pull request, not by severity.
+#
+# A reader scanning a list of pull requests should be able to tell, without reading a word, which
+# of four things happened: you were paid, you were measured and not paid, we could not tell, or
+# it was rejected. Severity colouring gets this wrong -- it would paint `unresolved` and
+# `correctness-fail` the same alarming red, when one of them is "we could not measure your idea"
+# and the other is "your change is incorrect".
+#
+# Kept here rather than in the shell script that creates the labels, so the colour and the
+# meaning sit in one place and a new outcome cannot be added without one.
+GREEN = "0E8A16"       # paid
+BLUE = "1D76DB"        # a real measurement that did not pay
+PALE = "C5DEF5"        # we could not tell
+RED = "B60205"         # rejected on correctness
+AMBER = "FBCA04"       # rejected on a guard
+PURPLE = "8250DF"      # disputed
+GREY = "BFD4F2"        # not evaluated
+ORANGE = "F9A825"      # the evaluator's own fault
+
+COLORS = {
+    "FRONTIER_EXPANDED": GREEN,
+    "EXPANDED_OFF_LATENCY": GREEN,
+    "CELL_OPENED": GREEN,
+    "NO_GAIN": BLUE,
+    "MOVED_ALONG_FRONTIER": BLUE,
+    "UNRESOLVED": PALE,
+    "PARTIAL": PALE,
+    "SHAPE_OVERFIT": AMBER,
+    "CORRECTNESS_FAIL": RED,
+    "DETERMINISM_FAIL": RED,
+    "HELD": PURPLE,
+    "BUILD_FAIL": ORANGE,
+    "EVAL_ERROR": ORANGE,
+}
+
+# The paying label carries a NUMBER, so it is created on demand rather than pre-registered --
+# and a label GitHub auto-creates gets a RANDOM colour. The most important outcome in the system
+# would have come out a different shade every time, occasionally red.
+#
+# So it is coloured here, and the shade carries the magnitude: a bigger contribution is a deeper
+# green. Logarithmic, because real values span orders of magnitude -- the noise floor on the
+# tightest cell is worth 0.00009 of the gap and a large win is 0.1, and a linear ramp would paint
+# everything below a tenth the same pale colour.
+GAP_RAMP_LO, GAP_RAMP_HI = 1e-4, 0.5
+GAP_PALE = (0xC6, 0xE6, 0xC6)
+GAP_DEEP = (0x04, 0x4D, 0x0C)
+
+
+def color_for(receipt: dict) -> str:
+    """The label colour for this outcome. Six hex digits, no leading '#', as GitHub wants."""
+    import math
+    status = receipt.get("status")
+    if status in CREDITING:
+        credited = float((receipt.get("score") or {}).get("credited_gap_closed") or 0.0)
+        if credited <= 0:
+            return COLORS.get(status, GREY)
+        lo, hi = math.log10(GAP_RAMP_LO), math.log10(GAP_RAMP_HI)
+        t = (math.log10(max(credited, GAP_RAMP_LO)) - lo) / (hi - lo)
+        t = min(max(t, 0.0), 1.0)
+        rgb = tuple(round(a + (b - a) * t) for a, b in zip(GAP_PALE, GAP_DEEP))
+        return "%02X%02X%02X" % rgb
+    return COLORS.get(status, GREY)
+
+
 class VerdictError(ValueError):
     """A receipt cannot be turned into a verdict."""
 

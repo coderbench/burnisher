@@ -82,7 +82,26 @@ def already_labelled(pr) -> bool:
     return any(n.startswith(f"{V.PREFIX}:") for n in names)
 
 
-def set_label(repo, num, label, *, dry_run=False):
+def ensure_label(repo, label, color, description, *, dry_run=False):
+    """Create the label with the colour we chose, before attaching it.
+
+    Attaching a label that does not exist creates it -- with a colour GitHub picks at RANDOM.
+    The fixed outcomes are pre-registered by eval/setup_labels.sh and so keep their meaning, but
+    the PAYING label carries the measured number and therefore cannot be pre-registered: there is
+    a different one for every value. Left alone, the most important outcome in the system came
+    out a different shade every time, occasionally red.
+    """
+    if dry_run or not color:
+        return
+    owner, name = repo.split("/", 1)
+    r = gh(["api", f"repos/{owner}/{name}/labels", "--method", "POST",
+            "-f", f"name={label}", "-f", f"color={color}",
+            "-f", f"description={description[:100]}"], check=False)
+    if r.returncode != 0 and "already_exists" not in (r.stderr + r.stdout):
+        print(f"   (could not set the colour for {label}: {r.stderr.strip()[:120]})")
+
+
+def set_label(repo, num, label, *, color=None, description="", dry_run=False):
     """Replace any previous burnish:* label with this one, via the REST API.
 
     REST rather than `gh pr edit`: that path goes through a GraphQL query that fails on
@@ -90,8 +109,10 @@ def set_label(repo, num, label, *, dry_run=False):
     """
     owner, name = repo.split("/", 1)
     if dry_run:
-        print(f"   [dry-run] would label #{num}: {label}")
+        print(f"   [dry-run] would label #{num}: {label}"
+              + (f"  (#{color})" if color else ""))
         return
+    ensure_label(repo, label, color, description)
     cur = gh(["api", f"repos/{owner}/{name}/issues/{num}/labels", "--jq", "[.[].name]"])
     for old in json.loads(cur.stdout or "[]"):
         if old.startswith(f"{V.PREFIX}:") and old != label:
@@ -251,7 +272,8 @@ def evaluate(repo, pr, args) -> dict:
         pub.mkdir(parents=True, exist_ok=True)
         shutil.copy(out_dir / "raw.json", pub / f"{rid}-raw.json")
 
-        set_label(repo, num, v["label"])
+        set_label(repo, num, v["label"], color=V.color_for(receipt),
+                  description=v["headline"])
         comment(repo, num, report(v, receipt,
                                   raw_name=f"{rid}-raw.json", receipt_name=f"{rid}.json"))
         print(f"   {v['label']}   pays {v['payout_fraction']:.4f}")

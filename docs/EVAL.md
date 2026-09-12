@@ -100,6 +100,34 @@ submission that was never resolved, never correct, or never measured would be re
 | `burnish:held` | An independent re-measurement disagrees beyond the floor. |
 | `burnish:skipped-instrument` | Changes the instrument. Not evaluated, no GPU spent. |
 
+### The colours mean something
+
+Labels are coloured by what the outcome **means to you**, not by severity — severity colouring
+would paint `unresolved` and `correctness-fail` the same alarming red, when one is *"we could not
+measure your idea"* and the other is *"your change is incorrect"*.
+
+| | |
+|:--|:--|
+| green | paid — a gain, or a cell opened |
+| blue | a real measurement that did not pay |
+| pale blue | we could not tell |
+| red | rejected on correctness or determinism |
+| amber | rejected by a guard (shape overfit) |
+| purple | disputed — an independent re-measurement disagrees |
+| orange | the evaluator's own fault; not yours |
+
+**The paying label's shade carries the magnitude**: a bigger contribution is a deeper green, on a
+log scale, because real values span orders of magnitude — the tightest cell's noise floor is worth
+0.00009 of the gap and a large win is 0.1. So a list of pull requests is readable at a glance
+before anybody opens one.
+
+That label cannot be pre-registered — it carries the measured number, so there is one per value —
+and a label GitHub creates on first use gets a **random** colour. The bot therefore creates it
+with the right one before attaching it. Colours and meanings both live in
+`eval/burnscore/verdict.py`; `eval/setup_labels.sh` reads them from there rather than keeping a
+second copy, because a label with a stale colour still works and so nobody notices it has come to
+mean something else.
+
 ---
 
 ## Disputing a result

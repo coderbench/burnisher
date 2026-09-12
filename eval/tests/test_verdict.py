@@ -97,6 +97,76 @@ class TestTheVerdictIsAPureFunction(unittest.TestCase):
                              f"{lab} is a letter grade")
 
 
+class TestLabelColour(unittest.TestCase):
+    """Colour by MEANING, and the paying label's shade carries the magnitude.
+
+    Two things go wrong if this is left alone. Colouring by severity paints `unresolved` and
+    `correctness-fail` the same alarming red, when one is "we could not measure your idea" and
+    the other is "your change is incorrect". And the paying label cannot be pre-registered --
+    it carries the measured number, so there is one per value -- which means GitHub creates it
+    on first use with a RANDOM colour. The most important outcome in the system came out a
+    different shade every time, occasionally red.
+    """
+
+    def _paying(self, gap):
+        return {"status": "FRONTIER_EXPANDED", "score": {"credited_gap_closed": gap}}
+
+    def test_every_outcome_has_a_colour(self):
+        for status in R.STATUSES:
+            self.assertIn(status, V.COLORS, f"{status} has no colour")
+            self.assertRegex(V.COLORS[status], r"^[0-9A-F]{6}$")
+
+    def test_a_bigger_contribution_is_a_deeper_green(self):
+        """Monotone, so a reader scanning a list sees relative size without reading numbers."""
+        def luminance(hexcolor):
+            r, g, b = (int(hexcolor[i:i + 2], 16) for i in (0, 2, 4))
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b
+        gaps = [0.0002, 0.001, 0.005, 0.02, 0.08, 0.3]
+        lums = [luminance(V.color_for(self._paying(g))) for g in gaps]
+        self.assertEqual(lums, sorted(lums, reverse=True),
+                         f"the ramp is not monotone: {list(zip(gaps, lums))}")
+
+    def test_the_ramp_is_logarithmic_not_linear(self):
+        """Real values span orders of magnitude -- the tightest cell's floor is worth 0.00009 of
+        the gap and a large win is 0.1. A linear ramp paints everything below a tenth the same
+        pale colour, which is most of what will ever be earned."""
+        def lum(g):
+            c = V.color_for(self._paying(g))
+            return sum(int(c[i:i + 2], 16) for i in (0, 2, 4))
+        # A decade near the bottom must move the colour comparably to a decade near the top.
+        low = lum(0.0005) - lum(0.005)
+        high = lum(0.005) - lum(0.05)
+        self.assertGreater(low, 0)
+        self.assertGreater(high, 0)
+        self.assertLess(abs(low - high) / max(low, high), 0.35,
+                        f"the ramp is not close to logarithmic: {low} vs {high} per decade")
+
+    def test_a_paying_outcome_is_never_a_rejection_colour(self):
+        for g in (0.0001, 0.01, 0.9):
+            self.assertNotIn(V.color_for(self._paying(g)), (V.RED, V.AMBER, V.ORANGE))
+
+    def test_meaning_not_severity(self):
+        """The distinction the palette exists to make."""
+        unresolved = V.color_for({"status": "UNRESOLVED", "score": {}})
+        wrong = V.color_for({"status": "CORRECTNESS_FAIL", "score": {}})
+        self.assertNotEqual(unresolved, wrong,
+                            "'we could not measure this' and 'this is incorrect' share a colour")
+        self.assertEqual(wrong, V.RED)
+
+    def test_the_setup_script_reads_colours_from_the_code(self):
+        """One place for colour and meaning. A second copy in the shell script would drift
+        silently -- a label with the wrong colour still works, so nobody notices."""
+        script = (ROOT / "eval" / "setup_labels.sh").read_text()
+        self.assertIn("V.COLORS", script)
+        self.assertIn("V.ALL_OUTCOMES", script)
+        self.assertNotIn("declare -A COLOR", script)
+
+    def test_the_bot_creates_the_paying_label_before_attaching_it(self):
+        bot = (ROOT / "eval" / "pr_bot.py").read_text()
+        self.assertIn("def ensure_label(", bot)
+        self.assertIn("color=V.color_for(receipt)", bot)
+
+
 class TestTheDeclaredModelMatchesTheCode(unittest.TestCase):
     """`.gittensor/weights.json` declares how this repository pays. The code decides.
 
