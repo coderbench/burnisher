@@ -14,6 +14,8 @@ noise -- pressing it smooth until the image emerges. This is the command that do
     burnish bench                  paired interleaved base-vs-candidate runs              [GPU]
 
     burnish score                  raw measurements -> a scored receipt
+    burnish verdict                a receipt's payable outcome, and the label that carries it
+    burnish audit                  re-derive a published verdict from its own measurements
     burnish receipt verify|show    check a receipt against itself and its generation
     burnish ledger show|audit      the append-only history
 
@@ -217,6 +219,52 @@ def cmd_receipt(args, rest):
     return 0
 
 
+def cmd_verdict(args, rest):
+    """The payable outcome of a receipt. A pure function of it, so anyone gets the same answer."""
+    from burnscore import verdict as V
+    doc = json.loads(Path(args.path).read_text())
+    v = V.verdict(doc)
+    if args.label_only:
+        print(v["label"])
+        return 0
+    if args.json:
+        print(json.dumps(v, indent=1, sort_keys=True))
+        return 0
+    print(f"  label          {v['label']}")
+    print(f"  status         {v['status']}  -- {v['headline']}")
+    print(f"  pays           {'yes' if v['pays'] else 'no'}")
+    if v["pays"]:
+        print(f"  payout         {v['payout_fraction']:.4f} of the remaining gap")
+    if v["measured_gap_closed"] is not None:
+        ci = v["confidence_interval"]
+        print(f"  measured       {v['measured_gap_closed']:+.4f}"
+              + (f"   {int(100 * (v['confidence_level'] or 0))}% interval "
+                 f"[{ci[0]:+.4f}, {ci[1]:+.4f}]" if ci and ci[0] is not None else ""))
+    print(f"  provenance     {'complete' if v['provenance_complete'] else 'INCOMPLETE'}")
+    print()
+    print(f"  {v['meaning']}")
+    return 0
+
+
+def cmd_audit(args, rest):
+    """Re-derive a published verdict from its published measurements. No GPU."""
+    import audit as A
+    argv = []
+    if args.ledger:
+        argv += ["--ledger", args.ledger]
+    elif args.raw and args.receipt:
+        argv += [args.raw, args.receipt]
+    else:
+        print("!! give a raw file and a receipt, or --ledger DIR", file=sys.stderr)
+        return 2
+    argv += ["--generation", args.generation]
+    if args.json:
+        argv += ["--json", args.json]
+    if args.cells_root:
+        argv += ["--cells-root", args.cells_root]
+    return A.main_with(argv)
+
+
 def cmd_ledger(args, rest):
     from burnscore import cells as C, ledger as L
     root = args.root or cells_root(args.cells_root)
@@ -308,6 +356,23 @@ def build_parser():
     p.add_argument("path")
     p.add_argument("--cells-root")
     p.set_defaults(fn=cmd_receipt)
+
+    p = sub.add_parser("verdict", help="a receipt's payable outcome and its label")
+    p.add_argument("path")
+    p.add_argument("--label-only", action="store_true",
+                   help="print just the label, for a bot to apply")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(fn=cmd_verdict)
+
+    p = sub.add_parser("audit",
+                       help="re-derive a published verdict from its measurements [no GPU]")
+    p.add_argument("raw", nargs="?")
+    p.add_argument("receipt", nargs="?")
+    p.add_argument("--ledger", help="audit every receipt/raw pair in a ledger")
+    p.add_argument("--generation", default="BG-1")
+    p.add_argument("--json")
+    p.add_argument("--cells-root")
+    p.set_defaults(fn=cmd_audit)
 
     p = sub.add_parser("ledger", help="the append-only receipt history")
     p.add_argument("action", choices=["show", "audit"])
