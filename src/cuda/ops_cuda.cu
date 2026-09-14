@@ -329,7 +329,9 @@ void norm_cuda(const NormArgs& a) {
 // constant, so the reduction order does not depend on how the launch was scheduled and the result
 // reproduces byte for byte.
 
-constexpr int64_t kNormChunk = 16384;
+// Short, because a GPU thread is slow at a long serial loop: at 16384 the chunk-sum pass was a
+// third of the VAE decode. Still a constant, so the reduction order still is too.
+constexpr int64_t kNormChunk = 1024;
 
 Tensor& scratch(int slot, int64_t numel, DType dtype);   // defined with attention, below
 
