@@ -86,6 +86,9 @@ class DeviceWeights : public WeightSource {
     DType dtype_;
     mutable std::mutex mutex_;
     mutable std::map<std::string, Tensor> cache_;
+    // Page-locked staging for uploads, grown to the largest weight seen.
+    mutable std::shared_ptr<void> stage_;
+    mutable size_t stage_bytes_ = 0;
 };
 
 struct T5Config {

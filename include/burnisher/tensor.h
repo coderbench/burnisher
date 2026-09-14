@@ -49,6 +49,9 @@ class Tensor {
     void set(int64_t flat, float v);
 
     Tensor to(DType target) const;
+    // What `to` computes, written into `dst` (numel() elements of `target`) instead of a new
+    // tensor, so a caller can convert straight into a buffer it owns. Host tensors only.
+    void convert_into(DType target, void* dst) const;
     // Explicit copies across the device boundary. Explicit because an implicit one is a copy
     // nobody sees in the code and everybody sees in the profile.
     Tensor to_device() const;

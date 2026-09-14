@@ -6,6 +6,7 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "burnisher/device.h"
 #include "burnisher/models.h"
 
 namespace burnisher {
@@ -199,9 +200,18 @@ Tensor DeviceWeights::get(const std::string& name) const {
     auto it = cache_.find(name);
     if (it != cache_.end()) return it->second;
     // Converted on the HOST and then uploaded, once, and cached. A weight re-uploaded per layer
-    // would dominate every measurement and would look like a slow kernel.
-    Tensor host = host_.get(name).to(dtype_);
-    Tensor dev = host.to_device();
+    // would dominate every measurement and would look like a slow kernel. Converted straight into
+    // page-locked staging, so the upload is one direct copy rather than two.
+    const Tensor host = host_.get(name);
+    Tensor dev(host.shape(), dtype_, Device::CUDA);
+    const size_t bytes = dev.nbytes();
+    if (bytes > stage_bytes_) {
+        stage_.reset();
+        stage_ = std::shared_ptr<void>(device::alloc_pinned(bytes), device::release_pinned);
+        stage_bytes_ = bytes;
+    }
+    host.convert_into(dtype_, stage_.get());
+    device::copy_to_device(dev.data(), stage_.get(), bytes);
     cache_.emplace(name, dev);
     return dev;
 }

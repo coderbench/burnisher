@@ -26,6 +26,8 @@ void release(void*) {}
 void copy_to_device(void*, const void*, size_t) { no_cuda("copy_to_device"); }
 void copy_to_host(void*, const void*, size_t) { no_cuda("copy_to_host"); }
 void synchronize() {}
+void* alloc_pinned(size_t) { no_cuda("alloc_pinned"); }
+void release_pinned(void*) {}
 size_t allocated_bytes() { return 0; }
 size_t peak_allocated_bytes() { return 0; }
 void reset_peak() {}

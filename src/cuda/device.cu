@@ -186,6 +186,16 @@ void copy_to_host(void* dst, const void* src, size_t bytes) {
 
 void synchronize() { check(cudaDeviceSynchronize(), "synchronize"); }
 
+void* alloc_pinned(size_t bytes) {
+    void* p = nullptr;
+    check(cudaMallocHost(&p, bytes), "cudaMallocHost");
+    return p;
+}
+
+void release_pinned(void* p) {
+    if (p) cudaFreeHost(p);
+}
+
 size_t allocated_bytes() { std::lock_guard<std::mutex> l(g_mutex); return g_live; }
 size_t peak_allocated_bytes() { std::lock_guard<std::mutex> l(g_mutex); return g_peak; }
 void reset_peak() { std::lock_guard<std::mutex> l(g_mutex); g_peak = g_live; }

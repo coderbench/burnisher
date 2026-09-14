@@ -122,32 +122,41 @@ void parallel_chunks(int64_t n, Fn fn) {
 
 Tensor Tensor::to(DType target) const {
     if (target == dtype_) return *this;
+    Tensor out(shape_, target, device_);
+    convert_into(target, out.data_);
+    return out;
+}
+
+void Tensor::convert_into(DType target, void* dst) const {
     if (device_ != Device::CPU) {
         throw std::runtime_error("Tensor::to: convert on the host, then upload");
     }
-    Tensor out(shape_, target, device_);
+    if (target == dtype_) {
+        std::memcpy(dst, data_, nbytes());
+        return;
+    }
     // fp32 <-> bf16 is how every checkpoint weight reaches a bf16 run, and element-wise through
     // get/set it was a single core walking T5's 4.7 billion parameters: ten seconds of every
     // generation spent before the text encoder ran. The same conversion functions, over raw
     // pointers and split across the host's cores.
     if (dtype_ == DType::F32 && target == DType::BF16) {
         const float* src = static_cast<const float*>(data_);
-        BF16* dst = static_cast<BF16*>(out.data_);
-        parallel_chunks(numel_, [src, dst](int64_t b, int64_t e) {
-            for (int64_t i = b; i < e; ++i) dst[i] = f32_to_bf16(src[i]);
+        BF16* out = static_cast<BF16*>(dst);
+        parallel_chunks(numel_, [src, out](int64_t b, int64_t e) {
+            for (int64_t i = b; i < e; ++i) out[i] = f32_to_bf16(src[i]);
         });
-        return out;
+        return;
     }
     if (dtype_ == DType::BF16 && target == DType::F32) {
         const BF16* src = static_cast<const BF16*>(data_);
-        float* dst = static_cast<float*>(out.data_);
-        parallel_chunks(numel_, [src, dst](int64_t b, int64_t e) {
-            for (int64_t i = b; i < e; ++i) dst[i] = bf16_to_f32(src[i]);
+        float* out = static_cast<float*>(dst);
+        parallel_chunks(numel_, [src, out](int64_t b, int64_t e) {
+            for (int64_t i = b; i < e; ++i) out[i] = bf16_to_f32(src[i]);
         });
-        return out;
+        return;
     }
+    Tensor out = Tensor::view(dst, shape_, target);
     for (int64_t i = 0; i < numel_; ++i) out.set(i, get(i));
-    return out;
 }
 
 Tensor Tensor::to_device() const {
