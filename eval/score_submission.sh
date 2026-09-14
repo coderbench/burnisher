@@ -37,11 +37,8 @@ WEIGHTS="${BURNISH_WEIGHTS:-}"; NOISE="${BURNISH_NOISE:-}"
 # evaluation is defined by and the scorer enforces it as a minimum, so hardcoding a number here
 # would be a second opinion about a frozen parameter.
 GEN="BG-1"; REPEATS=""; GATE_REPEATS=2; DTYPE="fp32"; DEVICE="cuda"; OUT=""
-# THIS BOX's calibration. Every validator has their own, and that is what makes two validators
-# agree about what a submission earned: `achieved` is ceiling over measured and both halves are
-# properties of the card, so probing locally makes them cancel. Scoring against the committed
-# reference device's calibration instead biases every result by roughly twice the hardware
-# difference -- about 6% between two RTX 5090s -- systematically and in the same direction.
+# An anchor other than the committed one. Normally empty: every card of the pinned class scores
+# against the generation's committed anchor, and no box needs a calibration of its own.
 CALIBRATION="${BURNISH_CALIBRATION:-}"
 
 usage() {
@@ -122,15 +119,6 @@ BASE_COMMIT="$(git -C "$SUB" rev-parse "$BASE" 2>/dev/null || echo unknown)"
 CACHE="${BURNISH_GATE_CACHE:-$HOME/.cache/burnish/gate}"
 KEY="$(printf '%s' "$BASE_COMMIT|$IMPL_BASE|$DTYPE|$DEVICE|$GEN|$GATE_REPEATS|$(sha256sum "$NOISE" | cut -c1-16)|$(readlink -f "$WEIGHTS")" | sha256sum | cut -c1-32)"
 HIT="$CACHE/gate-base-$KEY.json"
-
-if [ -z "$CALIBRATION" ]; then
-    echo
-    echo ">> NOTE: no --calibration given, so the committed REFERENCE DEVICE's calibration is"
-    echo "   used. That is correct only if this box IS the reference device -- the scorer"
-    echo "   checks the GPU UUID and will refuse rather than quietly biasing the result."
-    echo "   Calibrate this box once:  burnish probe --write"
-    echo "                             burnish calibrate --repeats 9 --output <yours>.json"
-fi
 
 say "1/4  gate the BASE arm ($IMPL_BASE)"
 if [ -s "$HIT" ]; then

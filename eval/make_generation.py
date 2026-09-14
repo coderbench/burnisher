@@ -30,21 +30,15 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def local_ceilings(generation_doc, device_key="rtx5090", devices=None) -> dict:
-    """Recompute this generation's per-cell ceilings against THIS box's probed peaks.
+    """Recompute this generation's per-cell ceilings against this machine's probed peaks.
 
     A ceiling is `max(flops/peak, unavoidable_bytes/bandwidth)`: the geometry is frozen with the
-    generation, the peaks belong to whatever card is in the machine. The two must not be frozen
-    together, and for a while they were -- `generation.json` carried a ceiling computed from the
-    reference device's probe, so a validator on a different card scored `achieved = someone
-    else's ceiling / my measurement`, which is a ratio of two machines.
+    generation, the peaks belong to whatever card is in the machine.
 
-    Splitting them is what makes a score portable: probed locally, both halves of the ratio scale
-    with the card and cancel. A 3% difference in the part then produces a 0.0000% difference in
-    gap-closed instead of a systematic 6%.
-
-    Called by `burnish calibrate`, which writes the result into the validator's own calibration
-    file. The frozen generation is never rewritten -- it holds what is measured, not what this
-    machine can do.
+    Called by `burnish calibrate` when a generation is anchored, so the anchor's achieved fraction
+    is one card's ceiling over the same card's time. Scoring takes only ratios from a run, so the
+    card that scores never needs this. The frozen generation is never rewritten -- it holds what
+    is measured, not what a machine can do.
     """
     cands = json.loads((ROOT / "configs" / "candidates.json").read_text())["candidates"]
     devices = devices or json.loads((ROOT / "configs" / "devices.json").read_text())

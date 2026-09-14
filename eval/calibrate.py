@@ -62,13 +62,12 @@ def main():
                          "floor comes from the spread ACROSS invocations, not within one, so "
                          "this trades a little within-run stability for more paired repeats -- "
                          "and the repeats are what the floor is made of.")
-    # --write updates the committed reference.json, which is the REFERENCE DEVICE's calibration
-    # and part of the instrument. A validator calibrating their own box wants --output instead:
-    # their calibration belongs beside their ledger, not in a repository everybody shares.
+    # --write updates the committed reference.json: the generation's ANCHOR, used by every card
+    # that scores it. Needed once per generation, and again only when the base code changes.
     ap.add_argument("--write", action="store_true",
-                    help="update the committed reference.json in place. This is the reference "
-                         "device's calibration and part of the instrument -- if you are a "
-                         "validator calibrating your own box, use --output.")
+                    help="update the committed anchor (reference.json) in place. Needed once per "
+                         "generation, on any card of the pinned class, and again only when the "
+                         "base code changes. No box needs its own calibration to score.")
     ap.add_argument("--merge", metavar="FILE",
                     help="fold this calibration into an earlier one, keeping the WORST floor "
                          "per cell. A floor is a spread statistic and a spread estimated from "
@@ -76,12 +75,11 @@ def main():
                          "hours apart, these floors moved by up to 24x while the achieved "
                          "fractions held to three figures. Taking the worst can only refuse a "
                          "real gain that was too small to see; taking the best would credit "
-                         "noise, and only one of those two errors is recoverable.")
+                         "noise, and only one of those two errors is recoverable. Sessions "
+                         "from different cards pool the same way.")
     ap.add_argument("--output",
-                    help="write this box's calibration here, to pass to `burnish score "
-                         "--calibration`. Keep it beside your ledger: it describes YOUR card, "
-                         "and a calibration used on a different one biases every score it "
-                         "produces in the same direction.")
+                    help="write the calibration here instead of (or as well as) the committed "
+                         "anchor -- for a session to --merge later, or to inspect first.")
     args = ap.parse_args()
 
     gpath = generation_path(args.generation, args.cells_root)
@@ -96,11 +94,9 @@ def main():
         print(f">> calibrating {generation.name} on {fp.get('name')} "
               f"driver {fp.get('driver_version')}")
         print(f">> {args.repeats} paired control-vs-control repeats per cell\n")
-        # The ceilings for THIS box, recomputed from the local probe rather than taken from the
-        # frozen generation. A ceiling is max(flops/peak, bytes/bandwidth): the geometry is
-        # frozen, the peaks are whatever card is in this machine. Freezing the two together is
-        # what made a score depend on which validator ran it -- `achieved` became one card's
-        # ceiling over another card's measurement, a systematic ~6% bias between two RTX 5090s.
+        # The ceilings for the card being anchored on, from its own probe, so the anchor's
+        # achieved fraction is this card's ceiling over this card's time. Scoring later takes
+        # only ratios from a run, so every other card of the pinned class uses this anchor as is.
         from make_generation import local_ceilings
         local = local_ceilings(generation.raw)
         for cid, c in local.items():
@@ -151,12 +147,8 @@ def main():
     sessions = 1
     if args.merge:
         prev = json.loads(Path(args.merge).read_text())
-        prev_probe = (prev.get("device_probe") or {})
-        if prev_probe.get("uuid") and fp.get("uuid") and prev_probe["uuid"] != fp["uuid"]:
-            print(f"!! --merge names a calibration of {prev_probe['uuid']} and this box is "
-                  f"{fp['uuid']}.\n   Pooling two cards' floors would describe neither. "
-                  f"Calibrate each box separately.", file=sys.stderr)
-            return 2
+        # Sessions from different cards pool too. The anchor's floor is used on every card of the
+        # pinned class, so the worst floor seen on any of them is the one that is safe to use.
         sessions = int(prev.get("calibration_sessions", 1)) + 1
         for cid, prior in (prev.get("cells") or {}).items():
             now = out_cells.get(cid)

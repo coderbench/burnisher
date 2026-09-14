@@ -26,13 +26,13 @@ $ tools/burnish receipt show examples/BG-1-pr-000001-receipt.json
   gap closed        -0.0056   (credited +0.0000)
   99% interval     [-0.0056, -0.0056]
   resolved          False
-  frontier          -0.94394 (not expanded)
+  frontier          -0.94392 (not expanded)
 
   per cell:
     cell                            gap           achieved   floor  res
     dit-step/1024/bf16          -0.0058     1.5% -> 1.0%     0.578%  yes
-    t5-encode/1024/bf16         -0.0089    18.1% -> 17.3%    3.753%  yes
-    vae-decode/1024/bf16        -0.0000     0.8% -> 0.8%     0.259%   NO
+    t5-encode/1024/bf16         -0.0090    18.2% -> 17.4%    3.753%  yes
+    vae-decode/1024/bf16        -0.0000     0.8% -> 0.8%     0.845%   NO
 ```
 
 - **Two cells resolved the regression.** It was far outside their noise floors.

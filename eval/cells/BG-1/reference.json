@@ -1,5 +1,6 @@
 {
  "_floor_method": "Two arms, both the unmodified base, interleaved with every guard a scored comparison uses. The floor is the larger of the paired control-vs-control spread and the instrument's own resolution.",
+ "_floor_pooling": "floor_pct is the worst of the two committed sessions on the anchor card: this file's own and calibration-session-2.json. The anchor is used on every card of the pinned class, so the floor it carries is the worst one measured.",
  "_what_this_is": "Per-cell calibration: the fraction of the arithmetic ceiling currently achieved, and the measured run-to-run noise floor. Both are measurements.",
  "calibrated_with": {
   "impl": "cuda",
@@ -8,6 +9,7 @@
   "timer_digits": 6,
   "warmup": 2
  },
+ "calibration_sessions": 2,
  "cells": {
   "dit-step/1024/bf16": {
    "achieved": 0.015245658417544026,
@@ -43,11 +45,12 @@
    "achieved": 0.007913030168201135,
    "basis": "measured",
    "ceiling_seconds": 0.04299607585791064,
-   "floor_decided_by": "spread",
+   "floor_decided_by": "worst-of-sessions",
    "floor_median_ratio": 1.0000976717338184,
-   "floor_pct": 0.25936641076014877,
+   "floor_pct": 0.8452848208762251,
    "floor_repeats": 9,
    "floor_resolution_pct": 0.0005,
+   "floor_sessions_max_from": "calibration-session-2.json",
    "floor_spread_pct": 0.25936641076014877,
    "floors_of_room": 48213.12865723825,
    "measured_seconds": 5.433579165499999,

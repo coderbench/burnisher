@@ -22,8 +22,8 @@ export PYTHONUNBUFFERED=1
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_DIR"
 
-# Secrets and box-local paths. Not committed: the calibration describes THIS card, the ledger
-# lives outside the worktree, and the token is a token.
+# Secrets and box-local paths. Not committed: the ledger lives outside the worktree, and the
+# token is a token. BURNISH_CALIBRATION is optional and normally unset.
 #   GH_TOKEN, BURNISH_REPO, BURNISH_LEDGER, BURNISH_WEIGHTS, BURNISH_NOISE, BURNISH_CALIBRATION
 [ -f "$REPO_DIR/.env.eval" ] && . "$REPO_DIR/.env.eval"
 

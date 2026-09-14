@@ -2,7 +2,7 @@
 
     raw records (per cell, per variant, per config, per repeat)
         -> pairing and coverage checks               the ones that catch a corrupt comparison
-        -> per cell: gap closed against that cell's arithmetic ceiling
+        -> per cell: gap closed, from the anchored achieved fraction and the paired ratio
         -> per cell: paired bootstrap, and the cell's own measured noise floor
         -> weighted aggregate                        = gap closed for the submission
         -> frontier hypervolume over latency, memory and fidelity
@@ -14,6 +14,7 @@ happened. If one is in your way, find out which incident it encodes first -- the
 """
 from __future__ import annotations
 
+import dataclasses
 import math
 import statistics
 from collections import defaultdict
@@ -50,60 +51,25 @@ def group(records):
     return out
 
 
-def require_calibrated_for(generation, device: dict) -> None:
-    """Refuse to score a run measured on a box this calibration does not describe.
-
-    `achieved` is `ceiling / measured`, and both halves are properties of the hardware. Score a
-    run from card B against card A's calibration and the ratio is a mix of two machines: a 3%
-    difference in the part produces a systematic 6% difference in gap-closed, in the same
-    direction, forever. That is not noise a bootstrap can absorb -- it is a bias, and it would
-    quietly pay submissions differently depending on which validator happened to pick them up.
-
-    Calibrating locally makes both halves scale with the card and cancel: measured, a 3%
-    difference in the hardware produces a 0.00% difference in the score. So the fix is for every
-    validator to calibrate their own box -- and this is the check that makes forgetting to a
-    loud failure instead of a quiet 6%.
-
-    It is a separate check from the drift guard below, and the two answer different questions.
-    This one asks "is this calibration even about this machine?" and is settled by an identifier.
-    The drift guard asks "has this machine changed since?" and is settled by a measurement.
-    """
-    want = generation.calibration_device
-    # Anything that is not a device fingerprint is "unknown", not "mismatched". A raw file with
-    # no provenance, or provenance from an older runner that recorded the device as a bare
-    # string, is already flagged by `code_provenance_complete`; refusing it here would break
-    # every synthetic fixture to catch nothing.
-    got = device.get("uuid") if isinstance(device, dict) else None
-    if not want or not got or want == got:
-        return
-    raise ComputeError(
-        f"this run was measured on {got} and the calibration describes "
-        f"{want}.\n"
-        f"  calibration: {generation.calibration_path or 'the committed reference.json'}\n"
-        f"               {generation.calibration_device_name}, driver "
-        f"{generation.calibration_driver}\n\n"
-        f"  A calibration is a measurement OF A CARD. `achieved` is ceiling over measured and "
-        f"both\n  are properties of the hardware, so scoring one card's run against another "
-        f"card's\n  calibration mixes two machines -- and two RTX 5090s differ by about 3% on "
-        f"achievable\n  GEMM, which lands as a systematic ~6% difference in gap-closed rather "
-        f"than as noise.\n\n"
-        f"  Calibrate this box once, and every score it produces becomes comparable with every\n"
-        f"  other validator's:\n\n"
-        f"      burnish probe --write\n"
-        f"      burnish calibrate --repeats 9 --write --output <your calibration>.json\n"
-        f"      burnish score ... --calibration <your calibration>.json\n")
+# How far the base arm may sit from the anchor's measured time before the anchor stops describing
+# it. Measured, not guessed: on a second RTX 5090 with a different driver and host, BG-1's base
+# times came in +2.2%, +9.4% and -1.2% from the anchor's (eval/cells/BG-1/second-card-check.json),
+# and the small, host-heavy t5 cell moved most. A 10% band would refuse that card's t5 on a noisy
+# afternoon; 25% leaves room for it and still catches a large change to the base code.
+BASE_ANCHOR_BAND_PCT = 25.0
+# How noisy a run may be, in multiples of the cell's frozen noise floor, before it is refused.
+BASE_SPREAD_FLOORS = 3.0
 
 
 def compute(generation, records, *, held_out_records=None, allow_partial=False,
             reference_drift_guard=True, device=None):
     """Score a submission. `generation` is frozen; `records` are what the runner measured.
 
-    `device` is the box the records were measured on, from the raw file's provenance. Passed so
-    the calibration can be checked against it: a calibration is a measurement of a particular
-    card, and scoring against somebody else's is a bias rather than an error bar.
+    `device` is the box the records were measured on, from the raw file's provenance. The score
+    does not depend on it: no box has to be calibrated before it can score, which is what lets a
+    rented card be swapped for another without half an hour of setup. It is accepted so callers
+    can pass provenance through unchanged.
     """
-    if device is not None:
-        require_calibrated_for(generation, device)
     uncalibrated = [c.id for c in generation.cells.values()
                     if c.implemented and not c.calibrated]
     _require(not uncalibrated,
@@ -123,6 +89,7 @@ def compute(generation, records, *, held_out_records=None, allow_partial=False,
              f"credit nothing.")
 
     per_cell = {}
+    run_cells = {}
     cell_gaps = {}
     any_unresolved = False
     for cell_id in scored_cells:
@@ -178,24 +145,53 @@ def compute(generation, records, *, held_out_records=None, allow_partial=False,
                          f"{cell_id} repeat {k}: latency_s={t!r} is not a duration")
                 sink.append(float(t))
 
-        # Has the box moved since the generation was calibrated? The base arm is the same code
-        # that produced `cell.achieved`; if it now lands somewhere else by more than the cell's
-        # own floor, the calibration is stale and every gap-closed score computed against it is
-        # measured from the wrong denominator. This catches a driver update, a different card,
-        # a thermal regime, and a base commit that is not the one that was calibrated.
+        # The ceiling in THIS run's seconds. The achieved fraction belongs to the base code and was
+        # measured once, when the generation was anchored; the base arm's time here belongs to
+        # this card. Their product is the ceiling expressed on this card, so all a run contributes
+        # to the score is the paired base/candidate ratio -- and a card that is uniformly slower,
+        # or slower at a resource the code is not limited by, scores the same.
+        #
+        # This replaced per-box calibration, which divided this card's time into this card's
+        # probed ceiling. That is invariant for a uniformly slower card, but it moves the score by
+        # the card's peak difference whenever the code is bound by something else -- launch
+        # overhead, today -- and it cost every rented box half an hour before it could score.
         base_geo = _geomean(b_times)
-        achieved_now = cell.ceiling_seconds / base_geo
-        drift_pct = (achieved_now / cell.achieved - 1.0) * 100.0
-        if reference_drift_guard and abs(drift_pct) > max(cell.floor_pct, 1e-9) * 3.0:
-            raise ComputeError(
-                f"{cell_id}: the BASE arm now achieves {achieved_now:.4f} of its ceiling where "
-                f"calibration recorded {cell.achieved:.4f} -- a drift of {drift_pct:+.2f}% "
-                f"against a floor of {cell.floor_pct:.3f}%. The denominator of every score in "
-                f"this cell comes from that calibration, so a stale one is not a small error. "
-                f"Re-calibrate, or find out what changed about the box.")
+        run_ceiling = cell.achieved * base_geo
+        run_cell = dataclasses.replace(cell, ceiling_seconds=run_ceiling)
+        run_cells[cell_id] = run_cell
 
-        g = gap_closed_for(_BoundView(cell), base_geo, _geomean(c_times))
-        ci = paired_bootstrap(cell.ceiling_seconds, b_times, c_times,
+        # Two guards on the base arm, each sized for what it catches. Neither needs this box to
+        # have been calibrated.
+        #
+        # 1. Was the box quiet? The base arm's own spread across repeats, against the cell's
+        #    frozen floor. A floor moves between sessions, so the frozen one is the worst ever
+        #    measured; a run noisier than several of those is a bad afternoon on this box, not a
+        #    measurement of the submission.
+        spread_pct = (max(b_times) / min(b_times) - 1.0) * 100.0
+        if reference_drift_guard and spread_pct > max(cell.floor_pct, 1e-9) * BASE_SPREAD_FLOORS:
+            raise ComputeError(
+                f"{cell_id}: the BASE arm's own repeats spread {spread_pct:.3f}% in this run, more "
+                f"than {BASE_SPREAD_FLOORS:.0f}x this cell's frozen noise floor of "
+                f"{cell.floor_pct:.3f}%. The box was too noisy to judge anything against; that is "
+                f"not the submission's fault. Re-run when the device is quiet.")
+        # 2. Is the base code the code the anchor measured? Its time here against the anchor's,
+        #    with a band wide enough for different cards and hosts of the pinned class and
+        #    narrower than a large change to the base. Outside it, the anchored achieved fraction
+        #    no longer describes this base, and every score in the cell would inherit the error.
+        base_vs_anchor_pct = None
+        if cell.measured_seconds:
+            base_vs_anchor_pct = (base_geo / cell.measured_seconds - 1.0) * 100.0
+            if reference_drift_guard and abs(base_vs_anchor_pct) > BASE_ANCHOR_BAND_PCT:
+                raise ComputeError(
+                    f"{cell_id}: the BASE arm took {base_geo:.4f} s where the anchor measured "
+                    f"{cell.measured_seconds:.4f} s ({base_vs_anchor_pct:+.1f}%), outside the "
+                    f"+/-{BASE_ANCHOR_BAND_PCT:.0f}% band cards of the pinned class fall in. "
+                    f"Either the base code is not the code this generation was anchored on -- "
+                    f"re-anchor it once, on any card, with `burnish calibrate --write` -- or this "
+                    f"is not the pinned hardware.")
+
+        g = gap_closed_for(_BoundView(run_cell), base_geo, _geomean(c_times))
+        ci = paired_bootstrap(run_ceiling, b_times, c_times,
                               level=generation.confidence_level,
                               resamples=generation.bootstrap_resamples,
                               seed=generation.bootstrap_seed)
@@ -226,8 +222,11 @@ def compute(generation, records, *, held_out_records=None, allow_partial=False,
             "speedup": g["speedup"],
             "ceiling_seconds": cell.ceiling_seconds,
             "ceiling_basis": "model",
-            "calibrated_achieved": cell.achieved,
-            "base_drift_pct": drift_pct,
+            "run_ceiling_seconds": run_ceiling,
+            "anchor_achieved": cell.achieved,
+            "anchor_measured_seconds": cell.measured_seconds,
+            "base_vs_anchor_pct": base_vs_anchor_pct,
+            "base_spread_pct": spread_pct,
             "floor_pct": cell.floor_pct,
             "floor_as_gap_closed": floor_gap,
             "resolved": resolved,
@@ -281,7 +280,7 @@ def compute(generation, records, *, held_out_records=None, allow_partial=False,
     # test for a clean win caught it.
     fr_cells = {}
     for cell_id in per_cell:
-        objs = cell_objectives(generation, generation.cell(cell_id))
+        objs = cell_objectives(generation, run_cells[cell_id])
         fr_cells[cell_id] = frontier_delta(
             [r for r in records if r["cell"] == cell_id and r["variant"] == "base"],
             [r for r in records if r["cell"] == cell_id and r["variant"] == "candidate"],

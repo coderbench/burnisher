@@ -386,9 +386,8 @@ def main():
     ap.add_argument("--weights", default=os.environ.get("BURNISH_WEIGHTS", ""))
     ap.add_argument("--noise", default=os.environ.get("BURNISH_NOISE", ""))
     ap.add_argument("--calibration", default=os.environ.get("BURNISH_CALIBRATION", ""),
-                    help="this validator's own calibration. Without it the scorer uses the "
-                         "committed reference device's and refuses unless this box IS that "
-                         "device -- which is the intended failure, not a bug.")
+                    help="an anchor other than the generation's committed one. Normally empty: "
+                         "every card of the pinned class scores against the committed anchor.")
     ap.add_argument("--impl-base", default="cuda")
     ap.add_argument("--impl-candidate", required=False, default="cuda")
     ap.add_argument("--timeout", type=int, default=7200)

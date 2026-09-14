@@ -134,7 +134,7 @@ def main():
     # is a second opinion about a number the frozen generation already declares, and the two
     # drift the moment either moves.
     ap.add_argument("--calibration",
-                    help="this box's calibration; defaults to the committed reference device's")
+                    help="an anchor other than the committed one; normally omitted")
     ap.add_argument("--repeats", type=int, default=None,
                     help="paired repeats per cell; defaults to what the generation declares, "
                          "and the scorer refuses fewer")
@@ -269,10 +269,9 @@ def main():
 
     doc = {
         "generation": args.generation,
-        # The calibration these measurements were scored against, embedded rather than
-        # referenced. Every validator has their own, so a raw file that merely NAMED one could
-        # be re-derived by exactly one person -- the validator who produced it -- and the
-        # "anyone can check this without a GPU" property would be a claim rather than a fact.
+        # The anchor these measurements were scored against, embedded rather than referenced.
+        # A generation is re-anchored when its base code changes, so a raw file that merely
+        # NAMED the anchor could stop re-deriving the moment the committed one moved on.
         #
         # Self-contained is the requirement: this file plus the frozen generation is everything
         # needed to reproduce the receipt, on any machine, forever.
@@ -285,13 +284,15 @@ def main():
             "calibrated_with": {"warmup": warmup, "iters": iters},
             "cells": {c.id: {"achieved": c.achieved, "floor_pct": c.floor_pct,
                              "ceiling_seconds": c.ceiling_seconds,
+                             "measured_seconds": c.measured_seconds,
                              "floor_repeats": c.floor_repeats}
                       for c in generation.cells.values() if c.calibrated},
             "_why_embedded": (
-                "A calibration describes one physical card, so every validator has a different "
-                "one. Embedded here so this file alone re-derives the receipt: an auditor with "
-                "no GPU and no access to the validator's machine can still check that the "
-                "published verdict follows from the published measurements."),
+                "The anchor this run was scored against: each cell's achieved fraction, the base "
+                "time behind it, and the frozen noise floor. Embedded so this file alone "
+                "re-derives the receipt, even after the generation is re-anchored: an auditor "
+                "with no GPU can still check that the published verdict follows from the "
+                "published measurements."),
         },
         "records": records,
         "held_out": held_records or None,

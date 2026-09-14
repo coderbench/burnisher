@@ -16,10 +16,10 @@ What is real here and what is not. Read this before spending a week on anything.
 |:--|--:|--:|--:|
 | `t5-encode/1024/bf16` | 18.2% | 5.5x | 3.753% |
 | `dit-step/1024/bf16` | 1.5% | 65.6x | 0.578% |
-| `vae-decode/1024/bf16` | 0.8% | 126.4x | 0.259% |
+| `vae-decode/1024/bf16` | 0.8% | 126.4x | 0.845% |
 
-Nine paired repeats per cell. Floors are **not stable between sessions**: a second calibration of
-the same card moved one by 24×, so validators merge sessions and keep the worst (`docs/EVAL.md`).
+Nine paired repeats per cell, in two sessions. Floors are **not stable between sessions**: the
+second moved one by 24×, so each cell's floor is the worst of the two (`docs/EVAL.md`).
 
 ## Built and working
 

@@ -46,9 +46,12 @@ EXIT_NO_DEVICE = 3
 
 def _runtime_binary():
     """Where the native runtime is, or a clear explanation of why it is not."""
+    # The CUDA build first. A box usually has both, and the CPU build has no device kernels: a GPU
+    # command run through it fails with "no 'cuda' implementation to fall back on", which is how
+    # the first calibration on a fresh rented box died.
     for candidate in (os.environ.get("BURNISHER_BIN"),
-                      ROOT / "build" / "burnisher",
-                      ROOT / "build-cuda" / "burnisher"):
+                      ROOT / "build-cuda" / "burnisher",
+                      ROOT / "build" / "burnisher"):
         if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK):
             return Path(candidate)
     return None
@@ -59,8 +62,8 @@ def _require_device(what):
     binary = _runtime_binary()
     problems = []
     if binary is None:
-        problems.append("the native runtime is not built (looked for build/burnisher; build it "
-                        "with scripts/build.sh)")
+        problems.append("the native runtime is not built (looked for build-cuda/burnisher and "
+                        "build/burnisher; build it with scripts/build_cuda.sh)")
     if shutil.which("nvidia-smi") is None:
         problems.append("nvidia-smi is not on PATH, so there is no NVIDIA device visible here")
     if problems:
@@ -407,9 +410,9 @@ def build_parser():
                         "nothing")
     p.add_argument("--cells-root")
     p.add_argument("--calibration",
-                   help="this box's calibration, from `burnish calibrate --write`. Defaults to "
-                        "the committed reference device's, which is only right if you ARE the "
-                        "reference device.")
+                   help="an anchor other than the generation's committed one. Normally omitted: "
+                        "every card of the pinned class scores against the committed anchor, and "
+                        "no box needs a calibration of its own.")
     p.set_defaults(fn=cmd_score)
 
     p = sub.add_parser("receipt", help="verify or show a receipt")

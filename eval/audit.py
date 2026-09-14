@@ -62,11 +62,9 @@ def audit_one(raw_path, receipt_path, *, cells_root=None, calibration=None,
     raw = json.loads(Path(raw_path).read_text())
     published = json.loads(Path(receipt_path).read_text())
     gen_name = published.get("benchmark_generation") or raw.get("generation")
-    # The calibration the receipt was scored against, in order of preference: one the auditor
-    # named, the one EMBEDDED in the raw file, then the committed reference device's. The
-    # embedded copy is what makes this check portable -- every validator calibrates their own
-    # box, so without it only the validator who produced a receipt could re-derive it, and
-    # "anyone can check this" would be a claim rather than a fact.
+    # The anchor the receipt was scored against, in order of preference: one the auditor named,
+    # the one EMBEDDED in the raw file, then the committed one. The embedded copy is what keeps
+    # an old receipt checkable after its generation has been re-anchored.
     embedded = None
     if not calibration and raw.get("calibration", {}).get("cells"):
         embedded = Path(tempfile.mkdtemp()) / "calibration.json"
@@ -91,11 +89,11 @@ def audit_one(raw_path, receipt_path, *, cells_root=None, calibration=None,
     # 2. The score follows from the data. This is the one that catches a scorer bug, a
     #    hand-edited number, and a receipt built from measurements other than the ones shipped.
     # A ComputeError here is a FINDING, not a crash. The scorer refuses measurements it cannot
-    # trust -- unpaired repeats, a base arm that has drifted from its calibration, a degenerate
-    # output -- and an auditor who fed it a receipt built from such measurements needs to be
-    # told which, not handed a traceback. This is also the path a tampered raw file takes:
-    # moving the base arm to manufacture a speedup moves its achieved fraction too, and the
-    # drift guard notices before anything is scored.
+    # trust -- unpaired repeats, a base arm outside its anchor band or noisier than its floor, a
+    # degenerate output -- and an auditor who fed it a receipt built from such measurements needs
+    # to be told which, not handed a traceback. It is NOT a defence against a fabricated raw file:
+    # a base arm slowed by less than the anchor band to manufacture a speedup scores cleanly here.
+    # Only an independent re-measurement (`burnish challenge`) settles that.
     try:
         out = CP.compute(gen, raw["records"], held_out_records=raw.get("held_out") or None,
                          device=(raw.get("provenance") or {}).get("device"))

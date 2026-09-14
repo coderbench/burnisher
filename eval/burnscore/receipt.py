@@ -167,22 +167,21 @@ _CODE_PROVENANCE = ("candidate_commit", "base_commit", "instrument_from")
 
 
 def with_calibration(provenance: dict, generation) -> dict:
-    """Stamp the receipt with the calibration it was scored against.
+    """Stamp the receipt with the anchor it was scored against.
 
-    Every validator calibrates their own box, so two receipts for one submission were scored
-    with two different sets of ceilings and floors. That is correct and it is what makes the
-    scores comparable -- but it means a receipt that does not name its calibration cannot be
-    told apart from one scored against somebody else's, and a challenge could not distinguish a
-    real disagreement from a stale calibration on one side.
+    Any card of the pinned class scores against the same anchor, so two receipts for one
+    submission share it. Naming it is what makes a re-anchor visible: a challenge between a
+    receipt scored before a re-anchor and one scored after would otherwise look like a
+    disagreement about the measurement.
     """
     p = dict(provenance or {})
     p["calibration"] = {
         "device_uuid": generation.calibration_device,
         "device_name": generation.calibration_device_name,
         "driver_version": generation.calibration_driver,
-        "_why": ("A calibration is a measurement of one physical card. `achieved` is ceiling "
-                 "over measured and both are properties of the hardware, so a run is scored "
-                 "against the calibration of the box it ran on -- never another's."),
+        "_why": ("The card the anchor's achieved fractions and floors were measured on. The "
+                 "run itself may come from any card of the pinned class: its score takes only "
+                 "the paired base/candidate ratio from the run."),
     }
     return p
 

@@ -43,6 +43,7 @@ class Cell:
     achieved: float = None
     floor_pct: float = None
     floor_repeats: int = None
+    measured_seconds: float = None
     notes: str = ""
 
     @property
@@ -67,6 +68,7 @@ class Cell:
                 "implemented": self.implemented, "weight": self.weight,
                 "ceiling_seconds": self.ceiling_seconds, "achieved": self.achieved,
                 "floor_pct": self.floor_pct, "floor_repeats": self.floor_repeats,
+                "measured_seconds": self.measured_seconds,
                 "calibrated": self.calibrated, "notes": self.notes}
 
 
@@ -101,12 +103,9 @@ class Generation:
     # as expensive as it needed to be AND quieter than the floor it was judged against.
     calibrated_warmup: int = None
     calibrated_iters: int = None
-    # Which physical device the calibration above was measured on.
-    #
-    # Not the model name: "RTX 5090" is not an identity. Two of them differ by about 3% on the
-    # achievable GEMM rate, which is larger than most cells' floors, so a calibration carried
-    # over from another card is a set of numbers nobody measured HERE. The UUID is what makes
-    # "is this calibration mine?" a question with an answer.
+    # Which physical device the anchor calibration was measured on. Provenance only: a run on any
+    # other card of the pinned class is scored against the same anchor, because the score takes
+    # nothing absolute from the run -- see `compute`.
     calibration_device: str = None
     calibration_device_name: str = None
     calibration_driver: str = None
@@ -143,32 +142,23 @@ class Generation:
 
 
 def load(path, calibration=None) -> Generation:
-    """Load a frozen generation, and the calibration of the box it will be scored on.
-
-    The split between these two files is the whole of what makes a score portable, and it is
-    worth stating precisely because the obvious arrangement is wrong.
+    """Load a frozen generation and its anchor calibration.
 
       generation.json   WHAT IS MEASURED. Cells, shapes, dtypes, tolerances, objectives, the
                         sampling plan, the held-out list, the model pins. Frozen: receipts stay
                         attached to it, and editing one silently re-scores history.
 
-      reference.json    WHAT THIS BOX DOES. Device peaks, ceilings, achieved fractions, noise
-                        floors. A measurement of hardware, so it belongs to the hardware, and
-                        every validator has their own.
+      reference.json    THE ANCHOR. Each cell's achieved fraction and the base time behind it,
+                        measured once for the generation on one card of the pinned class, and
+                        the worst noise floor measured in any session on any card.
 
-    The ceiling sits in the second file, not the first, and that placement is load-bearing. A
-    ceiling is `f(geometry, device peak)`: the geometry is frozen, the peak is local. Freezing
-    the CEILING rather than the geometry bakes one card's peak into everybody's ruler, and then
-    `achieved = ceiling / measured` moves with whichever card ran -- a 3% slower part reports a
-    6% different score, systematically, forever.
+    The anchor is not a property of the box that scores. `compute` takes only the paired ratio
+    from a run and expresses the ceiling in that run's seconds as `achieved x base time`, so a
+    uniformly slower card, or one slower at a resource the code is not limited by, produces the
+    same score with no calibration of its own. Anchoring again is needed only when the base code
+    itself changes, and the scorer says so when it does.
 
-    Probed locally, both halves of that ratio scale with the hardware and cancel. Measured: a 3%
-    difference in the card produces a 0.00% difference in gap-closed. That is what lets two
-    validators on two boxes agree about what a submission earned.
-
-    `calibration` overrides the committed reference.json -- it is how a validator scores against
-    their OWN box. The committed one is the reference device's, kept so the repository's own
-    published tables have something to stand on.
+    `calibration` overrides the committed reference.json, for scoring against a different anchor.
     """
     p = Path(path)
     doc = json.loads(p.read_text())
@@ -183,15 +173,13 @@ def load(path, calibration=None) -> Generation:
             wdtype=c["wdtype"], adtype=c.get("adtype", c["wdtype"]),
             implemented=bool(c.get("implemented", True)),
             weight=float(c.get("weight", 1.0)),
-            # The LOCAL ceiling when this box has been calibrated, the committed one otherwise.
-            # A generation's ceiling is what the reference device could do; a validator scoring
-            # on their own hardware has to use their own, or the achieved fraction is a ratio of
-            # one card's ceiling to another card's measurement.
+            # The anchor's ceiling when it records one, the generation's otherwise. Display only:
+            # scoring expresses the ceiling in each run's own seconds -- see `compute`.
             ceiling_seconds=cal.get("ceiling_seconds") or c.get("ceiling_seconds"),
             achieved=cal.get("achieved"), floor_pct=cal.get("floor_pct"),
-            floor_repeats=cal.get("floor_repeats"), notes=c.get("notes", ""))
-    # Which box this calibration describes. Carried so the scorer can refuse a run measured
-    # somewhere else -- see `require_calibrated_for`.
+            floor_repeats=cal.get("floor_repeats"),
+            measured_seconds=cal.get("measured_seconds"), notes=c.get("notes", ""))
+    # Which card the anchor was measured on. Provenance, not a requirement.
     probe = calib.get("device_probe") or {}
     gen_kwargs_extra = {
         "calibration_device": probe.get("uuid"),
@@ -229,13 +217,13 @@ def cell_objectives(generation: Generation, cell: Cell) -> list:
 
     So each cell is normalized against its own bracket:
 
-        hi (score 1.0) = the cell's arithmetic ceiling -- the best time that can exist
-        lo (score 0.0) = 1.5x the time the cell took when the generation was CALIBRATED
+        hi (score 1.0) = the cell's ceiling -- the best time that can exist
+        lo (score 0.0) = 1.5x the base time
 
-    Both ends are frozen at calibration and neither moves when a submission lands, which is the
-    property that keeps historical receipts meaning what they meant. Anchoring the good end at
-    the ceiling also makes this axis and the gap-closed score agree about what progress is,
-    rather than having the frontier reward something subtly different from the headline number.
+    `compute` passes the cell with its ceiling expressed in the run's own seconds, so both ends
+    sit on the card that ran and the bracket is the same fraction of the ceiling on every card.
+    Anchoring the good end at the ceiling also makes this axis and the gap-closed score agree
+    about what progress is, rather than having the frontier reward something subtly different.
     """
     cell.require_calibrated()
     base_s = cell.ceiling_seconds / cell.achieved

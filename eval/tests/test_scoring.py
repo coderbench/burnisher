@@ -294,11 +294,19 @@ class TestComputeAndReceipt(unittest.TestCase):
             # The floor is the larger of the paired spread and the instrument's resolution, and
             # it must say which of the two decided it -- a floor nobody can attribute is a
             # threshold, and a threshold is the thing this scoring model exists to replace.
-            self.assertIn(cal["floor_decided_by"], ("spread", "resolution"))
-            self.assertAlmostEqual(cal["floor_pct"],
-                                   max(cal["floor_spread_pct"], cal["floor_resolution_pct"]),
-                                   places=12, msg=f"{cell.id}: the floor is neither the spread "
-                                                  f"nor the resolution")
+            self.assertIn(cal["floor_decided_by"], ("spread", "resolution", "worst-of-sessions"))
+            own = max(cal["floor_spread_pct"], cal["floor_resolution_pct"])
+            if cal.get("floor_decided_by") == "worst-of-sessions":
+                # A pooled floor must be the worst of sessions that are themselves in the tree, so
+                # it is re-derived from them rather than trusted.
+                other = json.loads((HERE.parent / "cells" / "BG-1" /
+                                    cal["floor_sessions_max_from"]).read_text())
+                want = max(own, other["cells"][cell.id]["floor_pct"])
+            else:
+                want = own
+            self.assertAlmostEqual(cal["floor_pct"], want, places=12,
+                                   msg=f"{cell.id}: the floor is not the spread, the resolution, "
+                                       f"or the worst of the committed sessions")
             self.assertGreaterEqual(cal["floor_repeats"], 2,
                                     f"{cell.id}: a spread needs repeated runs to be a spread")
 
@@ -506,15 +514,15 @@ class TestComputeAndReceipt(unittest.TestCase):
             CP.compute(self.gen, recs)
         self.assertIn("pairing", str(cm.exception))
 
-    def test_a_stale_calibration_is_caught(self):
-        """The denominator of every score comes from calibration; a stale one is not small."""
+    def test_a_base_arm_far_from_its_anchor_is_caught(self):
+        """The achieved fraction comes from the anchor; a base it no longer describes is refused."""
         _, recs = self._score()
         for r in recs:
             if r["cell"] == "dit-step/1024/bf16":
                 r["metrics"]["latency_s"] *= 1.35
         with self.assertRaises(CP.ComputeError) as cm:
             CP.compute(self.gen, recs)
-        self.assertIn("BASE arm now achieves", str(cm.exception))
+        self.assertIn("BASE arm took", str(cm.exception))
 
     def test_a_declared_but_unimplemented_cell_cannot_be_scored(self):
         _, recs = self._score()

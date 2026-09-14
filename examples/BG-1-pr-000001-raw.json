@@ -1,6 +1,6 @@
 {
  "calibration": {
-  "_why_embedded": "A calibration describes one physical card, so every validator has a different one. Embedded here so this file alone re-derives the receipt: an auditor with no GPU and no access to the validator's machine can still check that the published verdict follows from the published measurements.",
+  "_why_embedded": "The anchor this run was scored against: each cell's achieved fraction, the base time behind it, and the frozen noise floor. Embedded so this file alone re-derives the receipt, even after the generation is re-anchored: an auditor with no GPU can still check that the published verdict follows from the published measurements.",
   "calibrated_with": {
    "impl": "cuda",
    "iters": 5,
@@ -13,19 +13,22 @@
     "achieved": 0.015245658417544026,
     "ceiling_seconds": 0.05444889960495386,
     "floor_pct": 0.5776947200587813,
-    "floor_repeats": 9
+    "floor_repeats": 9,
+    "measured_seconds": 3.5714364124999998
    },
    "t5-encode/1024/bf16": {
     "achieved": 0.18153324094970438,
     "ceiling_seconds": 0.02307707151940508,
     "floor_pct": 3.7532580815317766,
-    "floor_repeats": 9
+    "floor_repeats": 9,
+    "measured_seconds": 0.1271231175
    },
    "vae-decode/1024/bf16": {
     "achieved": 0.007913030168201135,
     "ceiling_seconds": 0.04299607585791064,
-    "floor_pct": 0.25936641076014877,
-    "floor_repeats": 9
+    "floor_pct": 0.8452848208762251,
+    "floor_repeats": 9,
+    "measured_seconds": 5.433579165499999
    }
   },
   "device_probe": {

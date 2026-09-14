@@ -281,13 +281,12 @@ class TestTheAuditCatchesAReceiptThatLies(unittest.TestCase):
 class TestAnAuditWorksWithoutTheValidatorsMachine(unittest.TestCase):
     """The property that makes "anyone can check this" true rather than aspirational.
 
-    Every validator calibrates their own card, so a receipt is scored against a calibration
-    that exists on one machine. If the raw file merely NAMED it, exactly one person could
-    re-derive the receipt -- the validator who produced it -- and the free verification tier
-    would be a tier of one.
+    A receipt from any card is scored against the generation's anchor, and a generation is
+    re-anchored when its base code changes. If the raw file merely NAMED the anchor, a receipt
+    scored before a re-anchor would stop re-deriving the moment the committed one moved on.
 
-    So the calibration travels inside the raw file. This file plus the frozen generation is
-    everything needed to reproduce the receipt, on any machine, forever.
+    So the anchor travels inside the raw file. This file plus the frozen generation is everything
+    needed to reproduce the receipt, on any machine, forever.
     """
 
     def setUp(self):
@@ -311,6 +310,7 @@ class TestAnAuditWorksWithoutTheValidatorsMachine(unittest.TestCase):
             "device_probe": dict(cal["device_probe"], uuid=other),
             "cells": {k: {"achieved": v["achieved"], "floor_pct": v["floor_pct"],
                           "ceiling_seconds": v["ceiling_seconds"],
+                          "measured_seconds": v["measured_seconds"],
                           "floor_repeats": v["floor_repeats"]}
                       for k, v in cal["cells"].items()},
         }
@@ -330,15 +330,19 @@ class TestAnAuditWorksWithoutTheValidatorsMachine(unittest.TestCase):
         self.assertTrue(r["pass"],
                         [c for c in r["checks"] if not c["pass"]])
 
-    def test_without_an_embedded_calibration_a_foreign_receipt_cannot_be_audited(self):
+    def test_without_its_embedded_anchor_a_receipt_stops_auditing_after_a_re_anchor(self):
         """The failure the embedding prevents, kept so the reason is not forgotten."""
         raw = json.loads(RAW.read_text())
-        raw["provenance"] = dict(raw["provenance"])
-        raw["provenance"]["device"] = dict(raw["provenance"]["device"],
-                                           uuid="GPU-bbbbbbbb-0000-0000-0000-000000000000")
         raw.pop("calibration", None)
         self.raw.write_text(json.dumps(raw))
-        r = A.audit_one(self.raw, self.rec, verbose=False)
+        # The generation re-anchored after this receipt was scored: the base code got faster, so
+        # the committed achieved fractions moved on.
+        anchor = json.loads((ROOT / "eval" / "cells" / "BG-1" / "reference.json").read_text())
+        for c in anchor["cells"].values():
+            c["achieved"] *= 1.05
+        moved = Path(self.tmp.name) / "re-anchored.json"
+        moved.write_text(json.dumps(anchor))
+        r = A.audit_one(self.raw, self.rec, calibration=moved, verbose=False)
         self.assertFalse(r["pass"])
 
     def test_the_bench_embeds_it(self):

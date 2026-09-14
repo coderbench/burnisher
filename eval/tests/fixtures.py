@@ -22,6 +22,7 @@ def calibrated_generation(tmpdir, *, achieved=None, floor_pct=None):
     floor_pct = floor_pct or {"t5-encode/1024/bf16": 0.60, "dit-step/1024/bf16": 0.35,
                               "vae-decode/1024/bf16": 0.90}
     src = json.loads((ROOT / "eval" / "cells" / "BG-1" / "generation.json").read_text())
+    ceilings = {c["id"]: c.get("ceiling_seconds") for c in src["cells"]}
     d = Path(tmpdir) / "BG-1"
     d.mkdir(parents=True, exist_ok=True)
     (d / "generation.json").write_text(json.dumps(src, indent=1, sort_keys=True) + "\n")
@@ -35,7 +36,9 @@ def calibrated_generation(tmpdir, *, achieved=None, floor_pct=None):
         # shaped differently from the real artifact tests a file nobody will ever have.
         "calibrated_with": {"impl": "cuda", "warmup": 2, "iters": 5, "repeats": 9},
         "cells": {cid: {"achieved": achieved.get(cid), "floor_pct": floor_pct.get(cid),
-                        "floor_repeats": 9, "measured_seconds": None}
+                        "floor_repeats": 9,
+                        "measured_seconds": (ceilings[cid] / achieved[cid]
+                                             if ceilings.get(cid) and achieved.get(cid) else None)}
                   for cid in [c["id"] for c in src["cells"]]},
     }, indent=1, sort_keys=True) + "\n")
     return d / "generation.json"

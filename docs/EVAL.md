@@ -66,7 +66,7 @@ burnish audit pr-000042-raw.json pr-000042.json
 burnish challenge <your receipt for the same submission> --ledger <the public ledger>
 ```
 
-- The raw file carries the validator's calibration, so an audit works on any machine.
+- The raw file carries the anchor it was scored against, so an audit works on any machine.
 - A challenge must measure **the same commit, implementations and generation**, on a **different
   physical card** (by GPU UUID).
 - If two receipts disagree by more than the cell's noise floor, the credit is **held**: neither paid
@@ -86,23 +86,40 @@ burnish challenge <your receipt for the same submission> --ledger <the public le
 
 ## Running a validator
 
-**Every validator calibrates their own card.** The ceiling and the measurement then both come
-from the same card and cancel out. Scoring a card 3% slower against someone else's calibration
-shifts every score by 6%. Against its own, 0.0000%. The scorer refuses a calibration from a
-different GPU UUID.
+**No box needs a calibration of its own.** Each generation is anchored once, on any card of the
+pinned class. `reference.json` holds each cell's achieved fraction, the base time behind it, and
+the worst noise floor measured in any session. A run contributes only its paired base/candidate
+ratio: the ceiling in that run's own seconds is `achieved × base time`. So a card that is uniformly
+slower, or slower at a resource the code is not limited by, gives the same score
+(`eval/tests/test_portable_scoring.py`).
+
+Setting up a new box:
 
 ```bash
-scripts/build_cuda.sh               # CMAKE_CUDA_ARCHITECTURES=121 for DGX Spark
-build-cuda/burnisher probe > probe.txt                       # this card's real peaks
-scripts/apply_probe.py probe.txt --device rtx5090 --write
-burnish calibrate --repeats 9 --weights <checkpoint> --output cal.json      # about 30 minutes
-burnish calibrate --repeats 9 --weights <checkpoint> --merge cal.json --output cal.json
-burnish score <raw.json> --calibration cal.json
+scripts/build_cuda.sh                                     # CMAKE_CUDA_ARCHITECTURES=121 for DGX Spark
+build-cuda/burnisher check-weights --weights <checkpoint>
 ```
 
-Keep `cal.json` beside your ledger, not in the repository.
+Two guards on every run replace per-box calibration:
+- **The base arm must be within 25% of the anchor's time.** On a second card, BG-1's base times
+  differed from the anchor's by up to 9.4% (`eval/cells/BG-1/second-card-check.json`). Further
+  than 25% means the base code changed, or this is not the pinned hardware.
+- **The base arm's repeats must spread less than 3× the floor.** Otherwise the box was too noisy,
+  and the run is refused as the box's fault, not the submission's.
 
-**Calibrate more than once.** Noise floors move between sessions on the same card:
+## Anchoring a generation
+
+Once per generation, and again only when the base code changes:
+
+```bash
+burnish calibrate --generation BG-N --impl cuda --repeats 9 --weights <checkpoint> --write
+# a second session, on any card, keeping the worst floor per cell
+burnish calibrate --generation BG-N --impl cuda --repeats 9 --weights <checkpoint> \
+    --merge eval/cells/BG-N/reference.json --write
+```
+
+**Anchor with two sessions, because floors move.** Two calibrations of the same RTX 5090, hours
+apart:
 
 | cell | session A | session B | ratio |
 |:--|--:|--:|--:|
@@ -110,11 +127,8 @@ Keep `cal.json` beside your ledger, not in the repository.
 | `t5-encode/1024/bf16` | 3.753% | 0.155% | 24.2× |
 | `vae-decode/1024/bf16` | 0.259% | 0.845% | 3.3× |
 
-`--merge` keeps the worst floor. A floor too tight would pay for noise permanently; one too loose
-only refuses a gain too small to see.
-
-**Recalibrate** after a driver or card change. If the base arm drifts more than three floors from
-the calibration, scoring stops.
+`--merge` keeps the worst floor per cell. A floor too tight would pay for noise permanently; one
+too loose only refuses a gain too small to see.
 
 **On the box:**
 - **Never run two benchmarks at once.** They race for VRAM and produce plausible wrong numbers.
