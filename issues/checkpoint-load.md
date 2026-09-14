@@ -16,8 +16,8 @@ Only the safetensors headers are read, over HTTP (about 1.8 MB, not 22 GB). CI r
 
 **What it taught.** The reference differs from itself across dtypes by
 0.3713 relative L2, so a bf16 end-to-end comparison can't gate
-correctness. The gate checks assembly in fp32 and each stage at bf16 instead
-(`docs/CORRECTNESS.md`).
+correctness. The gate checks the whole pipeline in fp32 instead; per-stage bf16 tolerances are
+recorded, but not yet run by the gate (`docs/CORRECTNESS.md`).
 
 ---
 

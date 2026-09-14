@@ -5,7 +5,8 @@
 1. **Guard.** If it changes the measuring instrument it is labelled `burnish:skipped-instrument`,
    and no GPU time is spent.
 2. **Build** from source on the evaluation box.
-3. **Gate** correctness and determinism for both base and candidate (`docs/CORRECTNESS.md`).
+3. **Gate** correctness (in fp32) and determinism for both base and candidate
+   (`docs/CORRECTNESS.md`).
 4. **Bench.** Base and candidate runs alternate, plus a held-out shape drawn after the code is
    frozen.
 5. **Score** into an append-only ledger outside the repository.

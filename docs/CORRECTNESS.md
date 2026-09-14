@@ -5,15 +5,18 @@ is timed. It is never traded against a speedup.
 
 ## What it checks
 
-1. **Determinism.** The same build, seed and prompts, replayed ten times, must give
-   **byte-identical** latents. A build that can't reproduce itself can't be compared with anything.
-2. **Assembly, in fp32.** The whole pipeline is compared with the fp32 reference latents. The
-   threshold is five times this runtime's measured drift.
-3. **The scored dtype, stage by stage.** Each stage runs at bf16 against the reference at bf16,
-   with its own tolerance.
+1. **Determinism.** The same build, seed and prompt, replayed, must give **byte-identical**
+   latents. `burnish gate` replays 10 times by default; `eval/score_submission.sh` uses 2 per arm.
+   A build that can't reproduce itself can't be compared with anything.
+2. **Correctness, in fp32.** The whole pipeline, for every frozen prompt, is compared with the fp32
+   reference latents. The threshold is five times this runtime's measured drift. Submissions are
+   gated at fp32.
 
-Why not compare the full bf16 run end to end? The reference disagrees **with itself** across
-dtypes by more than a real bug would (`eval/cells/BG-1/dtype-cost.json`).
+**Not automated yet: the bf16 path.** Comparing a full bf16 run end to end can't gate, because the
+reference disagrees **with itself** across dtypes by more than a real bug would
+(`eval/cells/BG-1/dtype-cost.json`). Per-stage bf16 tolerances are recorded in
+`configs/tolerance.json`, but `burnish gate` does not run them. Check your stages at bf16 with
+`scripts/differential_test.py`.
 
 Thresholds and the measurements behind them: `configs/tolerance.json`.
 
