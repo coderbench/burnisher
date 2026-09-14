@@ -16,7 +16,8 @@ discretion over the score.
 ## 1. Pick something
 
 - `tools/burnish roofline` shows every cell's ceiling and how full it is. `--` means not measured
-  yet.
+  yet. `vs pytorch` is how many times slower the cell is than PyTorch on the same card: getting a
+  cell under 1x is what makes the runtime worth using.
 - `issues/README.md` lists the open work.
 - A cell whose `res` column says `no` has less than 20 times its noise floor left, so a gain there
   has to be large to show.

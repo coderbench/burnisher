@@ -20,6 +20,9 @@ tools/burnish audit         # re-check anyone's score. no GPU, two seconds
   gate against committed reference latents.
 - Measured on an RTX 5090: `dit-step` is at **1.5%** of its arithmetic ceiling, `vae-decode` at
   **0.8%**, `t5-encode` at **18.2%**.
+- **It is not yet worth using.** On the same card PyTorch makes the whole image in **1.92 s**, and
+  this runtime is slower at every stage: `dit-step` **40.7×**, `vae-decode` **45.7×**, `t5-encode`
+  **3.3×** (`eval/cells/BG-1/pytorch-baseline.json`).
 - The kernels are deliberately naive: no tensor cores, convolution one thread per output element,
   every GEMM epilogue a separate pass.
 
@@ -27,8 +30,15 @@ What is measured, what is not, and every defect found so far: `docs/STATUS.md`.
 
 ## What it is for
 
-Gittensor SN74 pays merged pull requests that carry a bot-verified speedup. Burnisher is being built
-to become a scored target there, for image generation.
+**A runtime people choose over PyTorch** for image and video generation on consumer Blackwell cards.
+It is not one yet: every stage is slower than PyTorch on the same card. `tools/burnish roofline`
+shows each cell's gap to PyTorch beside its gap to the ceiling, and a cell that passes its PyTorch
+time is the first reason anybody has to run it here. The ceiling is well past PyTorch, so the room
+exists: PyTorch's denoiser step reaches only a fraction of it.
+
+**The work is paid.** Gittensor SN74 pays merged pull requests that carry a bot-verified speedup,
+and Burnisher is being built to become a scored target there. Every contribution it pays makes the
+runtime faster for anyone who uses it, whether or not they mine.
 
 ## How a change is scored
 
@@ -54,6 +64,12 @@ With a checkpoint, still without a GPU:
 ```bash
 ./build/burnisher check-weights --weights DIR                    # all required tensors load
 scripts/differential_test.py --weights DIR --stage vae-decode   # a stage vs the reference
+```
+
+Make an image from a prompt (CUDA build; the checkpoint with its `<checkpoint>/tokenizer/`):
+
+```bash
+scripts/generate.py --weights DIR "a red fox asleep in fresh snow" --out fox.png
 ```
 
 Commands that produce a **measurement** (`burnish probe | calibrate | gate | bench`) refuse to run

@@ -1,0 +1,68 @@
+{
+ "_comparison_basis": "burnisher_s is the anchor's measured time (reference.json), taken on a card of the same class. Cards of this class have differed by up to 9.4% per cell (second-card-check.json), which is small beside the ratios here but is not zero.",
+ "_what_this_is": "The same stages, at the same shapes and dtype, run by the reference implementation (diffusers on PyTorch, eager, as installed) on a card of the pinned class. Not scored. It answers whether the runtime is worth using, which the roofline cannot. `burnisher_over_pytorch` above 1 means the runtime is that many times SLOWER than PyTorch.",
+ "comparison": {
+  "dit-step/1024/bf16": {
+   "burnisher_over_pytorch": 40.72770424463117,
+   "burnisher_s": 3.5714364124999998,
+   "pytorch_s": 0.08769058994948864
+  },
+  "t5-encode/1024/bf16": {
+   "burnisher_over_pytorch": 3.310597417670823,
+   "burnisher_s": 0.1271231175,
+   "pytorch_s": 0.03839884512126446
+  },
+  "vae-decode/1024/bf16": {
+   "burnisher_over_pytorch": 45.652559023487804,
+   "burnisher_s": 5.433579165499999,
+   "pytorch_s": 0.11902025388553739
+  }
+ },
+ "device": {
+  "driver": "595.71.05",
+  "name": "NVIDIA GeForce RTX 5090",
+  "uuid": "GPU-96bb53a0-233c-705e-bb11-fbbaf4e2727d"
+ },
+ "generation": "BG-1",
+ "mode": "eager",
+ "prompt": "long-caption",
+ "stages": {
+  "dit-step/1024/bf16": {
+   "max_s": 0.08776323683559895,
+   "median_s": 0.08769058994948864,
+   "min_s": 0.08688647300004959,
+   "peak_vram_bytes": 11209818112,
+   "repeats": 9,
+   "spread_pct": 0.9998379940816755
+  },
+  "t5-encode/1024/bf16": {
+   "max_s": 0.03868664428591728,
+   "median_s": 0.03839884512126446,
+   "min_s": 0.03750157402828336,
+   "peak_vram_bytes": 11149864960,
+   "repeats": 9,
+   "spread_pct": 3.086213280351127
+  },
+  "vae-decode/1024/bf16": {
+   "max_s": 0.11904966784641147,
+   "median_s": 0.11902025388553739,
+   "min_s": 0.11897447612136602,
+   "peak_vram_bytes": 13533532160,
+   "repeats": 9,
+   "spread_pct": 0.0631755710399971
+  }
+ },
+ "versions": {
+  "diffusers": "0.35.1",
+  "torch": "2.12.0+cu130",
+  "transformers": "4.57.1"
+ },
+ "whole_image": {
+  "max_s": 1.928929470013827,
+  "median_s": 1.9225277178920805,
+  "min_s": 1.9202026049606502,
+  "peak_vram_bytes": 13539364864,
+  "repeats": 3,
+  "spread_pct": 0.45392661816836055
+ }
+}

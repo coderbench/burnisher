@@ -53,6 +53,20 @@ class TestProseMatchesTheArtifacts(unittest.TestCase):
                         f"source of truth is {artifact}; if that artifact changed, the prose has "
                         f"to change with it rather than keep the old number.")
 
+    def test_the_gap_to_pytorch_is_quoted_from_its_artifact(self):
+        pt = _load("pytorch-baseline.json")
+        src = "eval/cells/BG-1/pytorch-baseline.json"
+        for c in pt["comparison"].values():
+            ratio = f"{c['burnisher_over_pytorch']:.1f}\u00d7"
+            self._want(self.readme, "README.md", ratio, src)
+            self._want(self.status, "docs/STATUS.md", ratio, src)
+        whole = f"{pt['whole_image']['median_s']:.2f} s"
+        self._want(self.readme, "README.md", whole, src)
+        self._want(self.status, "docs/STATUS.md", whole, src)
+        dit = "dit-step/1024/bf16"
+        reached = f"{100 * self.cal[dit]['ceiling_seconds'] / pt['stages'][dit]['median_s']:.1f}%"
+        self._want(self.status, "docs/STATUS.md", reached, src)
+
     def test_the_readme_quotes_the_calibrated_achieved_fractions(self):
         for cid in ("dit-step/1024/bf16", "vae-decode/1024/bf16", "t5-encode/1024/bf16"):
             pct = f"{100 * self.cal[cid]['achieved']:.1f}%"

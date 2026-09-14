@@ -11,6 +11,9 @@ So it prints three things per cell and refuses to blur them together:
     ceiling          arithmetic, from the config and the device peak. Never a measurement.
     achieved         the fraction currently reached. NEEDS A RUN. Prints `--` when there is none.
     floor            the cell's measured run-to-run spread. NEEDS REPEATED RUNS. Same.
+    vs pytorch       how many times slower than the same stage in PyTorch on the same card class
+                     (`pytorch-baseline.json`). The ceiling says how far a cell is from the limit;
+                     this says how far it is from being worth using.
 
 A cell with a ceiling and no achieved fraction is a cell where the size of the box is known and
 how full it is is not. That is printed as `--`, not as a plausible number, and the summary line
@@ -36,7 +39,7 @@ from burnscore.floor import floor_as_gap_closed, resolution_gate
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def rows_for(generation, raw):
+def rows_for(generation, raw, pytorch=None):
     out = []
     for spec in raw["cells"]:
         cell = generation.cells[spec["id"]]
@@ -68,6 +71,12 @@ def rows_for(generation, raw):
             if cell.floor_pct is not None:
                 row["floor_as_gap_closed"] = floor_as_gap_closed(cell.floor_pct, cell.achieved)
                 row["resolvable"] = resolution_gate(cell.floor_pct, cell.achieved)["resolvable"]
+        stage = ((pytorch or {}).get("stages") or {}).get(cell.id)
+        row["pytorch_s"] = stage["median_s"] if stage else None
+        if stage:
+            row["pytorch_achieved"] = spec["ceiling_seconds"] / stage["median_s"]
+            if row.get("measured_s"):
+                row["times_pytorch"] = row["measured_s"] / stage["median_s"]
         out.append(row)
     return out
 
@@ -83,7 +92,8 @@ def render_text(generation, rows, device_name):
     w.append("  achieved / floor: MEASURED. `--` means nobody has measured this cell yet.")
     w.append("")
     hdr = (f"  {'cell':26s} {'runs':>4s} {'ceiling':>10s} {'bound':>7s} {'ai':>8s} "
-           f"{'fuse':>5s} {'achieved':>9s} {'left':>7s} {'floor':>7s} {'res':>4s}")
+           f"{'fuse':>5s} {'achieved':>9s} {'left':>7s} {'floor':>7s} {'res':>4s} "
+           f"{'pytorch':>9s} {'vs pt':>7s}")
     w.append(hdr)
     w.append("  " + "-" * (len(hdr) - 2))
     for r in rows:
@@ -96,7 +106,9 @@ def render_text(generation, rows, device_name):
             f"{_fmt(r.get('achieved'), '.1%'):>9s} "
             f"{_fmt(r.get('max_further_speedup'), '.2f') + ('x' if r.get('max_further_speedup') else ''):>7s} "
             f"{_fmt(r.get('floor_pct'), '.3f'):>7s} "
-            f"{('yes' if res else 'NO') if res is not None else '--':>4s}")
+            f"{('yes' if res else 'NO') if res is not None else '--':>4s} "
+            f"{_fmt(r['pytorch_s'] and r['pytorch_s'] * 1e3, '.1f') + ('ms' if r['pytorch_s'] else ''):>9s} "
+            f"{_fmt(r.get('times_pytorch'), '.1f') + ('x' if r.get('times_pytorch') else ''):>7s}")
         if not r["implemented"]:
             w.append(f"      ^ DECLARED, NOT IMPLEMENTED -- ceiling published, no reference exists")
     unmeasured = sum(1 for r in rows if r.get("achieved") is None)
@@ -110,6 +122,8 @@ def render_text(generation, rows, device_name):
              f"is worth.")
     w.append(f"  left = the most a perfect implementation could still gain in this cell, ever.")
     w.append(f"  res  = does this cell's remaining room clear 20x its own measured noise floor?")
+    w.append(f"  vs pt = how many times slower than the same stage in PyTorch on this card class.")
+    w.append(f"         Above 1x, nobody has a reason to run this cell here instead.")
     w.append("")
     if unmeasured:
         w.append(f"  {unmeasured} of {len(rows)} cells have NO measured achieved fraction and no "
@@ -156,14 +170,16 @@ def render_markdown(generation, rows, device_name, raw):
          "| left | measured | `1 / achieved` -- the most any implementation could still gain here, ever. |",
          "| floor | measured | this cell's run-to-run spread, from repeated paired control runs. |",
          "| res | measured | does the remaining room clear 20x this cell's own floor? |",
+         "| pytorch | **measured** | the same stage in diffusers on PyTorch, eager, same shapes and dtype, same card class (`pytorch-baseline.json`). |",
+         "| vs pytorch | measured | measured over pytorch: how many times slower this cell is than what users already have. |",
          "",
          "`unavoidable_bytes` is weights-read-once plus stage input plus stage output. Every",
          "intermediate is excluded on purpose: an intermediate is removable by fusion, and a",
          "ceiling that moved when a contributor fused would not be a ceiling.",
          "",
          "## Cells", "",
-         "| cell | runs | ceiling | bound | ai | fuse | achieved | left | floor | res |",
-         "|---|--:|--:|:--|--:|--:|--:|--:|--:|:--:|"]
+         "| cell | runs | ceiling | bound | ai | fuse | achieved | left | floor | res | pytorch | vs pytorch |",
+         "|---|--:|--:|:--|--:|--:|--:|--:|--:|:--:|--:|--:|"]
     for r in rows:
         res = r.get("resolvable")
         w.append(
@@ -173,8 +189,24 @@ def render_markdown(generation, rows, device_name, raw):
             f"{_fmt(r.get('achieved'), '.1%')} | "
             f"{_fmt(r.get('max_further_speedup'), '.2f')} | "
             f"{_fmt(r.get('floor_pct'), '.3f')} | "
-            f"{('yes' if res else '**no**') if res is not None else '--'} |")
+            f"{('yes' if res else '**no**') if res is not None else '--'} | "
+            f"{_fmt(r['pytorch_s'] and r['pytorch_s'] * 1e3, '.1f')}{' ms' if r['pytorch_s'] else ''} | "
+            f"{_fmt(r.get('times_pytorch'), '.1f')}{'x' if r.get('times_pytorch') else ''} |")
     w.append("")
+    compared = [r for r in rows if r.get("pytorch_s")]
+    if compared:
+        w += ["## Against PyTorch", "",
+              "A cell faster than its PyTorch time is a cell somebody would choose to run here. "
+              "That is the",
+              "bar that makes this runtime useful, and the ceiling is far enough past it to leave "
+              "room:", ""]
+        for r in compared:
+            w.append(f"- `{r['cell']}`: PyTorch takes {r['pytorch_s'] * 1e3:.1f} ms, "
+                     f"{r['pytorch_achieved']:.1%} of this ceiling. Matching it means reaching "
+                     f"that fraction"
+                     + (f"; this runtime is at {r['achieved']:.1%}." if r.get("achieved") is not None
+                        else "."))
+        w.append("")
     unmeasured = [r["cell"] for r in rows if r.get("achieved") is None]
     if unmeasured:
         w += ["## What is not known yet", "",
@@ -240,6 +272,10 @@ def main():
     raw = json.loads(gpath.read_text())
     devices = json.loads((ROOT / "configs" / "devices.json").read_text())
     device_key = args.device or raw["device"]
+    # Measured on the generation's own part, so it is shown only against that part's ceilings.
+    ppath = gpath.parent / "pytorch-baseline.json"
+    pytorch = (json.loads(ppath.read_text())
+               if ppath.exists() and device_key == raw["device"] else None)
 
     if args.device and args.device != raw["device"]:
         # A different part is a different generation's worth of ceilings. Recompute them rather
@@ -253,7 +289,7 @@ def main():
             if spec["id"] in generation.cells:
                 generation.cells[spec["id"]].ceiling_seconds = spec["ceiling_seconds"]
 
-    rows = rows_for(generation, raw)
+    rows = rows_for(generation, raw, pytorch)
     name = devices[device_key]["name"]
     print(render_text(generation, rows, name))
     if args.device and args.device != json.loads(gpath.read_text())["device"]:

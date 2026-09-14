@@ -20,6 +20,8 @@ disagreement would be invisible until a receipt was wrong.
 | left | measured | `1 / achieved` -- the most any implementation could still gain here, ever. |
 | floor | measured | this cell's run-to-run spread, from repeated paired control runs. |
 | res | measured | does the remaining room clear 20x this cell's own floor? |
+| pytorch | **measured** | the same stage in diffusers on PyTorch, eager, same shapes and dtype, same card class (`pytorch-baseline.json`). |
+| vs pytorch | measured | measured over pytorch: how many times slower this cell is than what users already have. |
 
 `unavoidable_bytes` is weights-read-once plus stage input plus stage output. Every
 intermediate is excluded on purpose: an intermediate is removable by fusion, and a
@@ -27,13 +29,22 @@ ceiling that moved when a contributor fused would not be a ceiling.
 
 ## Cells
 
-| cell | runs | ceiling | bound | ai | fuse | achieved | left | floor | res |
-|---|--:|--:|:--|--:|--:|--:|--:|--:|:--:|
-| `t5-encode/1024/bf16` | 1 | 23.08 ms | compute | 607 | 1.04 | 18.2% | 5.51 | 3.753 | yes |
-| `dit-step/1024/bf16` | 20 | 54.45 ms | compute | 10864 | 1.16 | 1.5% | 65.59 | 0.578 | yes |
-| `vae-decode/1024/bf16` | 1 | 43.00 ms | compute | 99505 | 1.32 | 0.8% | 126.37 | 0.845 | yes |
-| `dit-step/1024/fp8` | 20 | 31.70 ms | compute | 21715 | 1.28 | -- | -- | -- | -- |
-| `dit-step/1024/nvfp4` | 20 | 15.85 ms | compute | 38565 | 1.58 | -- | -- | -- | -- |
+| cell | runs | ceiling | bound | ai | fuse | achieved | left | floor | res | pytorch | vs pytorch |
+|---|--:|--:|:--|--:|--:|--:|--:|--:|:--:|--:|--:|
+| `t5-encode/1024/bf16` | 1 | 23.08 ms | compute | 607 | 1.04 | 18.2% | 5.51 | 3.753 | yes | 38.4 ms | 3.3x |
+| `dit-step/1024/bf16` | 20 | 54.45 ms | compute | 10864 | 1.16 | 1.5% | 65.59 | 0.578 | yes | 87.7 ms | 40.7x |
+| `vae-decode/1024/bf16` | 1 | 43.00 ms | compute | 99505 | 1.32 | 0.8% | 126.37 | 0.845 | yes | 119.0 ms | 45.7x |
+| `dit-step/1024/fp8` | 20 | 31.70 ms | compute | 21715 | 1.28 | -- | -- | -- | -- | -- | -- |
+| `dit-step/1024/nvfp4` | 20 | 15.85 ms | compute | 38565 | 1.58 | -- | -- | -- | -- | -- | -- |
+
+## Against PyTorch
+
+A cell faster than its PyTorch time is a cell somebody would choose to run here. That is the
+bar that makes this runtime useful, and the ceiling is far enough past it to leave room:
+
+- `t5-encode/1024/bf16`: PyTorch takes 38.4 ms, 60.1% of this ceiling. Matching it means reaching that fraction; this runtime is at 18.2%.
+- `dit-step/1024/bf16`: PyTorch takes 87.7 ms, 62.1% of this ceiling. Matching it means reaching that fraction; this runtime is at 1.5%.
+- `vae-decode/1024/bf16`: PyTorch takes 119.0 ms, 36.1% of this ceiling. Matching it means reaching that fraction; this runtime is at 0.8%.
 
 ## What is not known yet
 

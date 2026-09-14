@@ -22,6 +22,23 @@ What is real here and what is not. Read this before spending a week on anything.
 Nine paired repeats per cell, in two sessions. Floors are **not stable between sessions**: the
 second moved one by 24×, so each cell's floor is the worst of the two (`docs/EVAL.md`).
 
+## Against PyTorch on the same card
+
+`eval/cells/BG-1/pytorch-baseline.json`: the same stages in diffusers on PyTorch, eager as
+installed, at the same shapes and dtype, on an RTX 5090 (`scripts/pytorch_baseline.py`).
+
+| cell | Burnisher | PyTorch | Burnisher is |
+|:--|--:|--:|--:|
+| `t5-encode/1024/bf16` | 127.1 ms | 38.4 ms | 3.3× slower |
+| `dit-step/1024/bf16` | 3571.4 ms | 87.7 ms | 40.7× slower |
+| `vae-decode/1024/bf16` | 5433.6 ms | 119.0 ms | 45.7× slower |
+
+PyTorch makes the whole image in 1.92 s. **Until a stage beats its PyTorch time, nobody has a
+reason to run it here.** The ceiling leaves room past that: PyTorch's `dit-step` reaches 62.1% of
+its ceiling, where this runtime is at 1.5%.
+
+Not yet measured: PyTorch with `torch.compile`, which is a higher bar and the next row to add.
+
 ## Built and working
 
 - CPU reference ops, CUDA backend for all 15 ops, T5 / PixArt DiT / VAE graphs, DPM-Solver++.
