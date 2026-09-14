@@ -124,6 +124,7 @@
   "eval/tests/test_round.py",
   "eval/tests/test_runner.py",
   "eval/tests/test_schemas.py",
+  "eval/tests/test_score_submission.py",
   "eval/tests/test_scoring.py",
   "eval/tests/test_verdict.py",
   "examples/BG-1-pr-000001-raw.json",

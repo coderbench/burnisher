@@ -128,7 +128,7 @@ if [ -s "$HIT" ]; then
     cp "$HIT" "$OUT/gate-base.json"
 else
     BURNISH_ENTRY=gate "$RUN" "$BASE" "$SUB" -- \
-        --binary "$BIN" --weights "$WEIGHTS" --impl "$IMPL_BASE" --device "$DEVICE" \
+        --binary "$BIN" --generation "$GEN" --weights "$WEIGHTS" --impl "$IMPL_BASE" --device "$DEVICE" \
         --dtype "$DTYPE" --noise "$NOISE" --reference "$REF" \
         --repeats "$GATE_REPEATS" --output "$OUT/gate-base.json"
     mkdir -p "$CACHE"
@@ -137,13 +137,13 @@ fi
 
 say "2/4  gate the CANDIDATE arm ($IMPL_CAND)"
 BURNISH_ENTRY=gate "$RUN" "$BASE" "$SUB" -- \
-    --binary "$BIN" --weights "$WEIGHTS" --impl "$IMPL_CAND" --device "$DEVICE" \
+    --binary "$BIN" --generation "$GEN" --weights "$WEIGHTS" --impl "$IMPL_CAND" --device "$DEVICE" \
     --dtype "$DTYPE" --noise "$NOISE" --reference "$REF" \
     --repeats "$GATE_REPEATS" --output "$OUT/gate-cand.json"
 
 say "3/4  paired interleaved bench, ${REPEATS:-declared} repeats, both arms"
 BURNISH_ENTRY=bench "$RUN" "$BASE" "$SUB" -- \
-    --binary "$BIN" --weights "$WEIGHTS" --device "$DEVICE" \
+    --binary "$BIN" --generation "$GEN" --weights "$WEIGHTS" --device "$DEVICE" \
     --impl-base "$IMPL_BASE" --impl-candidate "$IMPL_CAND" \
     ${REPEATS:+--repeats "$REPEATS"} \
     --gate-result "$OUT/gate-cand.json" --gate-base-result "$OUT/gate-base.json" \
