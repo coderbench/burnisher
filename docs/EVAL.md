@@ -37,6 +37,7 @@ Steps 2–5 are `eval/score_submission.sh`, the same command anyone can run.
 | `burnish:unresolved` | Inside the cell's noise. Not a judgement of the idea. |
 | `burnish:no-gain` | Measured, and not an improvement. |
 | `burnish:moved-along-frontier` | Faster, but paid for in memory or fidelity. |
+| `burnish:expanded-off-latency` | Less memory or closer to the reference, no faster. Not paid. |
 | `burnish:shape-overfit` | The gain vanished at the held-out shape. |
 | `burnish:partial` | Not every cell was run. |
 | `burnish:correctness-fail` | Failed the gate. Rejected. |

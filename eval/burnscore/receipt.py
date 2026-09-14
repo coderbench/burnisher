@@ -38,7 +38,10 @@ STATUSES = (
     "EVAL_ERROR",
 )
 
-CREDITING = frozenset({"FRONTIER_EXPANDED", "EXPANDED_OFF_LATENCY"})
+# EXPANDED_OFF_LATENCY is not here. Payment is latency gap closed, and a run is resolved only when
+# its latency result clears the floor, so a gain in memory or fidelity alone has no number to pay.
+# It is recorded, and it keeps a speedup from being paid for in those objectives.
+CREDITING = frozenset({"FRONTIER_EXPANDED"})
 
 
 class ReceiptError(ValueError):

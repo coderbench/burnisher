@@ -15,6 +15,7 @@
   "burnish:unresolved": "Not paid, and not a judgement about the idea. The effect could not be distinguished from the cell's own measured noise. An axis whose spread sits inside its own noise is open, not solved.",
   "burnish:no-gain": "Not paid. Resolved, and measurably not an improvement -- which is a real result, not a failure.",
   "burnish:moved-along-frontier": "Not paid. Faster, but paid for in peak memory or output fidelity; the runtime could already make that trade.",
+  "burnish:expanded-off-latency": "Not paid. Peak memory or output fidelity improved and latency did not. Payment is the latency gap closed, so there is no number to pay; memory and fidelity count by stopping a speedup from being paid for in them.",
   "burnish:shape-overfit": "Not paid. The gain did not survive a shape drawn AFTER the candidate was frozen.",
   "burnish:partial": "Not paid. An incomplete matrix credits nothing, because dropping the cell a change hurts is the cheapest way to raise a score.",
   "burnish:correctness-fail": "Rejected before timing was considered. Never traded against a speed win.",

@@ -67,8 +67,9 @@ OUTCOMES = {
         "roofline gap that this change closed."),
     "EXPANDED_OFF_LATENCY": (
         "the frontier grew without a latency gain",
-        "Paid. Latency did not move, but peak memory or output fidelity did, and both are "
-        "scored objectives."),
+        "Not paid. Peak memory or output fidelity improved and latency did not. Payment is the "
+        "latency gap closed, so there is no number to pay; memory and fidelity count by stopping "
+        "a speedup from being paid for in them."),
     "MOVED_ALONG_FRONTIER": (
         "faster, and paid for in memory or fidelity",
         "Not paid. The runtime could already make this trade by turning a knob; a submission "
@@ -162,7 +163,7 @@ COLORS = {
     "NEEDS_REBASE": AMBER,
     "MERGE_FIRST": GREEN,
     "FRONTIER_EXPANDED": GREEN,
-    "EXPANDED_OFF_LATENCY": GREEN,
+    "EXPANDED_OFF_LATENCY": BLUE,
     "CELL_OPENED": GREEN,
     "NO_GAIN": BLUE,
     "MOVED_ALONG_FRONTIER": BLUE,

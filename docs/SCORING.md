@@ -38,7 +38,8 @@ Latency, peak VRAM and fidelity to the reference form a **frontier**.
 
 - Faster but using more memory, or drifting from the reference: `MOVED_ALONG_FRONTIER`, pays
   nothing. The runtime could already make that trade.
-- Same speed but less memory or closer to the reference: `EXPANDED_OFF_LATENCY`, pays.
+- Same speed but less memory or closer to the reference: `EXPANDED_OFF_LATENCY`, recorded but not
+  paid. Payment is latency gap closed, so a gain in memory or fidelity alone has no number.
 - A crash, OOM, timeout or failed gate is no result at all, never a slow one.
 
 ## What cannot be gamed
