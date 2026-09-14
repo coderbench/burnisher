@@ -1,87 +1,53 @@
 # Burnisher
 
-A native C++/CUDA **image and video generation** runtime for consumer Blackwell GPUs — and the
-instrument that scores changes to it.
-
-It runs PixArt-Sigma at 1024px correctly, on cuBLAS and cuDNN. Contributors make it faster and are
-paid for how much of the remaining gap to the hardware's limit they close.
-
-```
-tools/burnish roofline      # every cell's ceiling, and how full it is
-tools/burnish screen        # which model v0 pins, and why
-tools/burnish audit         # re-check anyone's score. no GPU, two seconds
-```
-
-**Here to contribute? Read `CONTRIBUTING.md`.**
+A native C++/CUDA image generation runtime for consumer Blackwell GPUs, and the harness that scores
+changes to it. It runs PixArt-Sigma at 1024px on cuBLAS and cuDNN. Contributors make it faster and
+are paid for the share of the remaining gap to the hardware's limit that they close.
 
 ## Where it stands
 
-- Runs end to end on CPU and CUDA, reproduces itself byte for byte, and passes the correctness
-  gate against committed reference latents.
-- Measured on an RTX 5090: `dit-step` is at **55.6%** of its arithmetic ceiling, `vae-decode` at
-  **25.4%**, `t5-encode` at **68.7%**.
-- **Against PyTorch on the same card**, which makes the whole image in **1.92 s**
-  (`eval/cells/BG-1/pytorch-baseline.json`): `t5-encode` takes **0.9×** PyTorch's time,
-  `dit-step` **1.1×** and `vae-decode` **1.4×**.
-- `cuda` stands on cuBLAS and cuDNN. What is still unfused is the backlog: every GEMM epilogue is a
-  separate pass, and AdaLN modulation is a full round trip.
+On an RTX 5090, against PyTorch on the same card (`eval/cells/BG-1/pytorch-baseline.json`), which
+makes the whole image in **1.92 s**:
 
-What is measured, what is not, and every defect found so far: `docs/STATUS.md`.
+| stage | share of its ceiling reached | time against PyTorch |
+|:--|--:|--:|
+| `t5-encode` | 68.7% | **0.9×** |
+| `dit-step` | 55.6% | **1.1×** |
+| `vae-decode` | 25.4% | **1.4×** |
 
-## What it is for
-
-**A runtime people choose over PyTorch** for image and video generation on consumer Blackwell cards.
-Its text encoder already beats PyTorch on the same card; its denoiser and decoder do not yet.
-`tools/burnish roofline` shows each cell's gap to PyTorch beside its gap to the ceiling, and a cell
-that passes its PyTorch time is a reason to run it here. The ceiling is past PyTorch, so the room
-exists.
-
-**The work is paid.** Gittensor SN74 pays merged pull requests that carry a bot-verified speedup,
-and Burnisher is being built to become a scored target there. Every contribution it pays makes the
-runtime faster for anyone who uses it, whether or not they mine.
-
-## How a change is scored
-
-1. You are paid the **fraction of the remaining gap** to a cell's ceiling that you close.
-2. A gain counts only if it clears **that cell's own measured noise floor**.
-3. **Faster but hungrier or less faithful pays nothing.**
-4. **Correctness is gated first**, and a **held-out shape** catches kernels tuned to one shape.
-5. **Opening a new cell pays too.**
-
-Details: `docs/SCORING.md`.
+It passes the fp32 correctness gate and reproduces itself byte for byte. More: `docs/STATUS.md`.
 
 ## Quick start
 
 ```bash
-scripts/build.sh           # CPU build: the correctness oracle and the whole harness
-./build/burnisher info     # every registered op implementation
-./build/burnisher selftest # the whole graph on synthetic weights
-scripts/check.sh           # everything checkable without a GPU
-```
-
-With a checkpoint, still without a GPU:
-
-```bash
-./build/burnisher check-weights --weights DIR                    # all required tensors load
-scripts/differential_test.py --weights DIR --stage vae-decode   # a stage vs the reference
-```
-
-Make an image from a prompt (CUDA build; the checkpoint with its `<checkpoint>/tokenizer/`):
-
-```bash
+scripts/build.sh          # CPU build: the correctness oracle and the harness, no GPU
+scripts/check.sh          # every check that needs no GPU
+scripts/build_cuda.sh     # CUDA build: needs the CUDA toolkit and cuDNN 9
 scripts/generate.py --weights DIR "a red fox asleep in fresh snow" --out fox.png
 ```
 
-Commands that produce a **measurement** (`burnish probe | calibrate | gate | bench`) refuse to run
-without a GPU. They never estimate.
+`DIR` is the pinned checkpoint, with its tokenizer in `<checkpoint>/tokenizer/`. Commands that
+measure (`tools/burnish probe | calibrate | gate | bench`) refuse to run without a GPU.
 
-## Where the work is
+## Contributing
 
-`issues/README.md` lists open work, each item with its arithmetic.
+- **How to submit a kernel:** `CONTRIBUTING.md`.
+- **Open work:** `issues/README.md`. Before a quantization cell, read `issues/weight-formats.md`:
+  one DiT step costs 0.473 s at fp32 and 0.098 s at bf16.
+- **Payment:** Gittensor SN74 pays merged pull requests that carry a bot-verified speedup, and
+  Burnisher is being built to be scored there.
 
-Read `issues/weight-formats.md` before picking a quantization cell: one DiT step costs 0.473 s at
-fp32 and 0.098 s at bf16. That is more than the halved bytes alone would buy, because the bf16 path
-also gets fused attention and the tensor cores.
+## Documents
+
+| document | answers |
+|:--|:--|
+| `CONTRIBUTING.md` | how to pick, write, check and submit a kernel |
+| `docs/SCORING.md` | how a change is scored |
+| `docs/EVAL.md` | what happens to a pull request, and how to run a validator |
+| `docs/CORRECTNESS.md` | the correctness gate |
+| `docs/CARTOGRAPHY.md` | how to add a new cell |
+| `docs/STATUS.md` | what is measured and what is not |
+| `docs/ROOFLINE.md` | every cell's ceiling (generated) |
 
 ## Layout
 
@@ -91,22 +57,10 @@ src/cpu/             reference ops: the correctness oracle, not the product
 src/cuda/            device probe and the CUDA op backend
 src/models/          T5 encoder, PixArt DiT, VAE decoder as graphs over the registry
 eval/burnscore/      the scorer: geometry, roofline, floor, bootstrap, frontier, receipt, ledger
-eval/cells/          frozen generations: definition, calibration, prompts, reference latents
+eval/cells/          frozen generations: definition, anchor, prompts, reference latents
 tools/burnish        the harness CLI
 issues/              the backlog, generated from configs/
 ```
-
-## Documents
-
-| document | answers |
-|:--|:--|
-| `CONTRIBUTING.md` | how to pick, write, check and submit a change |
-| `docs/SCORING.md` | how the number is computed |
-| `docs/EVAL.md` | what happens to a pull request, labels, audits, and running a validator |
-| `docs/CORRECTNESS.md` | the correctness gate |
-| `docs/CARTOGRAPHY.md` | how to open a new cell |
-| `docs/STATUS.md` | what is measured, what is not, and what went wrong |
-| `docs/ROOFLINE.md` | every cell's ceiling (generated) |
 
 ## Licence
 
