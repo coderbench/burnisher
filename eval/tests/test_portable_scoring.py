@@ -28,6 +28,9 @@ from burnscore import compute as CP
 
 GEN = ROOT / "eval" / "cells" / "BG-1" / "generation.json"
 RAW = ROOT / "examples" / "BG-1-pr-000001-raw.json"
+# The anchor the example's measurements belong to. They were taken on the first `cuda` kernels, and
+# scoring them against a later anchor would be refused by the very band these tests exercise.
+ANCHOR = ROOT / "examples" / "BG-1-anchor-v0.json"
 OTHER_CARD = {"uuid": "GPU-bbbbbbbb-0000-0000-0000-000000000000", "name": "NVIDIA GeForce RTX 5090"}
 
 
@@ -40,7 +43,7 @@ def _scaled(records, base=1.0, candidate=1.0):
 
 class TestAnyCardScoresTheSame(unittest.TestCase):
     def setUp(self):
-        self.gen = C.load(GEN)
+        self.gen = C.load(GEN, calibration=ANCHOR)
         self.records = json.loads(RAW.read_text())["records"]
         self.reference = CP.compute(self.gen, self.records)["aggregate"]["gap_closed"]
 
@@ -90,9 +93,10 @@ class TestAnyCardScoresTheSame(unittest.TestCase):
         self.assertIn("not the submission's fault", str(cm.exception))
 
     def test_the_anchor_records_where_it_was_measured(self):
+        committed = C.load(GEN)   # the generation's own anchor, not the example's
         for field in ("calibration_device", "calibration_device_name", "calibration_driver"):
-            self.assertTrue(getattr(self.gen, field), f"the anchor does not record {field}")
-        for c in self.gen.scorable_cells():
+            self.assertTrue(getattr(committed, field), f"the anchor does not record {field}")
+        for c in committed.scorable_cells():
             self.assertTrue(c.measured_seconds, f"{c.id}: the anchor has no base time")
 
 

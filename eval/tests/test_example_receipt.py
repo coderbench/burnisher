@@ -37,6 +37,10 @@ from burnscore import receipt as R
 EXAMPLES = ROOT / "examples"
 RAW = EXAMPLES / "BG-1-pr-000001-raw.json"
 RECEIPT = EXAMPLES / "BG-1-pr-000001-receipt.json"
+# The anchor the example was scored against. Scoring reads an anchor as well as the raw file, and
+# BG-1 was re-anchored when the vendor kernels became `cuda`; the example is a measurement of the
+# first kernels, so it reproduces against the anchor that describes them and no other.
+ANCHOR = EXAMPLES / "BG-1-anchor-v0.json"
 
 # Two fields cannot match and must not be asserted on: a receipt is stamped with the wall clock
 # at the moment it is built, and its digest covers that stamp. Everything else is a function of
@@ -62,7 +66,7 @@ class TestTheCommittedExampleStillReproduces(unittest.TestCase):
             out = Path(tmp) / "receipt.json"
             r = subprocess.run(
                 [sys.executable, str(ROOT / "tools" / "burnish"), "score", str(RAW),
-                 "--generation", "BG-1", "--output", str(out),
+                 "--generation", "BG-1", "--calibration", str(ANCHOR), "--output", str(out),
                  "--ledger", str(Path(tmp) / "ledger"), "--pr", str(self.want["pr"])],
                 capture_output=True, text=True, timeout=300)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -147,7 +151,7 @@ class TestTheCommittedExampleStillReproduces(unittest.TestCase):
         # produced by a different instrument than the one the repository ships would teach the
         # wrong thing to whoever copies it.
         import json as _json
-        cal = _json.loads((ROOT / "eval" / "cells" / "BG-1" / "reference.json").read_text())
+        cal = _json.loads(ANCHOR.read_text())
         self.assertEqual((r["provenance"]["warmup"], r["provenance"]["iters"]),
                          (cal["calibrated_with"]["warmup"], cal["calibrated_with"]["iters"]))
         self.assertGreaterEqual(r["provenance"]["repeats"], self.gen.repeats)

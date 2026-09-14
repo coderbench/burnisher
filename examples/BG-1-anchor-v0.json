@@ -1,0 +1,72 @@
+{
+ "_floor_method": "Two arms, both the unmodified base, interleaved with every guard a scored comparison uses. The floor is the larger of the paired control-vs-control spread and the instrument's own resolution.",
+ "_floor_pooling": "floor_pct is the worst of the two committed sessions on the anchor card: this file's own and calibration-session-2.json. The anchor is used on every card of the pinned class, so the floor it carries is the worst one measured.",
+ "_what_this_is": "Per-cell calibration: the fraction of the arithmetic ceiling currently achieved, and the measured run-to-run noise floor. Both are measurements.",
+ "calibrated_with": {
+  "impl": "cuda",
+  "iters": 5,
+  "repeats": 9,
+  "timer_digits": 6,
+  "warmup": 2
+ },
+ "calibration_sessions": 2,
+ "cells": {
+  "dit-step/1024/bf16": {
+   "achieved": 0.015245658417544026,
+   "basis": "measured",
+   "ceiling_seconds": 0.05444889960495386,
+   "floor_decided_by": "spread",
+   "floor_median_ratio": 0.9994778531907511,
+   "floor_pct": 0.5776947200587813,
+   "floor_repeats": 9,
+   "floor_resolution_pct": 0.0005,
+   "floor_spread_pct": 0.5776947200587813,
+   "floors_of_room": 11116.476383243249,
+   "measured_seconds": 3.5714364124999998,
+   "peak_vram_bytes": 3045294080,
+   "resolvable": true
+  },
+  "t5-encode/1024/bf16": {
+   "achieved": 0.18153324094970438,
+   "basis": "measured",
+   "ceiling_seconds": 0.02307707151940508,
+   "floor_decided_by": "spread",
+   "floor_median_ratio": 1.0000134774615537,
+   "floor_pct": 3.7532580815317766,
+   "floor_repeats": 9,
+   "floor_resolution_pct": 0.0005,
+   "floor_spread_pct": 3.7532580815317766,
+   "floors_of_room": 115.61721214802536,
+   "measured_seconds": 0.1271231175,
+   "peak_vram_bytes": 19629948928,
+   "resolvable": true
+  },
+  "vae-decode/1024/bf16": {
+   "achieved": 0.007913030168201135,
+   "basis": "measured",
+   "ceiling_seconds": 0.04299607585791064,
+   "floor_decided_by": "worst-of-sessions",
+   "floor_median_ratio": 1.0000976717338184,
+   "floor_pct": 0.8452848208762251,
+   "floor_repeats": 9,
+   "floor_resolution_pct": 0.0005,
+   "floor_sessions_max_from": "calibration-session-2.json",
+   "floor_spread_pct": 0.25936641076014877,
+   "floors_of_room": 48213.12865723825,
+   "measured_seconds": 5.433579165499999,
+   "peak_vram_bytes": 698261504,
+   "resolvable": true
+  }
+ },
+ "device": "cuda",
+ "device_probe": {
+  "_clocks_note": "Clocks are not pinned and cannot be in a container. Only paired interleaved same-box deltas mean anything; absolute times from two different sessions are not comparable.",
+  "driver_version": "595.91.07",
+  "memory.total": "32607 MiB",
+  "name": "NVIDIA GeForce RTX 5090",
+  "pci.bus_id": "00000000:01:00.0",
+  "uuid": "GPU-da2aa62b-30d9-78a4-d9a1-86a21df7e530"
+ },
+ "generation": "BG-1",
+ "weights": "/workspace/ckpt"
+}

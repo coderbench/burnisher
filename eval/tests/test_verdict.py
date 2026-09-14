@@ -298,7 +298,8 @@ class TestAnAuditWorksWithoutTheValidatorsMachine(unittest.TestCase):
 
     def test_a_receipt_from_another_box_audits_from_its_own_embedded_calibration(self):
         raw = json.loads(RAW.read_text())
-        cal = json.loads((ROOT / "eval" / "cells" / "BG-1" / "reference.json").read_text())
+        # The example's own anchor: a validator's embedded calibration describes the run it scored.
+        cal = json.loads((ROOT / "examples" / "BG-1-anchor-v0.json").read_text())
         other = "GPU-aaaaaaaa-0000-0000-0000-000000000000"
 
         # Another validator's run: their card, their calibration, travelling together.

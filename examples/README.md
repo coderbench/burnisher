@@ -7,13 +7,16 @@ ledger.
 |:--|:--|
 | `BG-1-pr-000001-raw.json` | the measurements: 3 cells × 2 arms × 3 repeats, a held-out shape, the gate results and the device |
 | `BG-1-pr-000001-receipt.json` | what `tools/burnish score` made of them |
+| `BG-1-anchor-v0.json` | the anchor they were scored against: BG-1 calibrated on the first `cuda` kernels |
 
 Re-score it on any machine, no GPU. Every figure comes out the same, and
-`eval/tests/test_example_receipt.py` checks it:
+`eval/tests/test_example_receipt.py` checks it. Pass the v0 anchor: BG-1 was re-anchored when the
+vendor kernels became `cuda`, and this run measured the first kernels, which only that anchor
+describes.
 
 ```
 tools/burnish score examples/BG-1-pr-000001-raw.json --generation BG-1 \
-    --output /tmp/r.json --ledger /tmp/ledger --pr 1
+    --calibration examples/BG-1-anchor-v0.json --output /tmp/r.json --ledger /tmp/ledger --pr 1
 ```
 
 ## What happened
