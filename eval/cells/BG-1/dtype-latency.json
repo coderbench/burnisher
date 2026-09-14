@@ -4,32 +4,32 @@
   "basis": "measured",
   "device": {
     "_clocks_note": "Clocks are not pinned and cannot be in a container. Only paired interleaved same-box deltas mean anything; absolute times from two different sessions are not comparable.",
-    "driver_version": "595.91.07",
+    "driver_version": "595.71.05",
     "memory.total": "32607 MiB",
     "name": "NVIDIA GeForce RTX 5090",
-    "pci.bus_id": "00000000:01:00.0",
-    "uuid": "GPU-da2aa62b-30d9-78a4-d9a1-86a21df7e530"
+    "pci.bus_id": "00000000:05:00.0",
+    "uuid": "GPU-96bb53a0-233c-705e-bb11-fbbaf4e2727d"
   },
-  "dit_step_bf16_s": 3.576476135,
-  "dit_step_fp32_s": 3.265501589,
+  "dit_step_bf16_s": 0.09761155,
+  "dit_step_fp32_s": 0.473298313,
   "impl": "cuda",
   "iters": 5,
-  "ratio_fp32_over_bf16": 0.9130500150813952,
+  "ratio_fp32_over_bf16": 4.848794153970509,
   "repeats": 5,
   "samples": {
     "bf16": [
-      3.559928631,
-      3.573781937,
-      3.576476135,
-      3.576552403,
-      3.577299539
+      0.097365458,
+      0.097490964,
+      0.09761155,
+      0.097633831,
+      0.097710525
     ],
     "fp32": [
-      3.230926189,
-      3.25537409,
-      3.265501589,
-      3.271041979,
-      3.268139644
+      0.471850953,
+      0.472899966,
+      0.473298313,
+      0.473608724,
+      0.474025446
     ]
   },
   "shape": {

@@ -18,14 +18,13 @@ Blackwell's FP4 path is new, and no open diffusion runtime has tuned it.
 - NVFP4 costs 0.5625 bytes per element (4 bits plus a scale per 16), not 0.5.
 - A 4-bit path needs its own tolerance in its own generation.
 
-**Measured: narrower weights do not pay yet.**
+**Measured: narrower weights pay, and by more than the bytes.**
 
-- One DiT step costs 3.266 s at fp32 and 3.576 s at bf16
+- One DiT step costs 0.473 s at fp32 and 0.098 s at bf16
   (5 paired repeats, `eval/cells/BG-1/dtype-latency.json`).
-- So halving the bytes made the step 10% slower.
-- At 1.5% of its ceiling, the step is limited by how the kernels are
-  written, not by bytes.
-- Do fused AdaLN, CUDA graphs and attention first.
+- That is 4.85x where the bytes are 2x. The bf16 path also runs fused attention and
+  tensor-core GEMMs that fp32 cannot, so the ratio measures kernels as much as bandwidth.
+- What fp8 and NVFP4 add on top of bf16 is unmeasured, and that is what these cells would show.
 
 ---
 

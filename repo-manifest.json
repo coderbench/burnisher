@@ -142,6 +142,7 @@
   "eval/tests/test_score_submission.py",
   "eval/tests/test_scoring.py",
   "eval/tests/test_verdict.py",
+  "examples/BG-1-anchor-v0-session-2.json",
   "examples/BG-1-anchor-v0.json",
   "examples/BG-1-pr-000001-raw.json",
   "examples/BG-1-pr-000001-receipt.json",

@@ -3,11 +3,12 @@
 #
 #   0 */2 * * * /path/to/burnisher/eval/run_round_cron.sh >> /var/log/burnish-round.log 2>&1
 #
-# Three slots, not five. A submission costs about 24 measured GPU-minutes, so three fit a
-# two-hour interval with 41 minutes of slack -- enough to absorb a slow build, a checkpoint
-# reload, or a retry -- and five overrun the window outright. The slack matters more than the
-# throughput: a round that runs past its interval meets the next one holding the lock, and the
-# next one skips.
+# Twelve slots. A submission measures about 4.5 GPU-minutes on a warm gate cache
+# (eval/cells/BG-1/round-cost.json), so twelve and a cold gate fit a two-hour interval with about an
+# hour of slack -- enough to absorb a slow build, a checkpoint reload, a retry, or the cold gate a
+# round pays after it merges. It was three when a submission cost 24 minutes. The slack matters
+# more than the throughput: a round that runs past its interval meets the next one holding the
+# lock, and the next one skips.
 #
 # The slot count should rise as the runtime gets faster. It is the one quantity here that
 # improves without anybody working on it directly: scoring cost is proportional to how slow the
@@ -52,7 +53,7 @@ git merge --quiet --ff-only origin/main
 
 exec python3 -u eval/round.py \
     --repo "$BURNISH_REPO" \
-    --slots "${BURNISH_SLOTS:-3}" \
+    --slots "${BURNISH_SLOTS:-12}" \
     --interval 120 \
     --base origin/main \
     --json "${BURNISH_ROUND_JSON:-$STATE/round-$(date -u +%Y%m%dT%H%M%SZ).json}" \

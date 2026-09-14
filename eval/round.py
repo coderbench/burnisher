@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """One evaluation round: pick a few open pull requests, score them, merge at most one.
 
-    eval/round.py --repo owner/name --slots 3 --ledger DIR --weights DIR --noise FILE
+    eval/round.py --repo owner/name --slots 12 --ledger DIR --weights DIR --noise FILE
     eval/round.py --repo owner/name --dry-run
 
 Why rounds, rather than scoring each pull request as it arrives
@@ -334,10 +334,12 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--repo", required=True)
-    ap.add_argument("--slots", type=int, default=3,
-                    help="how many submissions to MEASURE this round. Three fits a two-hour "
-                         "interval with slack at the measured cost of about 24 minutes each; "
-                         "five does not fit at all.")
+    ap.add_argument("--slots", type=int, default=12,
+                    help="how many submissions to MEASURE this round. Each costs about "
+                         + (f"{MEASURED_MINUTES_PER_PR:.1f} minutes on a warm gate cache "
+                            if MEASURED_MINUTES_PER_PR else "an unmeasured amount ")
+                         + "(eval/cells/BG-1/round-cost.json); the round warns when the slots "
+                           "cannot fit the interval.")
     ap.add_argument("--interval", type=float, default=120,
                     help="minutes between rounds, used only to warn about an unfittable budget")
     ap.add_argument("--merge", action="store_true",

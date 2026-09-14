@@ -327,11 +327,12 @@ def _measured_calibration():
 
 
 # What one record costs the evaluator BEYOND the arithmetic it measures: process spawn plus the
-# checkpoint map. Measured, not assumed -- 42 records of a real scoring run averaged 11 s each,
-# which was 36% of that run's bench stage. A cost model that counted only kernel time would say
-# a cheap cell is free, and the cheapest cell here (t5-encode, 0.13 s of work) actually costs
-# about eleven seconds a record.
-MEASURED_RECORD_OVERHEAD_S = 11.0
+# checkpoint map and upload. Measured, not assumed -- 30 records of a real scoring run spent 1.9 s
+# each beyond their timed work, and a record's whole wall clock was 2.8 s. It was 11 s before
+# weights were converted on every core and uploaded through page-locked staging. A cost model that
+# counted only kernel time would say a cheap cell is free, and the cheapest cell here (t5-encode,
+# 34 ms of work) still costs over three seconds a record.
+MEASURED_RECORD_OVERHEAD_S = 1.9
 
 
 def q6_score_cost(stage_rows, generation, assumed_achieved=ASSUMED_ACHIEVED,
@@ -388,9 +389,9 @@ def q6_score_cost(stage_rows, generation, assumed_achieved=ASSUMED_ACHIEVED,
             "why": (f"a full receipt MEASURES {total / 60:.0f} GPU-minutes against a "
                     f"{SCORE_COST_BUDGET_S / 60:.0f}-minute budget"),
             "_trap": ("This is the one screen question a model cannot answer. It scales with how "
-                      "fast the runtime actually is, and v0 ships deliberately slow -- so the "
-                      "cost of scoring falls as contributors do the work the scoring pays for. "
-                      "It is the only line in this document that gets better on its own."),
+                      "fast the runtime actually is, so the cost of scoring falls as "
+                      "contributors do the work the scoring pays for. It is the only line in "
+                      "this document that gets better on its own."),
         }
 
     per_generation_s = sum(r["seconds"] for r in stage_rows) / assumed_achieved

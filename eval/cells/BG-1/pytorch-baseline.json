@@ -3,18 +3,18 @@
  "_what_this_is": "The same stages, at the same shapes and dtype, run by the reference implementation (diffusers on PyTorch, eager, as installed) on a card of the pinned class. Not scored. It answers whether the runtime is worth using, which the roofline cannot. `burnisher_over_pytorch` above 1 means the runtime is that many times SLOWER than PyTorch.",
  "comparison": {
   "dit-step/1024/bf16": {
-   "burnisher_over_pytorch": 40.72770424463117,
-   "burnisher_s": 3.5714364124999998,
+   "burnisher_over_pytorch": 1.1159109153714917,
+   "burnisher_s": 0.0978548865,
    "pytorch_s": 0.08769058994948864
   },
   "t5-encode/1024/bf16": {
-   "burnisher_over_pytorch": 3.310597417670823,
-   "burnisher_s": 0.1271231175,
+   "burnisher_over_pytorch": 0.8747429354691468,
+   "burnisher_s": 0.0335891185,
    "pytorch_s": 0.03839884512126446
   },
   "vae-decode/1024/bf16": {
-   "burnisher_over_pytorch": 45.652559023487804,
-   "burnisher_s": 5.433579165499999,
+   "burnisher_over_pytorch": 1.4235817725859239,
+   "burnisher_s": 0.169435064,
    "pytorch_s": 0.11902025388553739
   }
  },

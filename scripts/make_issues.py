@@ -138,6 +138,17 @@ def _narrowing_note(f):
         return ""
     fp32, bf16 = d["dit_step_fp32_s"], d["dit_step_bf16_s"]
     ratio = fp32 / bf16
+    measured = (f"- One DiT step costs {fp32:.3f} s at fp32 and {bf16:.3f} s at bf16\n"
+                f"  ({d['repeats']} paired repeats, `eval/cells/BG-1/dtype-latency.json`).")
+    if ratio > 2.05:
+        return MEASURED_MARK + f"""
+**Measured: narrower weights pay, and by more than the bytes.**
+
+{measured}
+- That is {ratio:.2f}x where the bytes are 2x. The bf16 path also runs fused attention and
+  tensor-core GEMMs that fp32 cannot, so the ratio measures kernels as much as bandwidth.
+- What fp8 and NVFP4 add on top of bf16 is unmeasured, and that is what these cells would show.
+"""
     if ratio > 1.05:
         verdict = f"narrower weights pay, but {ratio:.2f}x rather than the 2x the bytes allow"
     elif ratio >= 0.98:
@@ -147,8 +158,7 @@ def _narrowing_note(f):
     return MEASURED_MARK + f"""
 **Measured: narrower weights do not pay yet.**
 
-- One DiT step costs {fp32:.3f} s at fp32 and {bf16:.3f} s at bf16
-  ({d['repeats']} paired repeats, `eval/cells/BG-1/dtype-latency.json`).
+{measured}
 - So {verdict}.
 - At {100 * f['dit_achieved']:.1f}% of its ceiling, the step is limited by how the kernels are
   written, not by bytes.
@@ -192,8 +202,9 @@ square of the resolution.
 |--:|--:|--:|--:|
 {rows}
 
-**Now:** `cuda` is a tiled online softmax with no tensor cores. It is the baseline you are measured
-against. `cuda-tile64` and `cuda-tile1024` are the same kernel at other tile widths.
+**Now:** `cuda` is cuDNN's fused attention for bf16, and cuBLAS scores with a float softmax for
+fp32 and for T5's biased attention. It is the baseline you are measured against. `cuda-tiled`,
+`cuda-tile64` and `cuda-tile1024` are the first kernel, a tiled online softmax, at three tile widths.
 
 **What counts:** a faster CUDA attention kernel under a new name. fp8
 ({f['dit_ceiling_fp8_ms']:.1f} ms) and NVFP4 ({f['dit_ceiling_nvfp4_ms']:.1f} ms) are separate
@@ -216,8 +227,10 @@ def _(f):
 |--:|--:|:--|--:|
 {rows}
 
-VAE decode is compute-bound on this card, not memory-bound. The room is in how it is written:
-convolution is one thread per output element, and it moves a lot of intermediate data.
+VAE decode is compute-bound on this card, not memory-bound. `cuda` convolves through cuDNN in
+float, so a bf16 decode reads every convolution's operands into float and rounds its output, and
+the decode moves a lot of intermediate data. The first kernel, one thread per output element, is
+still registered as `cuda-direct`.
 
 - **Fusion.** The headroom column is what removing intermediate traffic is worth.
 - **Mid-block attention** covers {r[1024]['tokens'] * 4} positions at 1024px. Materialized, its

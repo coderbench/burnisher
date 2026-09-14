@@ -1,26 +1,26 @@
 {
+ "_cache_note": "The base arm's gate is cached per base commit, so a typical submission pays the warm figure. But merging a round's winner moves `main`, which invalidates that cache -- so a round that merges pays the cold gate on its next run. The round budget uses cold + n x warm.",
+ "_it_gets_cheaper": "Scoring cost is proportional to how slow the runtime is, so every contribution the benchmark pays for makes the benchmark cheaper to run. Re-measure this before raising the slot count.",
+ "_method": "One cold run of eval/score_submission.sh on the pinned card with `cuda` as the base and `cuda-rowblock` as the candidate, the gate cache cleared first. gate_base and gate_candidate are each gate's own `wall_seconds`, bench is the bench's `wall_seconds_total`, and score is the rest of the wall clock: scoring itself plus extracting the instrument from the base commit before every stage.",
  "_what_this_is": "What one scored submission costs on the pinned card, broken down by stage. `eval/round.py` computes how many submissions fit an interval from this, so it is an artifact rather than a constant in the source.",
- "_method": "Stage boundaries were read from the mtimes of the artifacts each stage writes (gate-base.json, gate-cand.json, raw.json, receipt.json) for a full run of eval/score_submission.sh. That is a legitimate measurement and a poor instrument: it is why eval/gate.py now records its own `wall_seconds` and eval/bench.py records `wall_s` per record, so the next run produces this directly instead of by inference.",
  "basis": "measured",
  "device": {
-  "name": "NVIDIA GeForce RTX 5090",
   "driver_version": "595.91.07",
+  "name": "NVIDIA GeForce RTX 5090",
   "uuid": "GPU-da2aa62b-30d9-78a4-d9a1-86a21df7e530"
  },
  "generation": "BG-1",
- "repeats": 3,
  "instrument": {
-  "warmup": 2,
-  "iters": 5
+  "iters": 5,
+  "warmup": 2
  },
+ "repeats": 3,
  "stages_minutes": {
-  "gate_base": 6.3,
-  "gate_candidate": 7.2,
-  "bench": 17.1,
-  "score": 0.0
+  "bench": 1.42,
+  "gate_base": 1.53,
+  "gate_candidate": 1.55,
+  "score": 1.52
  },
- "total_minutes_cold_cache": 30.6,
- "total_minutes_warm_cache": 24.3,
- "_cache_note": "The base arm's gate is cached per base commit, so a typical submission pays the warm figure. But merging a round's winner moves `main`, which invalidates that cache -- so a round that merges pays the cold gate on its next run. The round budget uses cold + n x warm.",
- "_it_gets_cheaper": "Scoring cost is proportional to how slow the runtime is, so every contribution the benchmark pays for makes the benchmark cheaper to run. Re-measure this before raising the slot count."
+ "total_minutes_cold_cache": 6.02,
+ "total_minutes_warm_cache": 4.49
 }

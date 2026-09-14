@@ -75,9 +75,9 @@ averaged by weight. Peak memory is the device allocator's high-water mark on a C
   99% interval      [+0.1690, +0.1771]
   resolved          True
 
-    dit-step/1024/bf16          +0.1835     1.5% -> 19.6%   0.578%  yes
-    t5-encode/1024/bf16         +0.0011    18.2% -> 18.3%   3.753%   NO
-    vae-decode/1024/bf16        -0.0002     0.8% -> 0.8%    0.845%   NO
+    dit-step/1024/bf16          +0.1835    55.6% -> 63.8%   0.420%  yes
+    t5-encode/1024/bf16         +0.0011    68.7% -> 68.7%   0.293%   NO
+    vae-decode/1024/bf16        -0.0002    25.4% -> 25.4%   0.064%   NO
 ```
 
 (Illustrative, with BG-1's cell weights: the untouched cells count as zero. A real receipt is in

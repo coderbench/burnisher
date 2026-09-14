@@ -24,9 +24,10 @@ Steps 5–7 are `eval/score_submission.sh`, the same command anyone can run.
 
 ## Rounds
 
-- **Every two hours, oldest first** (`eval/run_round_cron.sh`). A round measures up to three
+- **Every two hours, oldest first** (`eval/run_round_cron.sh`). A round measures up to twelve
   submissions. One stopped at steps 1–3 costs no GPU time and does not use a slot. A measured
-  submission costs about 24 GPU-minutes, and two benchmarks cannot share a GPU.
+  submission costs about 4.5 GPU-minutes (`eval/cells/BG-1/round-cost.json`), and two benchmarks
+  cannot share a GPU.
 - **A round scores one generation:** BG-1, unless `BURNISH_GENERATION` names another. Give it that
   generation's pinned noise in `BURNISH_NOISE`. The gate records the noise file's hash; nothing
   checks it against the generation.
@@ -147,7 +148,7 @@ The score is pure arithmetic over recorded measurements, so anyone can re-derive
 | | audit | challenge |
 |:--|:--|:--|
 | asks | does the verdict follow from the published measurements? | did the measurements really happen? |
-| needs | nothing, about two seconds | an RTX 5090, about 30 minutes plus a build |
+| needs | nothing, about two seconds | an RTX 5090, about six minutes plus a build (`eval/cells/BG-1/round-cost.json`) |
 | catches | scoring bugs, edited receipts | measurements that never happened |
 
 ```bash
@@ -246,14 +247,18 @@ tools/burnish calibrate --generation BG-N --impl cuda --repeats 9 --weights <che
     --merge eval/cells/BG-N/reference.json --write
 ```
 
-**Anchor with two sessions, because floors move.** Two calibrations of the same RTX 5090, hours
-apart:
+**Anchor with two sessions, because floors move.** Two calibrations of the same RTX 5090 with the
+vendor kernels as `cuda`, back to back (`eval/cells/BG-1/reference.json` and
+`calibration-session-2.json`):
 
 | cell | session A | session B | ratio |
 |:--|--:|--:|--:|
-| `dit-step/1024/bf16` | 0.578% | 0.205% | 2.8× |
-| `t5-encode/1024/bf16` | 3.753% | 0.155% | 24.2× |
-| `vae-decode/1024/bf16` | 0.259% | 0.845% | 3.3× |
+| `dit-step/1024/bf16` | 0.261% | 0.420% | 1.6× |
+| `t5-encode/1024/bf16` | 0.237% | 0.293% | 1.2× |
+| `vae-decode/1024/bf16` | 0.039% | 0.064% | 1.6× |
+
+On the first kernels, two sessions hours apart moved a floor 24.2× (`examples/BG-1-anchor-v0.json`
+and `examples/BG-1-anchor-v0-session-2.json`).
 
 `--merge` keeps the worst floor per cell. A floor too tight would pay for noise permanently; one
 too loose only refuses a gain too small to see.

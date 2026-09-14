@@ -15,33 +15,38 @@ What is real here and what is not. Read this before spending a week on anything.
 
 | cell | achieved | room left | noise floor |
 |:--|--:|--:|--:|
-| `t5-encode/1024/bf16` | 18.2% | 5.5x | 3.753% |
-| `dit-step/1024/bf16` | 1.5% | 65.6x | 0.578% |
-| `vae-decode/1024/bf16` | 0.8% | 126.4x | 0.845% |
+| `t5-encode/1024/bf16` | 68.7% | 1.5x | 0.293% |
+| `dit-step/1024/bf16` | 55.6% | 1.8x | 0.420% |
+| `vae-decode/1024/bf16` | 25.4% | 3.9x | 0.064% |
 
-Nine paired repeats per cell, in two sessions. Floors are **not stable between sessions**: the
-second moved one by 24×, so each cell's floor is the worst of the two (`docs/EVAL.md`).
+Nine paired repeats per cell, in two sessions, with the vendor kernels as `cuda`. Floors are **not
+stable between sessions** -- 1.6× apart here, and 24.2× on the first kernels -- so each cell's
+floor is the worst of the two (`docs/EVAL.md`).
 
 ## Against PyTorch on the same card
 
 `eval/cells/BG-1/pytorch-baseline.json`: the same stages in diffusers on PyTorch, eager as
 installed, at the same shapes and dtype, on an RTX 5090 (`scripts/pytorch_baseline.py`).
 
-| cell | Burnisher | PyTorch | Burnisher is |
+| cell | Burnisher | PyTorch | Burnisher's time over PyTorch's |
 |:--|--:|--:|--:|
-| `t5-encode/1024/bf16` | 127.1 ms | 38.4 ms | 3.3× slower |
-| `dit-step/1024/bf16` | 3571.4 ms | 87.7 ms | 40.7× slower |
-| `vae-decode/1024/bf16` | 5433.6 ms | 119.0 ms | 45.7× slower |
+| `t5-encode/1024/bf16` | 33.6 ms | 38.4 ms | 0.9× |
+| `dit-step/1024/bf16` | 97.9 ms | 87.7 ms | 1.1× |
+| `vae-decode/1024/bf16` | 169.4 ms | 119.0 ms | 1.4× |
 
-PyTorch makes the whole image in 1.92 s. **Until a stage beats its PyTorch time, nobody has a
-reason to run it here.** The ceiling leaves room past that: PyTorch's `dit-step` reaches 62.1% of
-its ceiling, where this runtime is at 1.5%.
+PyTorch makes the whole image in 1.92 s. **The text encoder is faster than PyTorch's; the denoiser
+step and the decoder are not yet**, and a stage that passes its PyTorch time is a reason to run it
+here. The ceiling leaves room past that: PyTorch's `dit-step` reaches 62.1% of its ceiling, where
+this runtime is at 55.6%.
 
 Not yet measured: PyTorch with `torch.compile`, which is a higher bar and the next row to add.
 
 ## Built and working
 
 - CPU reference ops, CUDA backend for all 15 ops, T5 / PixArt DiT / VAE graphs, DPM-Solver++.
+- `cuda` on cuBLAS and cuDNN: fused attention for bf16, cuDNN convolution computed in float, a
+  chunked GroupNorm, and a caching allocator. `tests/test_cuda_ops.cpp` checks them against the CPU
+  oracle on a device; the first kernels stay registered under their own names.
 - Checkpoint loading, verified against the real checkpoint's tensor names and shapes.
 - Correctness gate, paired bench, calibration, scorer, receipts, ledger, audit, challenge.
 - Evaluation in rounds, with the instrument taken from the base commit.
@@ -60,6 +65,13 @@ so self-consistency tests passed every one. Comparing against the reference foun
 3. **The sampler used the wrong sigma ratio:** 157 where the reference uses 0.99998 at t=999.
 4. **The output patch order was transposed.** Identical mean and std, different arrangement.
 5. **Padding was never masked.**
+
+**In the CUDA backend:**
+- `burnisher generate` could not write the image on CUDA: the decoder hands pixels back on the
+  device, and writing them read device memory element by element. The benchmark writes latents
+  only, so nothing had noticed.
+- The first `cuda` GroupNorm (`cuda-rowblock`) accumulates in float and differs from the CPU oracle
+  by 3.3e-4 at a small fp32 shape. `tests/test_cuda_ops.cpp` found it; `cuda` sums in double.
 
 **In the harness:**
 - `bench.py` read all of `/dev/urandom` when picking a held-out shape.
@@ -82,6 +94,9 @@ so self-consistency tests passed every one. Comparing against the reference foun
   overfit at the held-out shape.
 - A credit held in the ledger stayed paid on the pull request's label.
 - `peak_vram_bytes` was host RSS on CUDA runs too.
+- Once the runtime was fast, the text encoder's cell could not resolve: its floor was 23% of its
+  time. `bench` timed its own input synthesis, and T5 rebuilt and uploaded its position bias on
+  every forward. Both moved out of the timed path, and that floor is now 0.293%.
 
 **Left in on purpose:** the sampler rounds a ~300-magnitude value to bf16. Fixing it would make the
 runtime more accurate than the reference, so the gate would reject it
@@ -94,11 +109,13 @@ one layer) until they separate.
 
 - **fp8 and NVFP4 cells** have no implementation, and their device peaks are vendor figures, not
   probed. Probing already corrected two assumed peaks, in opposite directions.
-- **What narrower weights are worth.** One DiT step costs 3.266 s at fp32 and 3.576 s at bf16.
-  Halving the bytes made it slower, so the step isn't limited by memory speed yet.
-- **Many submissions at once.** One submission costs ~24 min (gate candidate 7.2, bench 17.1; the
-  base gate is cached per commit). `tools/burnish screen` reports SCORE_COST as FAIL, at
-  31 modelled-from-measurement minutes against a 30-minute budget. Queueing is unmeasured.
+- **What narrower weights are worth.** One DiT step costs 0.473 s at fp32 and 0.098 s at bf16,
+  4.8× apart where the bytes are 2×: the bf16 path also gets fused attention and the tensor cores,
+  so the ratio measures kernels as much as bandwidth. What fp8 and NVFP4 add on top is unmeasured.
+- **Many submissions at once.** One submission costs ~4 min on a warm gate cache
+  (gate candidate 1.6, bench 1.4, score 1.5; the base gate, 1.5, is cached per commit).
+  `tools/burnish screen` reports SCORE_COST as PASS, at 2 modelled-from-measurement minutes against a 30-minute budget.
+  Queueing is unmeasured, and the round's slot count still assumes the old cost.
 - **BG-2 (512px) is anchored, but its gate is loose.** Its anchor (two sessions), reference
   latents and a measured tolerance are committed. Its fp32 drift against the reference grows
   with steps -- 0.019% at 1 step, 0.093% at 4, 1.36% at 20 -- so the
@@ -112,9 +129,9 @@ one layer) until they separate.
 - **Whether the sandbox holds on a rented box.** Submitted code builds and runs as its own account
   (`eval/sandbox.py`). Its tests run without root, so the account switch itself has not run on a
   GPU box; the check before each round is where it first will.
-- **Device memory on a CUDA run.** `peak_vram_bytes` now reports the device allocator's high-water
-  mark. That path only compiles in the CUDA build and has not run on a GPU yet, and the peak
-  memory recorded in the committed anchors is host RSS.
+- **Device memory under the cache.** `peak_vram_bytes` is the device allocator's high-water mark and
+  the committed anchors record it. Blocks the cache holds are not counted, so it is what the runtime
+  asked for; how much the driver holds on top of that is not measured.
 - **Launch overhead vs raw compute.** The ceiling treats both kinds of win the same. That is a
   choice.
 

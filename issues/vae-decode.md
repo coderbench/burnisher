@@ -11,8 +11,10 @@
 | 1024 | 43.0 ms | compute | 1.32x |
 | 2048 | 199.0 ms | compute | 1.28x |
 
-VAE decode is compute-bound on this card, not memory-bound. The room is in how it is written:
-convolution is one thread per output element, and it moves a lot of intermediate data.
+VAE decode is compute-bound on this card, not memory-bound. `cuda` convolves through cuDNN in
+float, so a bf16 decode reads every convolution's operands into float and rounds its output, and
+the decode moves a lot of intermediate data. The first kernel, one thread per output element, is
+still registered as `cuda-direct`.
 
 - **Fusion.** The headroom column is what removing intermediate traffic is worth.
 - **Mid-block attention** covers 16384 positions at 1024px. Materialized, its

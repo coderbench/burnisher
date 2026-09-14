@@ -86,7 +86,7 @@ Details: `docs/SCORING.md`.
 
 ## 6. What comes back
 
-- Evaluation runs **every two hours, oldest first**, measuring up to three submissions a round.
+- Evaluation runs **every two hours, oldest first**, measuring up to twelve submissions a round.
 - A paid result is labelled with its number, e.g. `burnish:gap+0.0342`.
 - At most **one** submission per round is picked to merge: the biggest verified gain. Other gains
   in the round get `burnish:needs-rebase`. That is not a rejection: push a rebase and it is

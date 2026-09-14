@@ -14,8 +14,9 @@ square of the resolution.
 | 1024 | 4096 | 35.0% | 54.4 ms |
 | 2048 | 16384 | 67.3% | 429.6 ms |
 
-**Now:** `cuda` is a tiled online softmax with no tensor cores. It is the baseline you are measured
-against. `cuda-tile64` and `cuda-tile1024` are the same kernel at other tile widths.
+**Now:** `cuda` is cuDNN's fused attention for bf16, and cuBLAS scores with a float softmax for
+fp32 and for T5's biased attention. It is the baseline you are measured against. `cuda-tiled`,
+`cuda-tile64` and `cuda-tile1024` are the first kernel, a tiled online softmax, at three tile widths.
 
 **What counts:** a faster CUDA attention kernel under a new name. fp8
 (31.7 ms) and NVFP4 (15.8 ms) are separate
@@ -23,7 +24,7 @@ cells with no implementation yet, against bf16's 54.4 ms. Landing one is
 also cartography (`docs/CARTOGRAPHY.md`).
 
 Ceilings are arithmetic: how big the box is, not how full.
-Calibrated in BG-1 (`eval/cells/BG-1/reference.json`): `dit-step/1024/bf16` at 1.5%, `t5-encode/1024/bf16` at 18.2%, `vae-decode/1024/bf16` at 0.8% of its ceiling.
+Calibrated in BG-1 (`eval/cells/BG-1/reference.json`): `dit-step/1024/bf16` at 55.6%, `t5-encode/1024/bf16` at 68.7%, `vae-decode/1024/bf16` at 25.4% of its ceiling.
 
 ---
 

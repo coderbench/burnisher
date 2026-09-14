@@ -13,8 +13,8 @@ cells are calibrated, and the first real receipt is in `examples/`.
 **What it cost:** six defects. Five are the correctness defects in `docs/STATUS.md`; the sixth was
 a non-deterministic reduction in attention, which the gate caught first.
 
-**What remains:** `dit-step/1024/bf16` is at 1.5% of its ceiling,
-54.4 ms against a measured 3571 ms. Every open issue
+**What remains:** `dit-step/1024/bf16` is at 55.6% of its ceiling,
+54.4 ms against a measured 98 ms. Every open issue
 is about that gap.
 
 ---

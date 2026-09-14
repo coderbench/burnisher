@@ -3,7 +3,7 @@
 A native C++/CUDA **image and video generation** runtime for consumer Blackwell GPUs — and the
 instrument that scores changes to it.
 
-v0 runs PixArt-Sigma at 1024px correctly, and slowly on purpose. Contributors make it fast and are
+It runs PixArt-Sigma at 1024px correctly, on cuBLAS and cuDNN. Contributors make it faster and are
 paid for how much of the remaining gap to the hardware's limit they close.
 
 ```
@@ -18,23 +18,23 @@ tools/burnish audit         # re-check anyone's score. no GPU, two seconds
 
 - Runs end to end on CPU and CUDA, reproduces itself byte for byte, and passes the correctness
   gate against committed reference latents.
-- Measured on an RTX 5090: `dit-step` is at **1.5%** of its arithmetic ceiling, `vae-decode` at
-  **0.8%**, `t5-encode` at **18.2%**.
-- **It is not yet worth using.** On the same card PyTorch makes the whole image in **1.92 s**, and
-  this runtime is slower at every stage: `dit-step` **40.7×**, `vae-decode` **45.7×**, `t5-encode`
-  **3.3×** (`eval/cells/BG-1/pytorch-baseline.json`).
-- The kernels are deliberately naive: no tensor cores, convolution one thread per output element,
-  every GEMM epilogue a separate pass.
+- Measured on an RTX 5090: `dit-step` is at **55.6%** of its arithmetic ceiling, `vae-decode` at
+  **25.4%**, `t5-encode` at **68.7%**.
+- **Against PyTorch on the same card**, which makes the whole image in **1.92 s**
+  (`eval/cells/BG-1/pytorch-baseline.json`): `t5-encode` takes **0.9×** PyTorch's time,
+  `dit-step` **1.1×** and `vae-decode` **1.4×**.
+- `cuda` stands on cuBLAS and cuDNN. What is still unfused is the backlog: every GEMM epilogue is a
+  separate pass, and AdaLN modulation is a full round trip.
 
 What is measured, what is not, and every defect found so far: `docs/STATUS.md`.
 
 ## What it is for
 
 **A runtime people choose over PyTorch** for image and video generation on consumer Blackwell cards.
-It is not one yet: every stage is slower than PyTorch on the same card. `tools/burnish roofline`
-shows each cell's gap to PyTorch beside its gap to the ceiling, and a cell that passes its PyTorch
-time is the first reason anybody has to run it here. The ceiling is well past PyTorch, so the room
-exists: PyTorch's denoiser step reaches only a fraction of it.
+Its text encoder already beats PyTorch on the same card; its denoiser and decoder do not yet.
+`tools/burnish roofline` shows each cell's gap to PyTorch beside its gap to the ceiling, and a cell
+that passes its PyTorch time is a reason to run it here. The ceiling is past PyTorch, so the room
+exists.
 
 **The work is paid.** Gittensor SN74 pays merged pull requests that carry a bot-verified speedup,
 and Burnisher is being built to become a scored target there. Every contribution it pays makes the
@@ -79,8 +79,9 @@ without a GPU. They never estimate.
 
 `issues/README.md` lists open work, each item with its arithmetic.
 
-Read `issues/weight-formats.md` before picking a quantization cell: one DiT step costs 3.266 s at
-fp32 and 3.576 s at bf16, so narrower weights do not pay until the kernels improve.
+Read `issues/weight-formats.md` before picking a quantization cell: one DiT step costs 0.473 s at
+fp32 and 0.098 s at bf16. That is more than the halved bytes alone would buy, because the bf16 path
+also gets fused attention and the tensor cores.
 
 ## Layout
 

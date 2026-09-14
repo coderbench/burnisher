@@ -100,17 +100,19 @@ class TestProseMatchesTheArtifacts(unittest.TestCase):
         minutes = sc["predicted_receipt_seconds"] / 60
         self._want(self.status, "docs/STATUS.md", f"{minutes:.0f} modelled-from-measurement",
                    "eval/screen.py SCORE_COST")
-        self.assertFalse(sc["pass"],
-                         "SCORE_COST passes now; docs/STATUS.md says it fails. One of them is "
-                         "wrong and the document cannot be the one that decides.")
+        # The verdict is the screen's, and the document states it rather than deciding it. It
+        # was a hard-coded "fails", which stopped being true the day the runtime got fast.
+        verdict = "SCORE_COST as PASS" if sc["pass"] else "SCORE_COST as FAIL"
+        self._want(self.status, "docs/STATUS.md", verdict, "eval/screen.py SCORE_COST")
 
     def test_the_floor_instability_claim_has_its_measurement_in_the_tree(self):
-        """docs/EVAL.md and docs/STATUS.md publish a 24x claim about the instrument.
+        """docs/EVAL.md and docs/STATUS.md publish how far floors move between sessions.
 
         For a while the only place those numbers existed in this repository was a test
         docstring, which is prose. A published figure whose measurement is not in the tree
-        cannot be checked by anybody -- the one thing this repository is built not to do. The
-        second calibration session is now committed as the evidence.
+        cannot be checked by anybody -- the one thing this repository is built not to do. Both
+        sessions of the current anchor are in the tree, and so are the first kernels' two, whose
+        24x is what made the anchor keep the worst floor of its sessions.
         """
         p = CELL / "calibration-session-2.json"
         self.assertTrue(p.exists(),
@@ -119,22 +121,27 @@ class TestProseMatchesTheArtifacts(unittest.TestCase):
         second = json.loads(p.read_text())
         self.assertTrue(second["same_card_as_reference"],
                         "the claim is about one card measured twice; this is a different card")
+        eval_doc = (ROOT / "docs" / "EVAL.md").read_text()
+        src = "eval/cells/BG-1/reference.json and calibration-session-2.json"
         worst = 0.0
         for cid, c in self.cal.items():
-            a, b = c["floor_pct"], second["cells"][cid]["floor_pct"]
+            # The anchor's floor is the merged one; its own session measured `floor_spread_pct`.
+            a, b = c["floor_spread_pct"], second["cells"][cid]["floor_pct"]
             worst = max(worst, max(a, b) / min(a, b))
-            # The other half of the claim: achieved held while the floor moved.
-            self.assertAlmostEqual(c["achieved"], second["cells"][cid]["achieved"], places=3,
+            # The other half of the claim: achieved held while the floor moved. Two places, not
+            # three: at a hundred milliseconds a step, the fraction moves in the third.
+            self.assertAlmostEqual(c["achieved"], second["cells"][cid]["achieved"], places=2,
                                    msg=f"{cid}: achieved moved between sessions too, so the "
                                        f"documented contrast is wrong")
-        self._want(self.status, "docs/STATUS.md", f"{worst:.0f}x",
-                   "eval/cells/BG-1/calibration-session-2.json")
-        self._want((ROOT / "docs" / "EVAL.md").read_text(), "docs/EVAL.md", f"{worst:.1f}",
-                   "eval/cells/BG-1/calibration-session-2.json")
-        for cid, c in second["cells"].items():
-            self._want((ROOT / "docs" / "EVAL.md").read_text(), "docs/EVAL.md",
-                       f"{c['floor_pct']:.3f}%",
-                       "eval/cells/BG-1/calibration-session-2.json")
+            self._want(eval_doc, "docs/EVAL.md", f"{a:.3f}%", src)
+            self._want(eval_doc, "docs/EVAL.md", f"{b:.3f}%", src)
+        self._want(self.status, "docs/STATUS.md", f"{worst:.1f}\u00d7", src)
+        v0 = json.loads((ROOT / "examples" / "BG-1-anchor-v0.json").read_text())["cells"]
+        v0b = json.loads((ROOT / "examples" / "BG-1-anchor-v0-session-2.json").read_text())["cells"]
+        v0_worst = max(max(v0[c]["floor_pct"], v0b[c]["floor_pct"]) /
+                       min(v0[c]["floor_pct"], v0b[c]["floor_pct"]) for c in v0)
+        for doc, name in ((eval_doc, "docs/EVAL.md"), (self.status, "docs/STATUS.md")):
+            self._want(doc, name, f"{v0_worst:.1f}\u00d7", "examples/BG-1-anchor-v0-session-2.json")
 
     def test_the_round_budget_comes_from_an_artifact(self):
         """`eval/round.py` decides how many submissions fit an interval. That number has to be

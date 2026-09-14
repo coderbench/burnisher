@@ -164,23 +164,23 @@ class TestTheLock(unittest.TestCase):
         self.assertIn("git merge --quiet --ff-only origin/main", src)
         self.assertIn("./scripts/build_cuda.sh", src)
 
-    def test_the_cron_wrapper_defaults_to_three_slots(self):
+    def test_the_cron_wrapper_defaults_to_twelve_slots(self):
         src = (ROOT / "eval" / "run_round_cron.sh").read_text()
-        self.assertIn("BURNISH_SLOTS:-3", src)
+        self.assertIn("BURNISH_SLOTS:-12", src)
 
 
 class TestTheBudgetIsChecked(unittest.TestCase):
-    def test_three_slots_fit_two_hours_and_five_do_not(self):
+    def test_twelve_slots_fit_two_hours_and_thirty_do_not(self):
         """From the measured cost, so this fails if the cost is ever re-measured upward without
         the slot count being revisited."""
         per = RD.MEASURED_MINUTES_PER_PR
         cold = RD.COLD_GATE_MINUTES
-        self.assertLess(cold + 3 * per, 120, "three slots no longer fit a two-hour round")
-        self.assertGreater(cold + 5 * per, 120, "five slots now fit; the warning is stale")
+        self.assertLess(cold + 12 * per, 120, "twelve slots no longer fit a two-hour round")
+        self.assertGreater(cold + 30 * per, 120, "thirty slots now fit; the warning is stale")
 
-    def test_the_default_is_three(self):
+    def test_the_default_is_twelve(self):
         src = (ROOT / "eval" / "round.py").read_text()
-        self.assertIn('"--slots", type=int, default=3', src)
+        self.assertIn('"--slots", type=int, default=12', src)
 
     def test_merging_is_opted_into_not_assumed(self):
         """A round that merges unattended is an outward-facing action."""
