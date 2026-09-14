@@ -31,6 +31,8 @@ Thresholds and the measurements behind them: `configs/tolerance.json`.
 - **Reference latents** are committed in fp32 and bf16 under `eval/cells/BG-1/`, with the starting
   noise passed in as an input.
 - **Latents, not pixels**, because the VAE decoder is itself being optimized.
+- **TF32 off.** The reference runs with TF32 disabled. The committed BG-1 and BG-2 latents reproduce
+  byte for byte with it off.
 
 ## Rules
 

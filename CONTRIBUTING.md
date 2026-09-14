@@ -55,6 +55,8 @@ eval/score_submission.sh --base <commit you branched from> --worktree . \
     --weights <checkpoint dir> --noise <pinned noise .npy>
 ```
 
+It scores BG-1 by default. To score against BG-2, add `--generation BG-2` and use BG-2's noise.
+
 ## 5. How you are scored
 
 - You are paid the **fraction of the remaining gap** to the ceiling that you close.

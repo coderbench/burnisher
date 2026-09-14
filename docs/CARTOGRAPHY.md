@@ -22,7 +22,7 @@ A new cell arrives as a **new generation** under `eval/cells/<name>/`. Existing 
 frozen.
 
 ```bash
-burnish cartography check --generation BG-2 --base origin/main --measure \
+burnish cartography check --generation BG-3 --base origin/main --measure \
     --binary build-cuda/burnisher --weights <checkpoint> --noise <noise.npy>
 ```
 

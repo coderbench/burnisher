@@ -19,6 +19,8 @@ Steps 2–5 are `eval/score_submission.sh`, the same command anyone can run.
 
 - **Every two hours, three submissions, oldest first** (`eval/run_round_cron.sh`). One submission
   costs about 24 GPU-minutes, and two benchmarks cannot share a GPU.
+- **A round scores one generation:** BG-1, unless `BURNISH_GENERATION` names another. Its
+  `BURNISH_NOISE` must be that generation's pinned noise.
 - **The order never depends on the submission's content**, so it can't be gamed.
 - **The head commit is frozen when the round starts.** The comment names the commit it measured.
 - **At most one merge per round:** the largest credited gain. Gains measured against the same
@@ -97,7 +99,7 @@ slower, or slower at a resource the code is not limited by, gives the same score
 Setting up a new box:
 
 ```bash
-scripts/build_cuda.sh                                     # CMAKE_CUDA_ARCHITECTURES=121 for DGX Spark
+scripts/build_cuda.sh             # CMAKE_CUDA_ARCHITECTURES=121 for DGX Spark
 build-cuda/burnisher check-weights --weights <checkpoint>
 ```
 

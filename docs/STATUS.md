@@ -48,6 +48,14 @@ so self-consistency tests passed every one. Comparing against the reference foun
   `MOVED_ALONG_FRONTIER`.
 - Floors and benches used different iteration counts.
 - A single-kernel submission fell back to CPU kernels on a GPU run. The first scored run found it.
+- `tools/burnish` picked the CPU build over the CUDA build when a box had both, so every GPU
+  command failed. The first calibration on a new box found it.
+- `eval/score_submission.sh` passed the generation to scoring but not to its gates or bench, so it
+  could only score BG-1. The first BG-2 control run found it. The bot never passed one either.
+- BG-2's frozen generation kept a provisional tolerance after the measured one was applied,
+  because the check only compared BG-1's generation with `configs/`.
+- A frontier gain with no speedup would have been labelled `burnish:gap+0.0000`, which reads as
+  paid while paying nothing.
 
 **Left in on purpose:** the sampler rounds a ~300-magnitude value to bf16. Fixing it would make the
 runtime more accurate than the reference, so the gate would reject it

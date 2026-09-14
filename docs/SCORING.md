@@ -27,7 +27,8 @@ The **ceiling** is arithmetic: the fastest the card's measured compute and memor
 
 ## When a gain counts
 
-- Each cell's **noise floor** is measured by running the unchanged base against itself.
+- Each cell's **noise floor** is measured by running the unchanged base against itself. Floors move
+  between sessions, so the one kept is the worst measured.
 - A gain is credited when the lower end of its 99% bootstrap interval clears that floor.
 - A cell that doesn't resolve contributes zero and doesn't block the others.
 - `burnish roofline` marks cells with too little room over their floor (`res: no`).
