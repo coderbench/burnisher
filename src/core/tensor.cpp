@@ -1,8 +1,11 @@
 #include "burnisher/tensor.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <sstream>
+#include <thread>
+#include <vector>
 
 #include "burnisher/device.h"
 
@@ -92,12 +95,57 @@ void Tensor::set(int64_t i, float v) {
     }
 }
 
+namespace {
+
+// Run `fn(begin, end)` over [0, n) in chunks, on as many threads as the host has. Every element
+// is converted by the same pure function whichever thread holds it, so the result does not depend
+// on the split.
+template <typename Fn>
+void parallel_chunks(int64_t n, Fn fn) {
+    const int64_t kMinChunk = int64_t{1} << 22;
+    const int64_t threads = std::max<int64_t>(
+        1, std::min<int64_t>(std::thread::hardware_concurrency(), n / kMinChunk));
+    if (threads == 1) {
+        fn(0, n);
+        return;
+    }
+    const int64_t chunk = (n + threads - 1) / threads;
+    std::vector<std::thread> pool;
+    for (int64_t t = 0; t < threads; ++t) {
+        const int64_t begin = t * chunk, end = std::min(n, begin + chunk);
+        if (begin < end) pool.emplace_back(fn, begin, end);
+    }
+    for (auto& th : pool) th.join();
+}
+
+}  // namespace
+
 Tensor Tensor::to(DType target) const {
     if (target == dtype_) return *this;
     if (device_ != Device::CPU) {
         throw std::runtime_error("Tensor::to: convert on the host, then upload");
     }
     Tensor out(shape_, target, device_);
+    // fp32 <-> bf16 is how every checkpoint weight reaches a bf16 run, and element-wise through
+    // get/set it was a single core walking T5's 4.7 billion parameters: ten seconds of every
+    // generation spent before the text encoder ran. The same conversion functions, over raw
+    // pointers and split across the host's cores.
+    if (dtype_ == DType::F32 && target == DType::BF16) {
+        const float* src = static_cast<const float*>(data_);
+        BF16* dst = static_cast<BF16*>(out.data_);
+        parallel_chunks(numel_, [src, dst](int64_t b, int64_t e) {
+            for (int64_t i = b; i < e; ++i) dst[i] = f32_to_bf16(src[i]);
+        });
+        return out;
+    }
+    if (dtype_ == DType::BF16 && target == DType::F32) {
+        const BF16* src = static_cast<const BF16*>(data_);
+        float* dst = static_cast<float*>(out.data_);
+        parallel_chunks(numel_, [src, dst](int64_t b, int64_t e) {
+            for (int64_t i = b; i < e; ++i) dst[i] = bf16_to_f32(src[i]);
+        });
+        return out;
+    }
     for (int64_t i = 0; i < numel_; ++i) out.set(i, get(i));
     return out;
 }

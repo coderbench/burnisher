@@ -40,6 +40,9 @@ set(BURNISHER_SOURCES
 )
 
 add_library(burnisher_core STATIC ${BURNISHER_SOURCES})
+# Weight conversion runs on every host core (src/core/tensor.cpp).
+find_package(Threads REQUIRED)
+target_link_libraries(burnisher_core PUBLIC Threads::Threads)
 target_include_directories(burnisher_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>)
