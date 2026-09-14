@@ -72,6 +72,19 @@ class TestTheGuardEndToEnd(unittest.TestCase):
         self.assertTrue(v["evidence"])
         self.assertTrue(v["blocked"])
 
+    def test_a_branch_stacked_on_another_open_pull_request_is_review_not_a_block(self):
+        """Its diff against main carries the other pull request by construction."""
+        self.submit("alice", KERNEL)
+        self.run_guard(10, "alice", "2026-09-01T00:00:00Z")
+        git(self.repo, "checkout", "-q", "-B", "bob", "alice")
+        (self.repo / "src" / "cuda" / "bob.cu").write_text("int tiny() { return 1; }\n")
+        git(self.repo, "add", "-A"); git(self.repo, "commit", "-q", "-m", "bob on alice")
+        r, v = self.run_guard(11, "bob", "2026-09-02T00:00:00Z")
+        self.assertEqual((v["outcome"], v["kind"]), ("REVIEW", "stacked"), r.stdout + r.stderr)
+        self.assertEqual(v["stacked_on"], [10])
+        self.assertFalse(v["blocked"])
+        self.assertFalse((self.corpus / "blocked.jsonl").exists())
+
     def test_a_copy_of_a_pull_request_that_is_no_longer_open_is_not_this_guards_question(self):
         self.submit("alice", KERNEL)
         self.run_guard(10, "alice", "2026-09-01T00:00:00Z")
@@ -144,7 +157,7 @@ class TestTheBotActsOnTheVerdicts(unittest.TestCase):
 
     def test_a_copy_and_a_blocked_account_close_the_pull_request(self):
         for outcome in ('if cc["outcome"] == "BLOCKED":', 'if cc["outcome"] == "COPY":'):
-            start = self.SRC.index(outcome, self.SRC.index("def evaluate("))
+            start = self.SRC.index(outcome, self.SRC.index("def _evaluate("))
             self.assertIn("close_pr(repo, num", self.SRC[start:self.SRC.index("return", start)])
 
     def test_a_review_is_measured_but_pays_nothing(self):

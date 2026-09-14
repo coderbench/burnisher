@@ -128,7 +128,7 @@ def main():
     ap.add_argument("--impl", default="stock")
     ap.add_argument("--weights", required=True, help="checkpoint directory")
     ap.add_argument("--device", default="cuda", choices=["cpu", "cuda"])
-    ap.add_argument("--dtype", default="bf16",
+    ap.add_argument("--dtype", default="fp32",
                     help="the compute dtype under test. The reference is fp32; running fp32 here "
                          "isolates the kernels from the dtype.")
     ap.add_argument("--noise", required=True,
@@ -342,18 +342,28 @@ def main():
                 "implementation from a slightly different one on this workload: the reference "
                 "reproduces itself across dtypes only to 0.37 relative L2. The assembly is "
                 "gated in fp32 and the dtype path is gated stage by stage.")
-        report["correctness"] = "PASS" if ok else "FAIL"
-        if ok:
+        if args.dtype != "fp32":
+            # Not PASS and not FAIL. The fp32 threshold says nothing about a bf16 run -- a correct
+            # bf16 build drifts about 0.35 relative L2 against it -- so neither word would be true,
+            # and a report that said FAIL for a correct kernel sent people chasing a bug that was
+            # not there. Nothing downstream accepts this as a gate result.
+            report["correctness"] = "INFORMATIONAL"
+            print(f"\n   INFORMATIONAL ({args.dtype}): worst rel L2 {worst_l2:.5f}, worst max abs "
+                  f"{worst_abs:.5f}.\n   Submissions are gated in fp32; run with --dtype fp32 to "
+                  f"gate.")
+        elif ok:
+            report["correctness"] = "PASS"
             print(f"\n   PASS: worst rel L2 {worst_l2:.5f} <= {tol['latent_l2_relative']}, "
                   f"worst max abs {worst_abs:.5f} <= {tol['latent_max_abs']}")
         else:
+            report["correctness"] = "FAIL"
             print(f"\n!! FAIL: worst rel L2 {worst_l2:.5f} against a tolerance of "
                   f"{tol['latent_l2_relative']},\n   worst max abs {worst_abs:.5f} against "
                   f"{tol['latent_max_abs']}.\n"
                   f"   This is a rejection, not a trade-off. Correctness precedes speed and is "
                   f"never\n   weighed against it.", file=sys.stderr)
     _write(args, report)
-    return 0 if report.get("correctness") == "PASS" else 1
+    return 0 if report.get("correctness") in ("PASS", "INFORMATIONAL") else 1
 
 
 def _write(args, report):

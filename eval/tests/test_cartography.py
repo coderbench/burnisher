@@ -156,6 +156,14 @@ class TestAProposedCell(unittest.TestCase):
         self.assertIn("it declares at least one cell that does not already exist",
                       self._failed(r))
 
+    def test_a_cell_at_a_held_out_resolution_is_refused(self):
+        """The bench draws held-out shapes after a candidate is frozen; a cell there gives them away."""
+        held = json.loads((ROOT / "configs" / "axes.json").read_text())["held_out"]["resolutions"]
+        self.propose("BG-HELD", resolution=held[0])
+        r = self._check("BG-HELD")
+        self.assertFalse(r["pass"])
+        self.assertIn("no cell is at a held-out resolution", self._failed(r))
+
     def test_a_cell_with_no_oracle_is_refused(self):
         """A cell whose correctness cannot be gated is a cell where a wrong answer scores."""
         self.propose("BG-NOREF", with_refs=False)

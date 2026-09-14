@@ -9,8 +9,9 @@ BG-1 is images only. Video multiplies tokens by frames: sixteen 1024px frames wi
 65536 tokens and 256x the attention arithmetic. That is why video models
 factorise or sparsify attention, and that is the cell worth building.
 
-Not in BG-1 because a video receipt would take hours. Run `eval/screen.py` on a video model before
-proposing a generation.
+Not in BG-1 because a video receipt would take hours. `eval/screen.py` only screens the models in
+`configs/candidates.json`, none of which is a video model, and the geometry has no frame axis. A
+video generation starts with both, and both are instrument changes.
 
 ---
 

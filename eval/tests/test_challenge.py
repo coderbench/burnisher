@@ -109,6 +109,24 @@ class TestChallenges(unittest.TestCase):
         self.assertFalse(cur["history"][0]["paid"])
         self.assertTrue(cur["history"][0]["held"])
 
+    def test_a_third_measurement_that_agrees_with_the_canonical_receipt_releases_the_hold(self):
+        CH.attach(self.root, self.canonical, self._counter(gap=0.02), receipt_id=self.rid)
+        self.assertTrue(CH.status_for(self.root, "BG-1", self.rid, self.canonical, self.gen)["held"])
+        CH.attach(self.root, self.canonical,
+                  self._counter(floor_fraction=0.5, uuid="GPU-eeeeeeee-0000-0000-0000-000000000000"),
+                  receipt_id=self.rid)
+        st = CH.status_for(self.root, "BG-1", self.rid, self.canonical, self.gen)
+        self.assertFalse(st["held"])
+        self.assertEqual((st["confirmations"], len(st["disagreements"])), (1, 1))
+        self.assertEqual(L.update_current(self.root, "BG-1", self.gen)["crediting_receipts"], 1)
+
+    def test_a_third_measurement_that_sides_with_the_challenger_keeps_it_held(self):
+        CH.attach(self.root, self.canonical, self._counter(gap=0.02), receipt_id=self.rid)
+        CH.attach(self.root, self.canonical,
+                  self._counter(gap=0.021, uuid="GPU-eeeeeeee-0000-0000-0000-000000000000"),
+                  receipt_id=self.rid)
+        self.assertTrue(CH.status_for(self.root, "BG-1", self.rid, self.canonical, self.gen)["held"])
+
     def test_the_threshold_is_the_cells_own_measured_floor(self):
         """Not a tolerance anybody chose.
 

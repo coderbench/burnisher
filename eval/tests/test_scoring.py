@@ -537,8 +537,34 @@ class TestComputeAndReceipt(unittest.TestCase):
     def test_held_out_regression_is_reported_as_overfit(self):
         out, _ = self._score(speedups={"dit-step/1024/bf16": 1.20})
         held = fixtures.records(self.gen, speedups={"dit-step/1024/bf16": 0.97})
-        verdict = CP._held_out_verdict(self.gen, held, out["aggregate"]["gap_closed"])
+        verdict = CP._held_out_verdict(self.gen, held, out["per_cell"])
         self.assertFalse(verdict["survived"])
+        self.assertEqual(verdict["cells_failed"], ["dit-step/1024/bf16"])
+
+    def test_a_gain_that_shrinks_into_the_noise_off_shape_is_overfit(self):
+        """Still nominally faster is not enough: it has to clear the bar the published gain did."""
+        out, _ = self._score(speedups={"dit-step/1024/bf16": 1.20})
+        floor = out["per_cell"]["dit-step/1024/bf16"]["floor_pct"]
+        held = fixtures.records(self.gen, speedups={"dit-step/1024/bf16": 1 + floor / 400})
+        self.assertFalse(CP._held_out_verdict(self.gen, held, out["per_cell"])["survived"])
+
+    def test_an_untouched_cell_does_not_decide_the_held_out_verdict(self):
+        """A neighbour reading 0.99x by noise must not make a real kernel look overfit."""
+        out, _ = self._score(speedups={"dit-step/1024/bf16": 1.20})
+        held = fixtures.records(self.gen, speedups={"dit-step/1024/bf16": 1.20,
+                                                    "t5-encode/1024/bf16": 0.99})
+        self.assertTrue(CP._held_out_verdict(self.gen, held, out["per_cell"])["survived"])
+
+    def test_an_untouched_noisy_cell_does_not_block_a_resolved_gain(self):
+        """Unresolved cells contribute zero AND do not decide whether the submission resolved."""
+        out, _ = self._score(speedups={"dit-step/1024/bf16": 1.15})
+        self.assertTrue(out["per_cell"]["dit-step/1024/bf16"]["resolved"])
+        widened = CP.compute(self.gen, fixtures.records(
+            self.gen, speedups={"dit-step/1024/bf16": 1.15}))
+        self.assertTrue(widened["interval"]["resolved"])
+        for c, v in widened["per_cell"].items():
+            if c != "dit-step/1024/bf16":
+                self.assertFalse(v["resolved"], c)
 
     def _receipt(self, out, **over):
         kw = dict(generation=self.gen, per_cell=out["per_cell"], aggregate=out["aggregate"],

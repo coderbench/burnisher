@@ -6,17 +6,20 @@ is timed. It is never traded against a speedup.
 ## What it checks
 
 1. **Determinism.** The same build, seed and prompt, replayed, must give **byte-identical**
-   latents. `burnish gate` replays 10 times by default; `eval/score_submission.sh` uses 2 per arm.
+   latents. `tools/burnish gate` replays 10 times by default; `eval/score_submission.sh` uses 2
+   per arm.
    A build that can't reproduce itself can't be compared with anything.
 2. **Correctness, in fp32.** The whole pipeline, for every frozen prompt, is compared with the fp32
    reference latents. The threshold is five times this runtime's measured drift. Submissions are
-   gated at fp32.
+   gated at fp32, which is also the gate's default. At any other dtype the gate reports
+   `INFORMATIONAL`, never PASS or FAIL: the fp32 threshold says nothing about a bf16 run.
 
 **Not automated yet: the bf16 path.** Comparing a full bf16 run end to end can't gate, because the
 reference disagrees **with itself** across dtypes by more than a real bug would
 (`eval/cells/BG-1/dtype-cost.json`). Per-stage bf16 tolerances are recorded in
-`configs/tolerance.json`, but `burnish gate` does not run them. Check your stages at bf16 with
-`scripts/differential_test.py`.
+`configs/tolerance.json`, but nothing runs them yet. `scripts/differential_test.py` compares one
+stage with the fp32 reference using its own fp32-sized defaults, so to check a stage at bf16 pass
+`--dtype bf16` and that stage's recorded tolerance with `--tolerance`.
 
 Thresholds and the measurements behind them: `configs/tolerance.json`.
 
@@ -45,13 +48,15 @@ Thresholds and the measurements behind them: `configs/tolerance.json`.
 ## Run it
 
 ```bash
-burnish gate --determinism-only --repeats 10 --weights <checkpoint> --noise <pinned noise .npy>
-burnish gate --impl <your-impl> --weights <checkpoint> --noise <pinned noise .npy>
-scripts/differential_test.py --weights DIR --stage dit-step --resolution 64   # no GPU
+tools/burnish gate --determinism-only --repeats 10 --weights <checkpoint> --noise <pinned noise .npy>
+tools/burnish gate --impl <your-impl> --dtype fp32 --weights <checkpoint> --noise <pinned noise .npy>
+scripts/differential_test.py --weights DIR --stage dit-step --resolution 64 --impl <your-impl>
+scripts/differential_test.py --weights DIR --stage dit-step --impl <your-impl> --device cuda  # GPU
 ```
 
 ## What it does not check
 
 - **How the image looks.** Fidelity is a number; drifting inside the tolerance still costs you on
   the frontier (`docs/SCORING.md`).
-- **Other shapes.** The held-out shape in `burnish bench` covers those.
+- **Other shapes.** The held-out shape in `tools/burnish bench` is timed, not compared with the
+  reference, so a kernel wrong only at another shape is not caught.

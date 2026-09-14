@@ -16,7 +16,7 @@ convolution is one thread per output element, and it moves a lot of intermediate
 
 - **Fusion.** The headroom column is what removing intermediate traffic is worth.
 - **Mid-block attention** covers 16384 positions at 1024px. Materialized, its
-  score matrix is 0.00 GB. The host kernel `materialized` is
+  score matrix is 1.07 GB. The host kernel `materialized` is
   kept as the naive baseline to measure that against.
 - **Tiling** changes the op list, so a tiled decode is a new cell, not a faster version of this one.
 

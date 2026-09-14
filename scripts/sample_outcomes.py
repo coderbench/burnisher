@@ -66,9 +66,19 @@ def _shaped(base, *, status, gap=None, per_cell_gap=None, resolved=True):
 
 def samples():
     real = json.loads(REAL_RECEIPT.read_text())
-    out = [("unresolved", "MEASURED",
+    out = [("no-gain", "MEASURED",
             "The first run this instrument ever scored. A 1024-wide attention tile, which "
             "spilled the working set and made one DiT step 60% slower.", real)]
+
+    unresolved = _shaped(real, status="UNRESOLVED", gap=0.0009,
+                         per_cell_gap={"dit-step/1024/bf16": 0.0009})
+    unresolved["score"]["resolved"] = False
+    for cell in unresolved["per_cell"].values():
+        cell["resolved"] = False
+    out.append((
+        "unresolved", "DERIVED",
+        "A difference inside every cell's own noise floor. Not paid, and not a judgement of the "
+        "idea.", unresolved))
 
     out.append((
         "gap", "DERIVED",
@@ -77,13 +87,6 @@ def samples():
                 per_cell_gap={"dit-step/1024/bf16": 0.0361,
                               "t5-encode/1024/bf16": 0.0088,
                               "vae-decode/1024/bf16": 0.0002})))
-
-    out.append((
-        "no-gain", "DERIVED",
-        "Resolved, and measurably not an improvement. A real result, not a failure -- the "
-        "measurement was good enough to say so.",
-        _shaped(real, status="NO_GAIN", gap=0.00002,
-                per_cell_gap={"dit-step/1024/bf16": 0.00002})))
 
     out.append((
         "shape-overfit", "DERIVED",

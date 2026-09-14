@@ -44,7 +44,12 @@ def local_ceilings(generation_doc, device_key="rtx5090", devices=None) -> dict:
     devices = devices or json.loads((ROOT / "configs" / "devices.json").read_text())
     device = devices[device_key]
     model = generation_doc["model"]
-    cand = next(c for c in cands.values() if c.get("repo") == model.get("repo"))
+    cand = next((c for c in cands.values() if c.get("repo") == model.get("repo")), None)
+    if cand is None:
+        raise ValueError(
+            f"{model.get('repo')!r} is not a model in configs/candidates.json, so its ceilings "
+            f"cannot be recomputed. A new model needs its geometry enumerated first, which is an "
+            f"instrument change (docs/CARTOGRAPHY.md).")
     resolution = int(model["resolution"])
     stages = pixart_stages(cand, resolution=resolution, steps=int(model["steps"]),
                            caption_len=int(model["caption_len"]),

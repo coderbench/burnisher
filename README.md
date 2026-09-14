@@ -7,9 +7,9 @@ v0 runs PixArt-Sigma at 1024px correctly, and slowly on purpose. Contributors ma
 paid for how much of the remaining gap to the hardware's limit they close.
 
 ```
-burnish roofline      # every cell's ceiling, and how full it is
-burnish screen        # which model v0 pins, and why
-burnish audit         # re-check anyone's score. no GPU, two seconds
+tools/burnish roofline      # every cell's ceiling, and how full it is
+tools/burnish screen        # which model v0 pins, and why
+tools/burnish audit         # re-check anyone's score. no GPU, two seconds
 ```
 
 **Here to contribute? Read `CONTRIBUTING.md`.**

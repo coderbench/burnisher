@@ -24,8 +24,10 @@ each one shaped a decision here:
   evaluator OBSERVED first, from a record the submission cannot write to.
 
 A copy embedded inside a larger submission, and a partial match, are REVIEW: measured, but not
-paid until a maintainer looks. A stacked branch built on somebody else's unmerged pull request
-looks exactly like an embedded copy, and only a person can tell them apart.
+paid until a maintainer looks. A branch STACKED on somebody else's open pull request -- its head
+commit is in this branch's history -- carries that pull request's code in its diff against main
+by construction, so it is never a copy of it: it is REVIEW, because the measurement includes
+work that is not the author's.
 """
 from __future__ import annotations
 
@@ -179,12 +181,15 @@ def boilerplate(added_sets, limit=BOILERPLATE_DF) -> set:
     return {h for h, n in df.items() if n > limit}
 
 
-def judge(candidate: dict, references: list, *, on_main=frozenset(), boiler=frozenset()) -> dict:
+def judge(candidate: dict, references: list, *, on_main=frozenset(), boiler=frozenset(),
+          stacked=frozenset()) -> dict:
     """COPY, REVIEW or CLEAR for one submission.
 
     `candidate` and each reference: {"pr", "author", "first_seen", "added", "base"}. Only
     references by a different author that the evaluator observed EARLIER are considered: a
-    self-resubmission is iteration, and a later submission cannot be the original.
+    self-resubmission is iteration, and a later submission cannot be the original. `stacked` names
+    the references whose head commit is in the candidate's history; matching one of those is
+    REVIEW, never COPY.
     """
     me = (candidate["author"] or "").lower()
     refs = [r for r in references
@@ -209,7 +214,8 @@ def judge(candidate: dict, references: list, *, on_main=frozenset(), boiler=froz
     if not novel:
         return clear
 
-    slots = {"copy": [], "contains-earlier": [], "partial": [], "tiny-identical": []}
+    slots = {"copy": [], "contains-earlier": [], "stacked": [], "partial": [],
+             "tiny-identical": []}
     for ref in refs:
         mine = novel - ref["base"]
         theirs = ref["added"] - boiler - ref["base"] - candidate["base"] - infra
@@ -220,7 +226,12 @@ def judge(candidate: dict, references: list, *, on_main=frozenset(), boiler=froz
         b = len(theirs & candidate["added"]) / len(theirs) if theirs else 0.0
         row = {"ref": ref, "containment": a, "contains": b, "new_code": len(mine),
                "shared": shared}
-        if len(mine) >= MIN_MASS and a >= T_COPY:
+        if ref["pr"] in stacked:
+            if ((len(mine) >= MIN_MASS and a >= T_REVIEW)
+                    or (len(theirs) >= EMBED_MIN and b >= T_COPY)
+                    or (TINY_MIN <= len(mine) < MIN_MASS and a >= 0.99)):
+                slots["stacked"].append(row)
+        elif len(mine) >= MIN_MASS and a >= T_COPY:
             slots["copy"].append(row)
         elif len(theirs) >= EMBED_MIN and b >= T_COPY and len(shared) >= EMBED_MIN:
             slots["contains-earlier"].append(row)
@@ -229,11 +240,11 @@ def judge(candidate: dict, references: list, *, on_main=frozenset(), boiler=froz
         elif TINY_MIN <= len(mine) < MIN_MASS and a >= 0.99:
             slots["tiny-identical"].append(row)
 
-    for kind in ("copy", "contains-earlier", "partial", "tiny-identical"):
+    for kind in ("copy", "contains-earlier", "stacked", "partial", "tiny-identical"):
         rows = slots[kind]
         if not rows:
             continue
-        key = "contains" if kind == "contains-earlier" else "containment"
+        key = "contains" if kind in ("contains-earlier", "stacked") else "containment"
         top = max(r[key] for r in rows)
         # The original is whoever was observed FIRST among the references that match as well as
         # the best one does -- not whichever pull request happens to have the lower number.
@@ -241,6 +252,8 @@ def judge(candidate: dict, references: list, *, on_main=frozenset(), boiler=froz
         ref = best["ref"]
         reason = {"copy": f"{best['containment']:.0%} of its new code is in #{ref['pr']}",
                   "contains-earlier": f"it contains {best['contains']:.0%} of #{ref['pr']}'s new code",
+                  "stacked": f"it is built on #{ref['pr']}'s unmerged commits, so its diff "
+                             f"carries {best['contains']:.0%} of #{ref['pr']}'s new code",
                   "partial": f"{best['containment']:.0%} of its new code is in #{ref['pr']}",
                   "tiny-identical": f"a small change identical to #{ref['pr']}"}[kind]
         return {"outcome": "COPY" if kind == "copy" else "REVIEW", "kind": kind,

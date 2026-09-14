@@ -23,8 +23,7 @@ cells with no implementation yet, against bf16's 54.4 ms. Landing one is
 also cartography (`docs/CARTOGRAPHY.md`).
 
 Ceilings are arithmetic: how big the box is, not how full.
-Only `dit-step/1024/bf16` is calibrated: 1.5% of its ceiling
-(`eval/cells/BG-1/reference.json`).
+Calibrated in BG-1 (`eval/cells/BG-1/reference.json`): `dit-step/1024/bf16` at 1.5%, `t5-encode/1024/bf16` at 18.2%, `vae-decode/1024/bf16` at 0.8% of its ceiling.
 
 ---
 

@@ -48,7 +48,8 @@ def main():
     verdict = RR.judge(tree(a.repo, "HEAD"), tree(a.repo, a.base))
     if a.cleared and verdict["outcome"] == "REREGISTERED":
         verdict = dict(verdict, outcome="CLEARED")
-    print(f">> reregistration guard: {verdict['outcome']}"
+    print(f">> reregistration guard: {verdict['outcome']}; new kernel names: "
+          f"{', '.join(verdict['candidate_names']) or 'none'}"
           + "".join(f"\n   {f['registration']['op']}/{f['registration']['name']} = "
                     f"{f['matches']['op']}/{f['matches']['name']} ({f['kind']}, {f['similarity']:.0%})"
                     for f in verdict["findings"]))

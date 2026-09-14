@@ -21,15 +21,16 @@
   "burnish:correctness-fail": "Rejected before timing was considered. Never traded against a speed win.",
   "burnish:determinism-fail": "Rejected. Nothing can be attributed to a change against a baseline that does not produce the same bytes twice.",
   "burnish:cell-opened": "PAID as cartography. A new cell -- its reference, calibration and roofline -- adds a place where future work can be measured.",
-  "burnish:held": "Held, not rejected. An independent re-measurement disagrees beyond the cell's floor, so one of the two receipts is wrong and nobody yet knows which. A score no one else can reproduce does not pay.",
+  "burnish:held": "Held, not rejected. A re-measurement on another card disagrees beyond the cell's floor, so one of the receipts is wrong and nobody yet knows which. The label replaces the paid one until a further measurement agrees with the receipt.",
   "burnish:build-fail": "Not evaluated.",
-  "burnish:eval-error": "Not the submission's fault. Re-run.",
-  "burnish:merge-first": "The best verified gain of its round. At most one submission per round can be merged, because everything else in that round was measured against the baseline this one is about to move.",
-  "burnish:needs-rebase": "Not a rejection and not a judgement of the work. It was measured in the same round as a submission that closed more of the gap and was merged, so its baseline no longer exists. Rebase and it is re-measured in a later round.",
+  "burnish:eval-error": "Not the submission's fault. Retried automatically, up to three times for the same commit, and again on a new commit.",
+  "burnish:merge-first": "The best verified gain of its round, added beside its paid label. At most one submission per round can be merged, because every other gain in that round was measured against the baseline this one is about to move.",
+  "burnish:needs-rebase": "Not a rejection. Its gain resolved, but a larger gain in the same round was picked to merge, so its baseline is about to move. Push a rebase and it is measured again.",
   "burnish:copycat": "Not evaluated, not paid, account blocked. Most of the new code matches an open pull request by a different author, observed earlier, once renaming, reformatting and shared boilerplate are set aside. The pull request is closed.",
-  "burnish:copycat-review": "Measured, not yet paid. Part of the new code matches an open pull request by someone else, or the submission contains most of an earlier one, as a stacked branch would. A maintainer decides.",
+  "burnish:copycat-review": "Measured, not yet paid. Part of the new code matches an open pull request by someone else, it contains most of one, or it is built on one. A maintainer decides; clearing it re-measures it.",
   "burnish:blocked": "Not evaluated. The account was blocked for an earlier copy, so this pull request is closed. A maintainer lifts a block only with a recorded reason.",
-  "burnish:reregistered": "Not evaluated, not paid. It registers a kernel already on main under a new name; the baseline never runs that kernel, so it would be credited with a gain that already landed. Different constants are a variant."
+  "burnish:reregistered": "Not evaluated, not paid. It registers a kernel already on main under a new name; the baseline never runs that kernel, so it would be credited with a gain that already landed. Different constants are a variant.",
+  "burnish:no-candidate": "Not evaluated. It registers no new kernel name, or several without naming the one to measure in its description, so there is no candidate arm to run against `cuda`."
  },
  "cartography": "Opening a cell is scored in its own right. A benchmark whose surface only a maintainer may extend stops growing, and a subnet's health depends on axis supply. The instrument guard distinguishes ADDING a new frozen generation (allowed, paid) from MODIFYING one that exists (blocked) -- an added generation cannot change what any existing receipt meant.",
  "verification": {

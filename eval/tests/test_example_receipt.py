@@ -123,10 +123,12 @@ class TestTheCommittedExampleStillReproduces(unittest.TestCase):
     def test_the_readmes_claims_about_this_run_are_true_of_this_receipt(self):
         """Prose drifts. The specific claims examples/README.md makes are checked here."""
         r = self.want
-        # "It lost, and the receipt says so" -- and a loss credits zero rather than negative.
+        # "It lost, and the receipt says so": two cells resolved a slowdown, so the submission
+        # resolved as measurably not an improvement, and NO_GAIN credits nothing.
         self.assertLess(r["score"]["gap_closed"], 0.0)
         self.assertEqual(r["score"]["credited_gap_closed"], 0.0)
-        self.assertEqual(r["status"], "UNRESOLVED")
+        self.assertTrue(r["score"]["resolved"])
+        self.assertEqual(r["status"], "NO_GAIN")
         # "Two cells resolved a regression and are named."
         resolved = {c for c, v in r["per_cell"].items() if v["resolved"]}
         self.assertEqual(resolved, {"dit-step/1024/bf16", "t5-encode/1024/bf16"})

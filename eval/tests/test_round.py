@@ -39,25 +39,86 @@ class TestSelection(unittest.TestCase):
         wait a function of the evaluator's opinion rather than of the queue."""
         prs = [pr(3, created="2026-09-03"), pr(1, created="2026-09-01"),
                pr(2, created="2026-09-02")]
-        taken, waiting = RD.select(sorted(prs, key=lambda p: p["createdAt"]), 2)
-        self.assertEqual([p["number"] for p in taken], [1, 2])
-        self.assertEqual([p["number"] for p in waiting], [3])
+        due = RD.select(sorted(prs, key=lambda p: p["createdAt"]))
+        self.assertEqual([p["number"] for p in due], [1, 2, 3])
 
     def test_a_submission_that_already_has_an_outcome_is_not_remeasured(self):
-        """A label is keyed to a commit; re-scoring an unchanged one spends GPU to re-derive the
-        same number."""
+        """An unchanged commit with an outcome: re-scoring it re-derives the same number."""
         prs = [pr(1, created="2026-09-01", labels=["burnish:unresolved"]),
                pr(2, created="2026-09-02")]
-        taken, _ = RD.select(prs, 3)
-        self.assertEqual([p["number"] for p in taken], [2])
+        last = {1: {"head": pr(1, created="")["headRefOid"]}}.get
+        self.assertEqual([p["number"] for p in RD.select(prs, last)], [2])
 
-    def test_the_rest_wait_rather_than_being_dropped(self):
-        prs = [pr(i, created=f"2026-09-{i:02d}") for i in range(1, 9)]
-        taken, waiting = RD.select(prs, 3)
-        self.assertEqual(len(taken), 3)
-        self.assertEqual(len(waiting), 5)
-        self.assertEqual([p["number"] for p in taken + waiting],
-                         [p["number"] for p in prs], "a submission was lost between the lists")
+    def test_a_push_after_an_outcome_makes_it_due_again(self):
+        """`needs-rebase` says rebase and it is measured again; that has to be true."""
+        prs = [pr(1, created="2026-09-01", labels=["burnish:needs-rebase"], head="b" * 40)]
+        last = {1: {"head": "a" * 40}}.get
+        self.assertEqual([p["number"] for p in RD.select(prs, last)], [1])
+
+
+class _FakeRound:
+    """`run` with the bot's GitHub and GPU halves replaced by recorded outcomes."""
+
+    def __init__(self, prs, outcomes):
+        import argparse
+        import pr_bot as B
+        self.B, self.calls, self.labels = B, [], []
+        self._saved = (RD.open_prs_fifo, B.evaluate, B.set_label, B.add_label, B.comment)
+        RD.open_prs_fifo = lambda repo: prs
+        B.evaluate = lambda repo, p, args: (self.calls.append(p["number"])
+                                            or dict(outcomes[p["number"]], pr=p["number"]))
+        B.set_label = lambda repo, num, label, **kw: self.labels.append(("set", num, label))
+        B.add_label = lambda repo, num, label, **kw: self.labels.append(("add", num, label))
+        B.comment = lambda *a, **kw: None
+        self.args = argparse.Namespace(slots=2, interval=0, merge=False, dry_run=True, ledger="",
+                                       repo="o/r", generation="BG-1", calibration="")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        RD.open_prs_fifo, self.B.evaluate, self.B.set_label, self.B.add_label, self.B.comment = \
+            self._saved
+
+
+class TestSlots(unittest.TestCase):
+    def test_slots_count_only_submissions_that_are_measured(self):
+        """A round of guard-skipped pull requests must not displace real submissions."""
+        prs = [pr(i, created=f"2026-09-{i:02d}") for i in range(1, 6)]
+        outcomes = {1: {"outcome": "SKIPPED"}, 2: {"outcome": "UNRESOLVED", "payout_fraction": 0.0},
+                    3: {"outcome": "COPYCAT"}, 4: {"outcome": "NO_GAIN", "payout_fraction": 0.0},
+                    5: {"outcome": "UNRESOLVED", "payout_fraction": 0.0}}
+        with _FakeRound(prs, outcomes) as f:
+            out = RD.run(f.args)
+        self.assertEqual(f.calls, [1, 2, 3, 4])
+        self.assertEqual(out["waiting"], [5])
+
+
+class TestTheRoundLabels(unittest.TestCase):
+    def test_only_other_gains_are_asked_to_rebase_and_the_winner_keeps_its_number(self):
+        prs = [pr(i, created=f"2026-09-{i:02d}") for i in range(1, 4)]
+        outcomes = {1: {"outcome": "FRONTIER_EXPANDED", "label": "burnish:gap+0.0100",
+                        "payout_fraction": 0.01},
+                    2: {"outcome": "FRONTIER_EXPANDED", "label": "burnish:gap+0.0300",
+                        "payout_fraction": 0.03},
+                    3: {"outcome": "NO_GAIN", "payout_fraction": 0.0}}
+        with _FakeRound(prs, outcomes) as f:
+            f.args.slots = 3
+            RD.run(f.args)
+        self.assertIn(("add", 2, RD.MERGE_FIRST), f.labels, "merge-first must not replace the number")
+        self.assertIn(("set", 1, RD.NEEDS_REBASE), f.labels)
+        self.assertNotIn(("set", 3, RD.NEEDS_REBASE), f.labels,
+                         "a result that did not pay was relabelled needs-rebase")
+        self.assertNotIn(("set", 2, RD.MERGE_FIRST), f.labels)
+
+
+class TestHolds(unittest.TestCase):
+    def test_the_latest_receipt_per_pull_request_decides_a_hold(self):
+        history = [{"pr": 7, "held": True, "receipt": "a"}, {"pr": 7, "held": False, "receipt": "b"},
+                   {"pr": 8, "held": True, "receipt": "c"}, {"pr": 9, "held": False, "receipt": "d"}]
+        hold, release, _ = RD.hold_changes(history, labelled={7, 9})
+        self.assertEqual(hold, [8])
+        self.assertEqual(release, [7, 9])
 
 
 class TestWhatGetsMerged(unittest.TestCase):

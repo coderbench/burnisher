@@ -318,9 +318,10 @@ def cmd_challenge(args, rest):
               f"{r['floor_as_gap_closed']:10.5f}  "
               f"{'within floor' if r['within_floor'] else 'DISAGREE'}")
     if not d["agree"]:
-        print(f"\n   This submission's credit is now HELD. One of the two receipts is wrong and")
-        print(f"   the ledger does not know which, so it pays neither. A third measurement")
-        print(f"   breaks the tie.")
+        print(f"\n   Unless other measurements already agree with the canonical receipt, this")
+        print(f"   submission's credit is now HELD: the ledger does not know which receipt is")
+        print(f"   wrong, so it pays neither. A further measurement on another card that agrees")
+        print(f"   with the canonical receipt releases it.")
     L.update_current(args.ledger, gen_name, gen)
     return 0
 

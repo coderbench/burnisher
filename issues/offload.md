@@ -18,7 +18,8 @@ bigger models, which were ruled out of v0 because they don't fit (`configs/candi
 
 - Scored on peak VRAM. Streaming that costs latency is a move along the frontier; streaming that
   costs nothing is a gain.
-- **Trap:** a CPU build reports host memory, not device memory.
+- **Trap:** peak memory is the device allocator's high-water mark on a CUDA run and host peak RSS
+  on a CPU run. They are different resources; never compare one with the other.
 
 ---
 

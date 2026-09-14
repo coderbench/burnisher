@@ -220,9 +220,8 @@ Tensor read_npy(const std::string& path) {
 }
 
 size_t peak_rss_bytes() {
-    // Host peak RSS on a CPU build. On a CUDA build this is replaced by the device allocator's
-    // high-water mark, which is what the memory objective actually scores; reporting the host
-    // figure there would silently score the wrong resource.
+    // Host peak RSS: the memory objective for a run on the CPU. A run on the device reports the
+    // device allocator's high-water mark instead -- see `peak_memory_bytes`.
     std::ifstream f("/proc/self/status");
     std::string line;
     while (std::getline(f, line)) {
@@ -231,6 +230,13 @@ size_t peak_rss_bytes() {
         }
     }
     return 0;
+}
+
+// The memory objective the frontier scores, for the resource this run actually used. It was
+// host RSS on every run, including runs on the device, so the "peak VRAM" of a CUDA run was how
+// much host memory the process touched -- the wrong resource, scored as if it were the right one.
+size_t peak_memory_bytes(Device d) {
+    return d == Device::CUDA ? device::peak_allocated_bytes() : peak_rss_bytes();
 }
 
 void device_sync_if(Device d) {
@@ -464,7 +470,7 @@ int cmd_bench(const Args& a) {
     std::ostringstream os;
     os.precision(12);
     os << "BURNISH_JSON: {\"metrics\":{\"latency_s\":" << median
-       << ",\"peak_vram_bytes\":" << peak_rss_bytes()
+       << ",\"peak_vram_bytes\":" << peak_memory_bytes(device_arg(a))
        << ",\"iters\":" << iters << "},\"effective\":" << json_map(effective)
        << ",\"output_stats\":" << stats_json(stats) << "}";
     std::cout << os.str() << "\n";
@@ -666,7 +672,7 @@ int cmd_decode(const Args& a) {
     std::ostringstream os;
     os.precision(12);
     os << "BURNISH_JSON: {\"metrics\":{\"latency_s\":" << secs
-       << ",\"peak_vram_bytes\":" << peak_rss_bytes() << "},\"effective\":"
+       << ",\"peak_vram_bytes\":" << peak_memory_bytes(dev) << "},\"effective\":"
        << json_map({{"stage", "vae-decode"}, {"dtype", dtype_name(dt)},
                     {"impl", a.get("impl", "stock")}, {"weights", "checkpoint"},
                     {"device", a.get("device", "cpu")}})
@@ -726,7 +732,7 @@ int cmd_dit_step(const Args& a) {
     std::ostringstream os;
     os.precision(12);
     os << "BURNISH_JSON: {\"metrics\":{\"latency_s\":" << secs
-       << ",\"peak_vram_bytes\":" << peak_rss_bytes() << "},\"effective\":"
+       << ",\"peak_vram_bytes\":" << peak_memory_bytes(dev) << "},\"effective\":"
        << json_map({{"stage", "dit-step"}, {"dtype", dtype_name(dt)},
                     {"impl", a.get("impl", "stock")}, {"weights", "checkpoint"},
                     {"device", a.get("device", "cpu")}})
@@ -792,7 +798,7 @@ int cmd_encode(const Args& a) {
     std::ostringstream os;
     os.precision(12);
     os << "BURNISH_JSON: {\"metrics\":{\"latency_s\":" << secs
-       << ",\"peak_vram_bytes\":" << peak_rss_bytes() << "},\"effective\":"
+       << ",\"peak_vram_bytes\":" << peak_memory_bytes(dev) << "},\"effective\":"
        << json_map({{"stage", "t5-encode"}, {"dtype", dtype_name(dt)},
                     {"impl", a.get("impl", "stock")}, {"weights", "checkpoint"},
                     {"device", a.get("device", "cpu")}})
@@ -993,7 +999,7 @@ int cmd_generate(const Args& a) {
        << ",\"text_encode_s\":" << t.text_encode_s
        << ",\"denoise_s\":" << t.denoise_s
        << ",\"vae_decode_s\":" << t.vae_decode_s
-       << ",\"peak_vram_bytes\":" << peak_rss_bytes()
+       << ",\"peak_vram_bytes\":" << peak_memory_bytes(device_arg(a))
        << "},\"effective\":" << json_map(effective)
        << ",\"output_stats\":" << stats_json(st) << "}";
     std::cout << os.str() << "\n";

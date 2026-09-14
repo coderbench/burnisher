@@ -166,7 +166,10 @@ def judge(candidate_files: dict, base_files: dict) -> dict:
     existing = {(r["op"], r["name"]) for r in base_regs}
     new = [r for r in cand_regs if (r["op"], r["name"]) not in existing]
     result = {"outcome": "CLEAR", "findings": [],
-              "new_registrations": [f"{r['op']}/{r['name']}" for r in new]}
+              "new_registrations": [f"{r['op']}/{r['name']}" for r in new],
+              # The names a candidate arm could run. The validator measures ONE name against
+              # `cuda`, and a submission that registers a new kernel says which by registering it.
+              "candidate_names": sorted({r["name"] for r in new})}
     if not new:
         return result
     base_defs, cand_defs = definitions(base_files), definitions(candidate_files)

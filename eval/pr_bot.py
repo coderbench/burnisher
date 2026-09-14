@@ -21,26 +21,32 @@ with `burnish audit`.
 The order of operations, and why
 --------------------------------
 
-  1. guard        Does the submission change the measuring instrument? A PR that does is SKIPPED,
+  1. copies       A blocked author, or new code copied from another open pull request: labelled,
+                  closed, no GPU time. See scripts/copycat_guard.py.
+  2. guard        Does the submission change the measuring instrument? A PR that does is SKIPPED,
                   not closed, and never spends GPU time -- a number produced by a modified
                   instrument cannot be accepted either way, so measuring it would be waste. The
                   exception is opening a NEW generation, which is cartography and is paid.
-  2. build        From source, on the eval box. No prebuilt artifacts.
-  3. gate         Correctness and self-determinism, before anything is timed, for BOTH arms.
-  4. bench        Paired, interleaved, with a held-out shape drawn now -- after the candidate is
+  3. kernel       Does it register a kernel already on main under a new name (not evaluated), and
+                  which new kernel name does it register? That name is the candidate arm.
+  4. build        From source, on the eval box. No prebuilt artifacts.
+  5. gate         Correctness and self-determinism, before anything is timed, for BOTH arms.
+  6. bench        Paired, interleaved, with a held-out shape drawn now -- after the candidate is
                   frozen.
-  5. score        Into an append-only ledger outside the submission's reach.
-  6. publish      Raw measurements AND receipt, so the verdict can be re-derived by anyone.
-  7. label        A pure function of the receipt.
+  7. score        Into an append-only ledger outside the submission's reach.
+  8. publish      Raw measurements AND receipt, so the verdict can be re-derived by anyone.
+  9. label        A pure function of the receipt.
 
-Steps 2-5 are `eval/score_submission.sh`, which is the same command a contributor runs by hand.
+Steps 5-7 are `eval/score_submission.sh`, which is the same command a contributor runs by hand.
 The bot is not a privileged path; it is a scheduled one.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -64,6 +70,12 @@ CLEARED = "copycat-cleared"
 BLOCKED = f"{V.PREFIX}:blocked"
 REREGISTERED = f"{V.PREFIX}:reregistered"
 REREGISTRATION_CLEARED = "reregistration-cleared"
+NO_CANDIDATE = f"{V.PREFIX}:no-candidate"
+EVAL_ERROR = f"{V.PREFIX}:eval-error"
+# How many times an evaluator error is retried for the same commit before it waits for a push.
+MAX_ATTEMPTS = 3
+# Where a pull request says which of several new kernel names to measure. The template has it.
+IMPL_FIELD = re.compile(r"\*\*Implementation name:\*\*\s*`([^`]+)`")
 
 
 def gh(args, *, check=True, timeout=120):
@@ -75,18 +87,75 @@ def gh(args, *, check=True, timeout=120):
 
 def open_prs(repo):
     r = gh(["pr", "list", "-R", repo, "--state", "open", "--limit", "200",
-            "--json", "number,headRefOid,headRefName,labels,title,author"])
+            "--json", "number,headRefOid,headRefName,labels,title,author,body"])
     return json.loads(r.stdout)
 
 
-def already_labelled(pr) -> bool:
-    """Has this exact commit already been given an outcome?
+def _body_sha(pr) -> str:
+    return hashlib.sha256((pr.get("body") or "").encode()).hexdigest()
 
-    Keyed on the label set rather than a local file, so the answer survives the bot being
-    restarted, moved, or replaced -- the PR itself is the state.
+
+def _record_path(args, num):
+    ledger = getattr(args, "ledger", "")
+    return Path(ledger) / "evaluations" / f"pr-{num:06d}.json" if ledger else None
+
+
+def last_evaluation(args, num):
+    """What the bot last concluded about this pull request, and for which commit."""
+    p = _record_path(args, num)
+    return json.loads(p.read_text()) if p and p.exists() else None
+
+
+def record_evaluation(args, pr, result) -> None:
+    """Remember which commit (and description) an outcome was for, beside the ledger.
+
+    A label cannot say which commit it describes, and GitHub keeps it through a push. Without this
+    record a labelled pull request could never be looked at again: a rebase asked for by
+    `needs-rebase`, a fix after `build-fail`, a retry after `eval-error` all went unmeasured.
     """
-    names = {l["name"] for l in pr.get("labels", [])}
-    return any(n.startswith(f"{V.PREFIX}:") for n in names)
+    p = _record_path(args, pr["number"])
+    if p is None or getattr(args, "dry_run", False) or result.get("outcome") == "DRY_RUN":
+        return
+    prev = last_evaluation(args, pr["number"]) or {}
+    attempts = 0
+    if result.get("outcome") == "EVAL_ERROR":
+        again = prev.get("head") == pr["headRefOid"] and prev.get("outcome") == "EVAL_ERROR"
+        attempts = prev.get("attempts", 0) + 1 if again else 1
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({
+        "pr": pr["number"], "head": pr["headRefOid"], "body_sha256": _body_sha(pr),
+        "outcome": result.get("outcome"), "attempts": attempts,
+        "at": time.strftime("%FT%TZ", time.gmtime())}, indent=1, sort_keys=True) + "\n")
+
+
+def needs_evaluation(pr, record) -> bool:
+    """Is this pull request due for evaluation?
+
+    - No outcome label yet: yes.
+    - A copy or a blocked account: only once a maintainer adds `copycat-cleared`.
+    - A copycat review or a re-registration: again once a maintainer clears it.
+    - Anything else: again when the head commit is not the one the outcome was for; after
+      `no-candidate`, also when the description changed; after `eval-error`, also up to
+      MAX_ATTEMPTS times for the same commit.
+    A label with no record behind it (applied before records existed) is left alone.
+    """
+    labels = {l["name"] for l in pr.get("labels", [])}
+    outcome = {n for n in labels if n.startswith(f"{V.PREFIX}:")}
+    if not outcome:
+        return True
+    if outcome & {COPYCAT, BLOCKED}:
+        return CLEARED in labels
+    if COPYCAT_REVIEW in outcome and CLEARED in labels:
+        return True
+    if REREGISTERED in outcome and REREGISTRATION_CLEARED in labels:
+        return True
+    if record is None:
+        return False
+    if record.get("head") != pr.get("headRefOid"):
+        return True
+    if NO_CANDIDATE in outcome and record.get("body_sha256") != _body_sha(pr):
+        return True
+    return EVAL_ERROR in outcome and record.get("attempts", 0) < MAX_ATTEMPTS
 
 
 def ensure_label(repo, label, color, description, *, dry_run=False):
@@ -127,6 +196,17 @@ def set_label(repo, num, label, *, color=None, description="", dry_run=False):
                 "--method", "DELETE"], check=False)
     gh(["api", f"repos/{owner}/{name}/issues/{num}/labels",
         "--method", "POST", "-f", f"labels[]={label}"])
+
+
+def add_label(repo, num, label, *, color=None, description="", dry_run=False):
+    """Attach a label WITHOUT removing the others: `merge-first` sits beside the paid number."""
+    owner, name = repo.split("/", 1)
+    if dry_run:
+        print(f"   [dry-run] would add label to #{num}: {label}")
+        return
+    ensure_label(repo, label, color, description)
+    gh(["api", f"repos/{owner}/{name}/issues/{num}/labels", "--method", "POST",
+        "-f", f"labels[]={label}"], check=False)
 
 
 def comment(repo, num, body, *, dry_run=False):
@@ -207,6 +287,40 @@ def reregistration(worktree: Path, pr: dict, args) -> dict:
     if REREGISTRATION_CLEARED in {l["name"] for l in pr.get("labels", [])}:
         cmd.append("--cleared")
     return _run_guard(cmd, out)
+
+
+def candidate_impl(rr: dict, pr: dict, args) -> tuple:
+    """The implementation the candidate arm runs, and why -- or (None, why there is none).
+
+    Read from the registry the submission changes, not from anything it says about itself: the
+    kernel it registers under a new name is the kernel it is measured on. The description is
+    consulted only to choose between several new names, and only among those names.
+    """
+    if getattr(args, "impl_candidate", ""):
+        return args.impl_candidate, "set by the operator"
+    names = rr.get("candidate_names") or []
+    if len(names) == 1:
+        return names[0], "the one new kernel name this pull request registers"
+    if not names:
+        return None, ("it registers no new kernel name. The candidate arm runs a newly registered "
+                      "kernel against `cuda` in the same binary, so a change to an existing kernel "
+                      "would be measured against itself")
+    m = IMPL_FIELD.search(pr.get("body") or "")
+    named = m.group(1).strip() if m else None
+    if named in names:
+        return named, "named in the pull request description"
+    return None, (f"it registers {len(names)} new kernel names ({', '.join(names)}) and the "
+                  f"description's Implementation name "
+                  + (f"is `{named}`, which is not one of them" if named else "does not name one"))
+
+
+def _no_candidate_note(why: str) -> str:
+    return "\n".join([
+        f"### `{NO_CANDIDATE}`", "", f"**Not evaluated: {why}.**", "",
+        "The validator runs the kernel a pull request registers under a new name against `cuda`, "
+        "in one binary (`CONTRIBUTING.md`). If you register several names, name the one to "
+        "measure in the description:", "", "```", "**Implementation name:** `your-kernel`", "```",
+        "", "Push a commit or edit the description and it is evaluated again."])
 
 
 def close_pr(repo, num, *, dry_run=False) -> bool:
@@ -316,14 +430,14 @@ def report(verdict: dict, receipt: dict, *, raw_name, receipt_name) -> str:
         "next to the receipt, and the verdict is a pure function of them:",
         "",
         "```bash",
-        f"burnish audit {raw_name} {receipt_name}",
+        f"tools/burnish audit {raw_name} {receipt_name}",
         "```",
         "",
         "That re-scores the raw measurements and compares the result to the published receipt, "
         "field for field. It catches a scoring bug or an edited receipt — including one whose "
         "digest was recomputed to cover the edit. It cannot prove the measurements describe "
         "what the hardware did; for that, re-measure on your own RTX 5090 and append a "
-        "counter-receipt with `burnish challenge`. A disagreement beyond the cell's own noise "
+        "counter-receipt with `tools/burnish challenge`. A disagreement beyond the cell's own noise "
         "floor puts the credit on hold.",
     ]
     if not v["provenance_complete"]:
@@ -333,10 +447,25 @@ def report(verdict: dict, receipt: dict, *, raw_name, receipt_name) -> str:
 
 
 def evaluate(repo, pr, args) -> dict:
+    """Evaluate one pull request, and record which commit the outcome is for."""
+    try:
+        result = _evaluate(repo, pr, args)
+    except Exception as exc:
+        record_evaluation(args, pr, {"pr": pr["number"], "outcome": "EVAL_ERROR",
+                                     "error": str(exc)})
+        raise
+    record_evaluation(args, pr, result)
+    return result
+
+
+def _evaluate(repo, pr, args) -> dict:
     num = pr["number"]
     print(f">> #{num}  {pr['title'][:70]}")
     work = Path(tempfile.mkdtemp(prefix=f"burnish-pr{num}-"))
     try:
+        # The head can live on a fork, which the evaluator's `git fetch origin main` never brings in.
+        subprocess.run(["git", "-C", str(ROOT), "fetch", "--quiet", "origin",
+                        f"+refs/pull/{num}/head"], capture_output=True, text=True)
         subprocess.run(["git", "-C", str(ROOT), "worktree", "add", "-q", "--detach",
                         str(work / "src"), pr["headRefOid"]], check=True,
                        capture_output=True, text=True)
@@ -391,6 +520,17 @@ def evaluate(repo, pr, args) -> dict:
             comment(repo, num, _reregistration_note(rr), dry_run=args.dry_run)
             return {"pr": num, "outcome": "REREGISTERED", "reregistration": rr}
 
+        impl = None
+        if g["outcome"] != "CARTOGRAPHY":
+            impl, why = candidate_impl(rr, pr, args)
+            if impl is None:
+                print(f"   NO CANDIDATE: {why}")
+                set_label(repo, num, NO_CANDIDATE, color=V.COLORS[V.NO_CANDIDATE],
+                          description=V.ALL_OUTCOMES[V.NO_CANDIDATE][0], dry_run=args.dry_run)
+                comment(repo, num, _no_candidate_note(why), dry_run=args.dry_run)
+                return {"pr": num, "outcome": "NO_CANDIDATE", "reregistration": rr}
+            print(f"   candidate arm: {impl} ({why})")
+
         if args.dry_run:
             print(f"   [dry-run] would evaluate: {g['outcome']}")
             return {"pr": num, "outcome": "DRY_RUN", "guard": g}
@@ -426,7 +566,7 @@ def evaluate(repo, pr, args) -> dict:
         r = subprocess.run(
             [str(wt / "eval" / "score_submission.sh"),
              "--base", args.base, "--worktree", str(wt),
-             "--impl-base", args.impl_base, "--impl-candidate", args.impl_candidate,
+             "--impl-base", args.impl_base, "--impl-candidate", impl,
              "--pr", str(num), "--ledger", args.ledger,
              "--generation", args.generation,
              "--weights", args.weights, "--noise", args.noise,
@@ -571,7 +711,9 @@ def main():
     ap.add_argument("--copycat-corpus", default=os.environ.get("BURNISH_COPYCAT_CORPUS", ""),
                     help="append-only copycat observation record; defaults to <ledger>/copycat")
     ap.add_argument("--impl-base", default="cuda")
-    ap.add_argument("--impl-candidate", required=False, default="cuda")
+    ap.add_argument("--impl-candidate", default="",
+                    help="force the candidate arm's implementation. Normally empty: it is the new "
+                         "kernel name the pull request registers.")
     ap.add_argument("--timeout", type=int, default=7200)
     ap.add_argument("--once", action="store_true", help="one pass, then exit")
     ap.add_argument("--dry-run", action="store_true",
@@ -583,7 +725,7 @@ def main():
     everything = open_prs(a.repo)
     a.open_prs = [p["number"] for p in everything]      # the copycat guard's references
     prs = ([p for p in everything if p["number"] == a.pr] if a.pr
-           else [p for p in everything if not already_labelled(p)])
+           else [p for p in everything if needs_evaluation(p, last_evaluation(a, p["number"]))])
     if not prs:
         print("nothing to evaluate")
         return 0

@@ -217,7 +217,7 @@ class TestGate(unittest.TestCase):
         self.gate("--determinism-only", "--repeats", "2")
         doc = json.loads((self.dir / "gate.json").read_text())
         self.assertEqual(len(doc["noise_sha256"]), 64)
-        self.assertEqual(doc["dtype"], "bf16")
+        self.assertEqual(doc["dtype"], "fp32", "submissions are gated in fp32, so that is the default")
 
     def test_the_prompt_set_digest_is_recorded(self):
         """The prompt set is part of the oracle; changing it would make every comparison against

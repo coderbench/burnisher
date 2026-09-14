@@ -154,6 +154,45 @@ def classify(rows, base_generations) -> dict:
             "contributor": contributor, "other": other}
 
 
+# A new generation needs its own entry in configs/tolerance.json: a correctness tolerance cannot be
+# inherited, and `eval/make_generation.py` and the harness tests refuse a generation without one.
+# The file is instrument, so without this a cartography pull request could not carry the entry
+# it is required to carry. Only ADDING entries named after the generations the same pull request
+# opens is allowed; an existing entry changed by so much as a digit is still an edit.
+ADDITIVE_FOR_NEW_GENERATIONS = ("configs/tolerance.json",)
+
+
+def only_adds_entries(base_text: str, head_text: str, allowed: set) -> bool:
+    """Does head keep every base entry byte for byte and add only keys in `allowed`?"""
+    try:
+        base, head = json.loads(base_text), json.loads(head_text)
+    except ValueError:
+        return False
+    if not (isinstance(base, dict) and isinstance(head, dict)):
+        return False
+    added = set(head) - set(base)
+    return (all(k in head and head[k] == base[k] for k in base)
+            and bool(added) and added <= set(allowed))
+
+
+def allow_new_generation_entries(r: dict, base: str, repo: Path = None) -> dict:
+    repo = Path(repo or ROOT)
+    opened = {CELL_DIR.match(p).group(1) for p in r["cartography"]}
+    keep = []
+    for path, why in r["blocked"]:
+        if path in ADDITIVE_FOR_NEW_GENERATIONS and opened:
+            old = subprocess.run(["git", "-C", str(repo), "show", f"{base}:{path}"],
+                                 capture_output=True, text=True)
+            new = repo / path
+            if (old.returncode == 0 and new.exists()
+                    and only_adds_entries(old.stdout, new.read_text(), opened)):
+                r["cartography"].append(path)
+                continue
+        keep.append((path, why))
+    r["blocked"] = keep
+    return r
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -170,7 +209,8 @@ def main():
     if not rows:
         print(f"ok: nothing changed against {a.base}")
         return 0
-    r = classify(rows, existing_generations(a.base, a.repo))
+    r = allow_new_generation_entries(classify(rows, existing_generations(a.base, a.repo)),
+                                     a.base, a.repo)
 
     if r["cartography"]:
         gens = sorted({CELL_DIR.match(p).group(1) for p in r["cartography"]})

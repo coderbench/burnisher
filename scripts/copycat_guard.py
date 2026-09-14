@@ -14,6 +14,9 @@ the time its copied head was first seen, not the time the pull request was opene
 The references are the pull requests OPEN now, by a different author, observed earlier. A copy
 of a merged kernel is a different question with its own guard (`scripts/reregistration_guard.py`).
 
+A branch stacked on another open pull request -- that pull request's head commit is in its
+history -- is never a copy of it; matching it is REVIEW.
+
 A COPY verdict BLOCKS the author: the block is appended to `blocked.jsonl` in the corpus, and every
 later submission from that author comes back BLOCKED without being judged. Maintainers -- the
 owners .github/CODEOWNERS names, passed as --maintainers -- are exempt. A block is lifted only by
@@ -54,6 +57,24 @@ def main_sources(repo, base):
             if r.returncode == 0:
                 files[path] = r.stdout
     return files
+
+
+def stacked_on(repo, entries) -> set:
+    """Open pull requests whose recorded head commit is in this branch's history.
+
+    Git decides, not the code: a branch built on somebody's unmerged pull request contains that
+    pull request's commits, and a copy does not. A head this checkout has never fetched is not
+    evidence either way, so it counts as not stacked.
+    """
+    out = set()
+    for e in entries:
+        if e["pr"] in out:
+            continue
+        r = subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", e["head"], "HEAD"],
+                           capture_output=True)
+        if r.returncode == 0:
+            out.add(e["pr"])
+    return out
 
 
 def load_corpus(corpus: Path) -> list:
@@ -176,8 +197,11 @@ def main():
         for e in others:
             if e["pr"] not in latest or e["first_seen"] > latest[e["pr"]]["first_seen"]:
                 latest[e["pr"]] = e
+        stacked = stacked_on(repo, others)
         verdict = CC.judge(entry, others, on_main=CC.fingerprint_sources(main_sources(repo, a.base)),
-                           boiler=CC.boilerplate([e["added"] for e in latest.values()]))
+                           boiler=CC.boilerplate([e["added"] for e in latest.values()]),
+                           stacked=stacked)
+        doc["stacked_on"] = sorted(stacked)
         doc.update(outcome=verdict["outcome"], kind=verdict.get("kind"), reason=verdict.get("reason"),
                    original=verdict.get("original"), containment=verdict.get("containment"),
                    new_code=verdict.get("new_code"), observations_compared=len(others))

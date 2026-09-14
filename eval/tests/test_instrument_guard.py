@@ -11,6 +11,7 @@ history to fabricate.
 """
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import unittest
@@ -79,6 +80,20 @@ class TestTheLineBetweenOpeningACellAndEditingTheRuler(unittest.TestCase):
         self.assertEqual(r["blocked"], [])
         self.assertEqual(len(r["cartography"]), 1)
         self.assertEqual(len(r["contributor"]), 1)
+
+    def test_a_new_generation_may_add_its_own_tolerance_entry_and_nothing_else(self):
+        """A generation cannot inherit a tolerance, so its pull request has to add one."""
+        base = json.dumps({"BG-1": {"latent_l2_relative": 0.0025}, "_note": "x"})
+        added = json.dumps({"BG-1": {"latent_l2_relative": 0.0025}, "_note": "x",
+                            "BG-3": {"latent_l2_relative": 0.01}})
+        self.assertTrue(G.only_adds_entries(base, added, {"BG-3"}))
+        self.assertFalse(G.only_adds_entries(base, added, {"BG-4"}),
+                         "an entry for a generation this pull request does not open")
+        edited = json.dumps({"BG-1": {"latent_l2_relative": 0.005}, "_note": "x",
+                             "BG-3": {"latent_l2_relative": 0.01}})
+        self.assertFalse(G.only_adds_entries(base, edited, {"BG-3"}),
+                         "loosening an existing tolerance rode in beside a new one")
+        self.assertFalse(G.only_adds_entries(base, base, {"BG-3"}))
 
     def test_the_guarded_paths_are_the_overlaid_paths(self):
         """A path guarded here but not overlaid by run_from_base.sh is a hole.

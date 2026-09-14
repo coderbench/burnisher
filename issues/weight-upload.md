@@ -6,8 +6,8 @@
 **Device:** NVIDIA GeForce RTX 5090
 
 `burnisher generate` uploads 10.8 GB of weights every run. The whole 20-step
-denoise has a ceiling of 1089 ms, and the
-upload takes tens of seconds.
+denoise has a ceiling of 1089 ms. The upload
+itself has never been timed.
 
 It isn't a scored cell (the bench loads once), but it dominates the gate's run time and anyone
 actually using the runtime.

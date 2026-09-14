@@ -1,6 +1,6 @@
 {
  "benchmark_generation": "BG-1",
- "content_digest": "sha256:25986d6abaaa7220a03927ab8bfe6de165e8ba25c3a3505c58c566c08d797324",
+ "content_digest": "sha256:abcbf60e499d4652245f27a71045d4607069b259b0f4f7164eea7b17a6c910d5",
  "correctness": "PASS",
  "coverage": {
   "_note": "A partial matrix credits nothing. Dropping the cell a change hurts is the cheapest way to raise a score, and a rule that stops a drop from PAYING removes the incentive rather than policing it.",
@@ -361,10 +361,10 @@
   },
   "credited_gap_closed": 0.0,
   "gap_closed": -0.0056093994004775905,
-  "resolution_rule": "the weighted lower bound of the paired bootstrap must clear the weighted per-cell noise floor. TWO quantities, not one: an interval alone does not say an effect is bigger than the noise -- with enough repeats a tiny thermal bias becomes significant -- and a floor alone does not say the effect is real. Cells that did not individually resolve contribute zero and are named.",
-  "resolved": false
+  "resolution_rule": "over the cells that resolved on their own, the weighted lower bound of the paired bootstrap must clear their weighted noise floor (or the upper bound fall below minus it). TWO quantities, not one: an interval alone does not say an effect is bigger than the noise -- with enough repeats a tiny thermal bias becomes significant -- and a floor alone does not say the effect is real. Cells that did not resolve contribute zero, are named, and do not block the others.",
+  "resolved": true
  },
- "status": "UNRESOLVED",
+ "status": "NO_GAIN",
  "supersede_reason": null,
  "supersedes": [],
  "timestamp_utc": "2026-09-14T02:46:20.239979+00:00"

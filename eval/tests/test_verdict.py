@@ -361,7 +361,7 @@ class TestTheAuditRunsFromTheCli(unittest.TestCase):
                             str(RECEIPT), "--label-only"],
                            capture_output=True, text=True, timeout=300)
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout.strip(), "burnish:unresolved")
+        self.assertEqual(r.stdout.strip(), "burnish:no-gain")
 
 
 if __name__ == "__main__":

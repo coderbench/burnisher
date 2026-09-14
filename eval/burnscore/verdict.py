@@ -100,7 +100,9 @@ OUTCOMES = {
         "Rejected. Nothing can be attributed to a change against a baseline that does not "
         "produce the same bytes twice."),
     "BUILD_FAIL": ("the submission did not build", "Not evaluated."),
-    "EVAL_ERROR": ("the evaluator failed", "Not the submission's fault; it will be re-run."),
+    "EVAL_ERROR": ("the evaluator failed",
+                   "Not the submission's fault. Retried automatically, up to three times for the "
+                   "same commit, and again whenever a new commit is pushed."),
 }
 
 # Outcomes that are not a receipt status, because they are properties of the LEDGER rather than
@@ -114,6 +116,7 @@ COPYCAT = "COPYCAT"
 COPYCAT_REVIEW = "COPYCAT_REVIEW"
 BLOCKED = "BLOCKED"
 REREGISTERED = "REREGISTERED"
+NO_CANDIDATE = "NO_CANDIDATE"
 
 EXTRA_OUTCOMES = {
     COPYCAT: (
@@ -134,29 +137,36 @@ EXTRA_OUTCOMES = {
         "baseline, which never runs the kernel already registered, so it would be credited with a "
         "gain that already landed. Different constants are a variant, not a re-registration."),
     COPYCAT_REVIEW: (
-        "measured, but part of it matches earlier work by someone else",
+        "measured, but part of it matches an open pull request by someone else",
         "Measured and not yet paid. Part of this submission matches an open pull request by a "
-        "different author, or it contains most of one -- which a branch stacked on somebody "
-        "else's unmerged work also does. Only a person can tell those apart, so a maintainer "
-        "decides; clearing it lets the result stand."),
+        "different author, it contains most of one, or it is built on one's unmerged commits. "
+        "Only a person can tell whether that is fair, so a maintainer decides; clearing it has "
+        "the submission measured again and paid like any other."),
+    NO_CANDIDATE: (
+        "there is no single new kernel to measure",
+        "Not evaluated. The validator measures the kernel a submission registers under a new "
+        "name against `cuda`, in one binary. This one registers none -- a change to an existing "
+        "kernel would be measured against itself -- or registers several and its description "
+        "does not name the one to measure. Push a kernel, or name it, and it is evaluated."),
     NEEDS_REBASE: (
-        "measured against a baseline that has since moved",
-        "Not a rejection and not a judgement of the work. It was measured in the same round as "
-        "a submission that closed more of the gap and was merged, so its baseline no longer "
-        "exists. Gains do not compose -- the ledger compounds toward the ceiling, and two wins "
-        "can overlap entirely -- so only one submission per round can be credited against a "
-        "known baseline. Rebase and it is re-measured."),
+        "its gain was measured against a baseline that is about to move",
+        "Not a rejection and not a judgement of the work. Its gain resolved, but a larger gain "
+        "measured in the same round was picked to merge, so its baseline is about to move. Gains "
+        "do not compose -- the ledger compounds toward the ceiling, and two wins can overlap "
+        "entirely -- so only one submission per round can be credited against a known baseline. "
+        "Push a rebase and it is measured again."),
     MERGE_FIRST: (
         "the best verified gain of its round",
-        "The largest credited gap-closed among the submissions measured in one round. At most "
-        "one per round can be merged, because everything else in it was measured against the "
-        "baseline this one is about to move."),
+        "The largest credited gap-closed among the submissions measured in one round, added "
+        "beside its paid label. At most one per round can be merged, because every other gain in "
+        "it was measured against the baseline this one is about to move."),
 
     HELD: (
         "an independent re-measurement disagrees beyond the noise floor",
-        "Held, not rejected. Two receipts for this submission disagree by more than the cell's "
-        "own floor, so at least one of them is wrong and nobody yet knows which. A score no "
-        "one else can reproduce does not pay."),
+        "Held, not rejected. A re-measurement on another card disagrees with this submission's "
+        "receipt by more than the cell's own floor, so one of them is wrong and nobody yet knows "
+        "which. A score no one else can reproduce does not pay. A further measurement that agrees "
+        "with the receipt releases it, and the paid label comes back."),
     CELL_OPENED: (
         "a new cell was opened",
         "Paid as cartography. Landing a new cell -- its reference, its calibration, its "
@@ -183,8 +193,8 @@ PALE = "C5DEF5"        # we could not tell
 RED = "B60205"         # rejected on correctness
 AMBER = "FBCA04"       # rejected on a guard
 PURPLE = "8250DF"      # disputed
-GREY = "BFD4F2"        # not evaluated
-ORANGE = "F9A825"      # the evaluator's own fault
+GREY = "D4D4D4"        # not evaluated
+ORANGE = "D93F0B"      # the evaluator's own fault
 
 COLORS = {
     "NEEDS_REBASE": AMBER,
@@ -203,6 +213,7 @@ COLORS = {
     "COPYCAT": AMBER,
     "BLOCKED": AMBER,
     "REREGISTERED": AMBER,
+    "NO_CANDIDATE": GREY,
     "COPYCAT_REVIEW": PURPLE,
     "BUILD_FAIL": ORANGE,
     "EVAL_ERROR": ORANGE,

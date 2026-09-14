@@ -6,10 +6,10 @@ What is real here and what is not. Read this before spending a week on anything.
 
 | | |
 |:--|--:|
-| sustained memory bandwidth | 1506.7 GB/s |
-| bf16 GEMM through cuBLAS | 236.9 TFLOPS |
+| sustained memory bandwidth | 1510.0 GB/s |
+| bf16 GEMM through cuBLAS | 243.9 TFLOPS |
 | replays of the bf16 CUDA pipeline | byte-identical |
-| CUDA stages vs the reference (VAE vs the CPU oracle) | agree to between 1.7e-07 and 5.2e-05 |
+| CUDA stages vs the reference (VAE vs the CPU oracle), one run, not kept as data | agree to between 1.7e-07 and 5.2e-05 |
 | reference latents, 4 prompts, fp32 and bf16 | committed |
 | BG-1 fp32 gate drift on a second card | reproduces the anchor card's |
 
@@ -58,6 +58,13 @@ so self-consistency tests passed every one. Comparing against the reference foun
   because the check only compared BG-1's generation with `configs/`.
 - A frontier gain with no speedup would have been labelled `burnish:gap+0.0000`, which reads as
   paid while paying nothing.
+- Rounds measured `cuda` against `cuda`: nothing read which kernel a pull request registered.
+- A labelled pull request was never evaluated again, so a rebase, a fix or a retry went unmeasured,
+  and `needs-rebase` replaced the labels of results that had not paid.
+- An untouched noisy cell could keep a real gain elsewhere from resolving, and could make it look
+  overfit at the held-out shape.
+- A credit held in the ledger stayed paid on the pull request's label.
+- `peak_vram_bytes` was host RSS on CUDA runs too.
 
 **Left in on purpose:** the sampler rounds a ~300-magnitude value to bf16. Fixing it would make the
 runtime more accurate than the reference, so the gate would reject it
@@ -73,7 +80,7 @@ one layer) until they separate.
 - **What narrower weights are worth.** One DiT step costs 3.266 s at fp32 and 3.576 s at bf16.
   Halving the bytes made it slower, so the step isn't limited by memory speed yet.
 - **Many submissions at once.** One submission costs ~24 min (gate candidate 7.2, bench 17.1; the
-  base gate is cached per commit). `burnish screen` reports SCORE_COST as FAIL, at
+  base gate is cached per commit). `tools/burnish screen` reports SCORE_COST as FAIL, at
   31 modelled-from-measurement minutes against a 30-minute budget. Queueing is unmeasured.
 - **BG-2 (512px) is anchored, but its gate is loose.** Its anchor (two sessions), reference
   latents and a measured tolerance are committed. Its fp32 drift against the reference grows
@@ -85,17 +92,22 @@ one layer) until they separate.
   original, and a block is automatic, so a wrong one waits for a maintainer.
 - **How the re-registration guard does on real submissions.** It is tested on this repository's
   registry only. A copy that changes a kernel just enough to fall under 95% similarity is clear.
+- **Device memory on a CUDA run.** `peak_vram_bytes` now reports the device allocator's high-water
+  mark. That path only compiles in the CUDA build and has not run on a GPU yet, and the peak
+  memory recorded in the committed anchors is host RSS.
 - **Launch overhead vs raw compute.** The ceiling treats both kinds of win the same. That is a
   choice.
 
 ## The first scored run
 
-`cuda-tile1024`, a change nobody expected to win. It was slower, credited zero, correctly left one
-cell unresolved, and found the CPU-fallback bug above. `examples/README.md`.
+`cuda-tile1024`, a change nobody expected to win. It was measurably slower (`NO_GAIN` under today's
+rules), credited zero, correctly left one cell unresolved, and found the CPU-fallback bug above.
+`examples/README.md`.
 
 ## Easy to get wrong later
 
-- `peak_vram_bytes` is host RSS on a CPU build and must be the device high-water mark on CUDA.
+- `peak_vram_bytes` is host RSS on a CPU run and the device allocator's high-water mark on a CUDA
+  run. Never compare one with the other.
 - The position embedding is sin-then-cos, the timestep embedding cos-then-sin. Both are required.
 - A tolerance is part of a generation. Changing it means a new generation.
 - A noise floor and the bench it judges must use the same warmup and iteration counts.

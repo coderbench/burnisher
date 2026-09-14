@@ -6,18 +6,22 @@
 
 - [ ] **Kernel** — registered under a new name beside the existing one
 - [ ] **New cell** — see `docs/CARTOGRAPHY.md`
-- [ ] **Instrument** — touches `eval/`, `configs/`, `schemas/` or `tools/burnish` (not scored)
+- [ ] **Instrument** — touches `eval/`, `configs/`, `schemas/`, `tools/burnish`, `scripts/`, `.github/`
+      or `.gittensor/` (not scored)
 - [ ] **Docs / build / other**
 
 ## For a kernel
 
 **Implementation name:** `<name>`
 
+<!-- The validator measures the new kernel name this PR registers. The field is read only when the
+PR registers more than one new name. -->
+
 - [ ] `burnisher info` lists it
 - [ ] `scripts/check.sh` passes
 
 Optional — the validator measures every submission. If you measured it on an RTX 5090, paste the
-`burnish score` summary. Never type a number by hand.
+`tools/burnish score` summary. Never type a number by hand.
 
 ```
 ```

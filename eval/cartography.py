@@ -119,10 +119,25 @@ def check(generation_name, *, base, repo=None, root=None, verbose=True) -> dict:
     ok("it declares at least one cell that does not already exist", bool(novel),
        f"new: {', '.join(novel) or 'none'}")
 
+    # 2b. It is not a held-out shape. The held-out resolutions are what the bench draws AFTER a
+    #     candidate is frozen; publishing one as a cell hands every contributor the shape the guard
+    #     relies on them not having tuned for.
+    held = set((json.loads((ROOT / "configs" / "axes.json").read_text()).get("held_out") or {})
+               .get("resolutions") or [])
+    clash = sorted(cid for cid in proposed
+                   if len(cid.split("/")) > 1 and cid.split("/")[1].isdigit()
+                   and int(cid.split("/")[1]) in held)
+    ok("no cell is at a held-out resolution", not clash,
+       f"held out: {sorted(held)}; clashing: {', '.join(clash) or 'none'}")
+
     # 3. The ceiling is recomputed here, from the BASE configs, and must match what was submitted.
     #    A submission that could pick its own ceiling could pick its own denominator, and every
     #    gap-closed score in the cell forever after would be measured against it.
-    recomputed = local_ceilings(doc)
+    try:
+        recomputed = local_ceilings(doc)
+    except ValueError as exc:
+        recomputed = {}
+        ok("its model is one the base can recompute ceilings for", False, str(exc))
     mismatched = []
     for c in doc.get("cells", []):
         want = (recomputed.get(c["id"]) or {}).get("ceiling_seconds")

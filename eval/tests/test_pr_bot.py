@@ -65,6 +65,69 @@ class TestTheBotDecidesNothingItself(unittest.TestCase):
         self.assertIn("not evidence about a particular commit", body)
 
 
+def _pr(labels=(), head="a" * 40, body=""):
+    return {"number": 5, "headRefOid": head, "body": body, "labels": [{"name": n} for n in labels]}
+
+
+class TestWhenAPullRequestIsEvaluatedAgain(unittest.TestCase):
+    def test_a_new_commit_is_evaluated_again_whatever_its_label(self):
+        for label in ("burnish:needs-rebase", "burnish:build-fail", "burnish:unresolved",
+                      "burnish:reregistered", "burnish:no-candidate"):
+            self.assertTrue(B.needs_evaluation(_pr([label], head="b" * 40), {"head": "a" * 40}), label)
+            self.assertFalse(B.needs_evaluation(_pr([label]),
+                                                {"head": "a" * 40,
+                                                 "body_sha256": B._body_sha(_pr())}), label)
+
+    def test_an_evaluator_error_is_retried_a_bounded_number_of_times(self):
+        rec = {"head": "a" * 40, "attempts": B.MAX_ATTEMPTS - 1}
+        self.assertTrue(B.needs_evaluation(_pr([B.EVAL_ERROR]), rec))
+        self.assertFalse(B.needs_evaluation(_pr([B.EVAL_ERROR]), dict(rec, attempts=B.MAX_ATTEMPTS)))
+
+    def test_a_copy_waits_for_a_maintainer_not_a_push(self):
+        self.assertFalse(B.needs_evaluation(_pr([B.COPYCAT], head="b" * 40), {"head": "a" * 40}))
+        self.assertTrue(B.needs_evaluation(_pr([B.COPYCAT, B.CLEARED]), {"head": "a" * 40}))
+        self.assertTrue(B.needs_evaluation(_pr([B.COPYCAT_REVIEW, B.CLEARED]), {"head": "a" * 40}))
+        self.assertTrue(B.needs_evaluation(_pr([B.REREGISTERED, B.REREGISTRATION_CLEARED]),
+                                           {"head": "a" * 40}))
+
+    def test_naming_the_kernel_in_the_description_is_enough(self):
+        rec = {"head": "a" * 40, "body_sha256": B._body_sha(_pr())}
+        self.assertTrue(B.needs_evaluation(_pr([B.NO_CANDIDATE], body="**Implementation name:** `x`"),
+                                           rec))
+
+    def test_a_label_with_no_record_is_left_alone(self):
+        self.assertFalse(B.needs_evaluation(_pr(["burnish:unresolved"]), None))
+        self.assertTrue(B.needs_evaluation(_pr(), None))
+
+
+class TestWhichKernelIsMeasured(unittest.TestCase):
+    class Args:
+        impl_candidate = ""
+
+    def test_the_one_new_name_is_the_candidate(self):
+        impl, _ = B.candidate_impl({"candidate_names": ["flash-sm120"]}, _pr(), self.Args())
+        self.assertEqual(impl, "flash-sm120")
+
+    def test_no_new_name_is_not_measured(self):
+        impl, why = B.candidate_impl({"candidate_names": []}, _pr(), self.Args())
+        self.assertIsNone(impl)
+        self.assertIn("measured against itself", why)
+
+    def test_several_names_need_the_description_and_only_among_those_names(self):
+        rr = {"candidate_names": ["a", "b"]}
+        self.assertIsNone(B.candidate_impl(rr, _pr(), self.Args())[0])
+        self.assertEqual(B.candidate_impl(rr, _pr(body="**Implementation name:** `b`"),
+                                          self.Args())[0], "b")
+        self.assertIsNone(B.candidate_impl(rr, _pr(body="**Implementation name:** `cuda`"),
+                                           self.Args())[0],
+                          "the description picked a kernel the pull request does not register")
+
+    def test_the_bot_measures_the_detected_kernel_not_cuda(self):
+        src = (ROOT / "eval" / "pr_bot.py").read_text()
+        self.assertIn('"--impl-candidate", impl,', src)
+        self.assertNotIn('"--impl-candidate", required=False, default="cuda"', src)
+
+
 class TestTheInstrumentSkipNote(unittest.TestCase):
     def test_it_says_skipped_not_rejected_and_points_at_cartography(self):
         """A contributor who reads 'rejected' stops. One who reads 'separated' resubmits.

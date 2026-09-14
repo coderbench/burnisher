@@ -74,6 +74,12 @@ class TestReregistration(unittest.TestCase):
         self.assertEqual(v["outcome"], "REREGISTERED")
         self.assertEqual(v["findings"][0]["matches"]["name"], "cuda")
 
+    def test_the_new_names_are_reported_as_what_the_candidate_arm_can_run(self):
+        v = RR.judge(candidate('register_impl<ModulateArgs>("modulate", "fast", fastmod_cuda, "f");',
+                               renamed_modulate(modify=True)), BASE)
+        self.assertEqual(v["candidate_names"], ["fast"])
+        self.assertEqual(RR.judge(BASE, BASE)["candidate_names"], [])
+
     def test_a_new_tile_width_is_a_variant_not_a_reregistration(self):
         """cuda-tile64 and cuda-tile1024 exist to measure exactly this kind of difference."""
         v = RR.judge(candidate('register_impl<AttentionArgs>("attention", "cuda-tile512", '

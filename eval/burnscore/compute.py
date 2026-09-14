@@ -251,25 +251,36 @@ def compute(generation, records, *, held_out_records=None, allow_partial=False,
     regressed = sorted(c for c, v in per_cell.items()
                        if v["resolved"] and v["gap_closed"] < 0)
 
-    # The submission-level interval is the weighted combination of the per-cell intervals'
-    # endpoints. It is deliberately conservative: a submission qualifies only if the aggregate
-    # lower bound clears the weighted floor, and no cell may be unresolved and still credited.
+    # The submission-level interval, reported over every cell: the honest range of the measured
+    # figure.
     w = {c: generation.cell(c).weight for c in per_cell}
     tw = sum(w.values()) or 1.0
     lower = sum(per_cell[c]["confidence_interval"]["lower"] * w[c] for c in per_cell) / tw
     upper = sum(per_cell[c]["confidence_interval"]["upper"] * w[c] for c in per_cell) / tw
-    weighted_floor = sum(per_cell[c]["floor_as_gap_closed"] * w[c] for c in per_cell) / tw
+
+    # Whether the submission RESOLVED is decided over the cells that resolved on their own. An
+    # unresolved cell is credited zero above, and it must not decide resolution either: an
+    # untouched cell can never resolve, and counting its interval let one noisy untouched cell
+    # hide a real gain elsewhere -- the blocking that crediting it at zero exists to prevent.
+    # A resolved regression IS counted, so a gain has to clear a real loss beside it. Two-sided,
+    # like each cell: a combination clearly below minus the floor is resolved too, as no gain.
+    res = [c for c in per_cell if per_cell[c]["resolved"]]
+    res_lower = sum(per_cell[c]["confidence_interval"]["lower"] * w[c] for c in res) / tw
+    res_upper = sum(per_cell[c]["confidence_interval"]["upper"] * w[c] for c in res) / tw
+    res_floor = sum(per_cell[c]["floor_as_gap_closed"] * w[c] for c in res) / tw
     interval = {
         "lower": lower, "upper": upper, "level": generation.confidence_level,
-        "weighted_floor_as_gap_closed": weighted_floor,
-        "resolved": lower > weighted_floor,
+        "resolved_cells_lower": res_lower, "resolved_cells_upper": res_upper,
+        "weighted_floor_as_gap_closed": res_floor,
+        "resolved": bool(res) and (res_lower > res_floor or res_upper < -res_floor),
         "cells_unresolved": sorted(c for c, v in per_cell.items() if not v["resolved"]),
         "cells_regressed": regressed,
-        "rule": ("the weighted lower bound of the paired bootstrap must clear the weighted "
-                 "per-cell noise floor. TWO quantities, not one: an interval alone does not say "
-                 "an effect is bigger than the noise -- with enough repeats a tiny thermal bias "
-                 "becomes significant -- and a floor alone does not say the effect is real. "
-                 "Cells that did not individually resolve contribute zero and are named."),
+        "rule": ("over the cells that resolved on their own, the weighted lower bound of the paired "
+                 "bootstrap must clear their weighted noise floor (or the upper bound fall below "
+                 "minus it). TWO quantities, not one: an interval alone does not say an effect is "
+                 "bigger than the noise -- with enough repeats a tiny thermal bias becomes "
+                 "significant -- and a floor alone does not say the effect is real. Cells that did "
+                 "not resolve contribute zero, are named, and do not block the others."),
     }
 
     # The frontier is computed PER CELL, over that cell's own configurations, against that
@@ -319,7 +330,7 @@ def compute(generation, records, *, held_out_records=None, allow_partial=False,
 
     held = None
     if held_out_records:
-        held = _held_out_verdict(generation, held_out_records, agg["gap_closed"])
+        held = _held_out_verdict(generation, held_out_records, per_cell)
     return {"per_cell": per_cell, "aggregate": agg, "interval": interval, "frontier": fr,
             "coverage": coverage, "held_out": held, "regressed_cells": regressed}
 
@@ -339,15 +350,21 @@ class _BoundView:
         self.ceiling_seconds = cell.ceiling_seconds
 
 
-def _held_out_verdict(generation, held_out_records, published_gap):
+def _held_out_verdict(generation, held_out_records, per_cell):
     """Did the gain survive a shape the candidate was not tuned on?
 
     A kernel fast only on the benchmarked shape scores nothing. The held-out shape is chosen by
     the evaluator at run time, from the base commit, after the candidate is frozen -- which is
     what makes this a guard rather than a second benchmark to tune against.
+
+    Judged on the cells whose gain RESOLVED at the published shape, and nowhere else. An untouched
+    cell reads 0.999x or 1.001x by noise at any shape, and judging it would call a real kernel
+    overfit for a neighbour's noise. Each judged cell must still be faster at the held-out shape by
+    more than its own noise floor -- the same bar that let the published gain count.
     """
     grouped = group(held_out_records)
     cells = sorted({c for (c, _v) in grouped})
+    gaining = {c: v for c, v in per_cell.items() if v["resolved"] and v["gap_closed"] > 0}
     results = {}
     for cell_id in cells:
         base = grouped.get((cell_id, "base"), {})
@@ -358,18 +375,21 @@ def _held_out_verdict(generation, held_out_records, published_gap):
         bt = [float(base[k][0]["metrics"]["latency_s"]) for k in shared]
         ct = [float(cand[k][0]["metrics"]["latency_s"]) for k in shared]
         speedup = _geomean(bt) / _geomean(ct)
+        need = (1.0 + gaining[cell_id]["floor_pct"] / 100.0) if cell_id in gaining else None
         results[cell_id] = {"speedup": speedup, "repeats": len(shared),
+                            "judged": cell_id in gaining, "required_speedup": need,
                             "sign_test": sign_test(bt, ct)}
     if not results:
         return {"survived": None, "per_shape": {},
                 "why": "no held-out records were supplied; the guard did not run"}
-    worst = min(r["speedup"] for r in results.values())
-    # The published gain must not evaporate off-shape. A candidate that is 15% faster on the
-    # scored shape and 1% faster on a neighbouring one has tuned a shape, not written a kernel.
-    survived = (published_gap <= 0) or (worst >= 1.0)
-    return {"survived": survived, "worst_speedup": worst, "per_shape": results,
-            "why": ("the gain is present on a shape the candidate was not tuned on"
-                    if survived else
-                    f"the candidate is SLOWER on a held-out shape (worst {worst:.4f}x). A "
-                    f"kernel fast only on the benchmarked shape is a tuned constant, not a "
-                    f"contribution.")}
+    judged = {c: r for c, r in results.items() if r["judged"]}
+    failed = sorted(c for c, r in judged.items() if r["speedup"] < r["required_speedup"])
+    worst = min((r["speedup"] for r in judged.values()), default=None)
+    return {"survived": not failed, "worst_speedup": worst, "per_shape": results,
+            "cells_failed": failed,
+            "why": ("no cell's gain resolved, so there was nothing to overfit" if not judged else
+                    "every resolved gain is still faster than its own noise floor at a shape the "
+                    "candidate was not tuned on" if not failed else
+                    f"{', '.join(failed)} did not stay faster than its own noise floor at the "
+                    f"held-out shape (worst {worst:.4f}x). A kernel fast only on the benchmarked "
+                    f"shape is a tuned constant, not a contribution.")}

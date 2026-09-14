@@ -53,10 +53,15 @@ ROOT = Path(__file__).resolve().parent.parent
 
 LOCK_PATH = os.environ.get("BURNISH_ROUND_LOCK", "/tmp/burnish-round.lock")
 
-# Applied to every scored submission in a round except the winner.
+# Applied to every OTHER submission in a round whose gain would have paid, once a winner is picked.
 NEEDS_REBASE = f"{V.PREFIX}:needs-rebase"
-# The winner, when merging is not enabled. A label rather than a merge, so a human can look.
+# Added beside the winner's paid label when merging is not enabled, so a human can look.
 MERGE_FIRST = f"{V.PREFIX}:merge-first"
+# A credit the ledger holds because an independent re-measurement disagrees.
+HELD = f"{V.PREFIX}:held"
+# Outcomes that spend no GPU time, and so do not use up one of a round's slots.
+NOT_MEASURED = frozenset({"SKIPPED", "COPYCAT", "BLOCKED", "REREGISTERED", "NO_CANDIDATE",
+                          "DRY_RUN"})
 
 def _round_cost():
     """What a submission costs, from the artifact rather than a constant in this file.
@@ -121,23 +126,24 @@ def open_prs_fifo(repo) -> list:
     ordering that needs no judgement.
     """
     r = B.gh(["pr", "list", "-R", repo, "--state", "open", "--limit", "100",
-              "--json", "number,headRefOid,headRefName,labels,title,author,createdAt"])
+              "--json", "number,headRefOid,headRefName,labels,title,author,body,createdAt"])
     prs = json.loads(r.stdout)
     return sorted(prs, key=lambda p: p["createdAt"])
 
 
-def select(prs, slots) -> tuple:
-    """Which pull requests this round takes, and which wait for the next one.
+def select(prs, last=lambda num: None) -> list:
+    """The pull requests due for evaluation, in queue order.
 
-    A submission that already carries an outcome is not re-measured -- the label is keyed to a
-    commit, and re-scoring an unchanged one spends GPU time to re-derive the same number.
+    Not "every unlabelled pull request": a label is kept through a push, so a PR is due again when
+    its head is not the commit its outcome was for (`pr_bot.needs_evaluation` has the rules). An
+    unchanged commit with an outcome is not re-measured -- that spends GPU time to re-derive the
+    same number.
 
-    Slots count only submissions that will be MEASURED. A pull request the guard skips costs
-    nothing, so letting it consume a slot would mean a round of five instrument edits displaced
-    five real submissions for no measurement at all.
+    Slots are not applied here. They count only submissions that are MEASURED, and whether a pull
+    request is measured is known only once its guards have run, so `run` keeps taking from this
+    list until its slots are spent.
     """
-    fresh = [p for p in prs if not B.already_labelled(p)]
-    return fresh[:slots], fresh[slots:]
+    return [p for p in prs if B.needs_evaluation(p, last(p["number"]))]
 
 
 def decide_winner(results):
@@ -170,16 +176,64 @@ def _rebase_note(num, winner, results) -> str:
         f"### `{NEEDS_REBASE}`\n\n"
         f"This was measured in the same round as #{winner}, which closed a larger fraction of "
         f"the remaining gap (`{w['payout_fraction']:+.4f}` against your "
-        f"`{next(r['payout_fraction'] for r in results if r['pr'] == num):+.4f}`) and has been "
-        f"merged.\n\n"
+        f"`{next(r['payout_fraction'] for r in results if r['pr'] == num):+.4f}`) and was "
+        f"picked to merge.\n\n"
         f"**Your result is not wrong — it is a measurement of a baseline that no longer "
         f"exists.** Gains do not compose: the ledger compounds toward the ceiling, so two "
         f"submissions each closing 20% of the remaining gap close 36% together rather than 40%. "
         f"And two wins can overlap entirely — fused AdaLN and CUDA-graph capture both attack "
         f"launch overhead, so a gain measured against the old `main` can be worth nothing once "
         f"another has landed.\n\n"
-        f"Rebase onto `main` and it will be re-measured in a later round. Nothing is lost; the "
-        f"number simply has to be against the baseline that now exists.")
+        f"Push a rebase onto `main` once it has merged and this is measured again in a later "
+        f"round. Nothing is lost; the number simply has to be against the baseline that exists.")
+
+
+def hold_changes(history, labelled) -> tuple:
+    """Which pull requests to put on hold and which to release, from the ledger's history.
+
+    A pull request's latest canonical receipt decides: an older receipt for a commit it has since
+    replaced says nothing about the credit it carries now.
+    """
+    latest = {}
+    for h in history:                          # oldest first
+        if h.get("pr") is not None:
+            latest[h["pr"]] = h
+    hold = sorted(pr for pr, h in latest.items() if h["held"] and pr not in labelled)
+    release = sorted(pr for pr in labelled if pr in latest and not latest[pr]["held"])
+    return hold, release, latest
+
+
+def sync_holds(args) -> dict:
+    """Put the ledger's holds where payment reads them: on the pull request's label.
+
+    A hold that lived only in the ledger paid anyway, because a merged pull request keeps its
+    `burnish:gap+N` label and that label is what is paid. So a held credit REPLACES the paid label
+    with `burnish:held`, and a released one gets the receipt's own label back.
+    """
+    from burnscore import cells as C, ledger as L
+    gpath = ROOT / "eval" / "cells" / args.generation / "generation.json"
+    if not args.ledger or not gpath.exists():
+        return {"held": [], "released": []}
+    gen = C.load(gpath, calibration=args.calibration or None)
+    cur = L.update_current(args.ledger, args.generation, gen)
+    r = B.gh(["pr", "list", "-R", args.repo, "--state", "all", "--label", HELD,
+              "--limit", "500", "--json", "number"])
+    hold, release, latest = hold_changes(cur["history"], {p["number"] for p in json.loads(r.stdout)})
+    for pr in hold:
+        B.set_label(args.repo, pr, HELD, color=V.COLORS["HELD"],
+                    description=V.ALL_OUTCOMES["HELD"][0], dry_run=args.dry_run)
+        B.comment(args.repo, pr, f"### `{HELD}`\n\n{V.ALL_OUTCOMES['HELD'][1]}\n\n"
+                                 f"{latest[pr].get('held_because') or ''}", dry_run=args.dry_run)
+    for pr in release:
+        rec = json.loads(L.receipt_path(args.ledger, args.generation,
+                                        latest[pr]["receipt"]).read_text())
+        v = V.verdict(rec)
+        B.set_label(args.repo, pr, v["label"], color=V.color_for(rec),
+                    description=v["headline"], dry_run=args.dry_run)
+        B.comment(args.repo, pr, f"### hold released: `{v['label']}`\n\nFurther measurements "
+                                 f"agree with this submission's receipt, so its credit stands.",
+                  dry_run=args.dry_run)
+    return {"held": hold, "released": release}
 
 
 def run(args) -> dict:
@@ -192,19 +246,27 @@ def run(args) -> dict:
               f"      Rounds will overlap, and the lock will make the next one skip. Lower "
               f"--slots.")
 
+    try:
+        holds = sync_holds(args)
+        if holds["held"] or holds["released"]:
+            print(f"   holds: {holds['held']} held, {holds['released']} released")
+    except Exception as exc:                         # a hold sync must not stop the round
+        print(f"   !! could not sync holds: {exc}", file=sys.stderr)
+
     prs = open_prs_fifo(args.repo)
     args.open_prs = [p["number"] for p in prs]          # the copycat guard's references
-    taken, waiting = select(prs, args.slots)
-    print(f"   {len(prs)} open, {len(taken)} taken this round, {len(waiting)} waiting")
-    for p in taken:
+    due = select(prs, lambda num: B.last_evaluation(args, num))
+    print(f"   {len(prs)} open, {len(due)} due, measuring up to {args.slots}")
+    for p in due:
         # Printed because this is the freeze: later pushes cannot reach this measurement.
         print(f"     #{p['number']:<5} {p['headRefOid'][:12]}  {p['title'][:52]}")
-    if not taken:
-        return {"started": started, "evaluated": [], "winner": None,
-                "waiting": [p["number"] for p in waiting]}
+    if not due:
+        return {"started": started, "evaluated": [], "winner": None, "waiting": []}
 
-    results, scored = [], []
-    for p in taken:
+    results, scored, measured = [], [], 0
+    for p in due:
+        if measured >= args.slots:
+            break
         try:
             r = B.evaluate(args.repo, p, args)
         except Exception as exc:                     # one bad PR must not end the round
@@ -212,8 +274,11 @@ def run(args) -> dict:
             r = {"pr": p["number"], "outcome": "EVAL_ERROR", "error": str(exc)}
         r["head"] = p["headRefOid"]
         results.append(r)
+        if r.get("outcome") not in NOT_MEASURED:
+            measured += 1
         if r.get("payout_fraction") is not None:
             scored.append(r)
+    waiting = [p["number"] for p in due[len(results):]]
 
     winner = decide_winner(scored)
     merged = None
@@ -226,13 +291,14 @@ def run(args) -> dict:
             merged = winner["pr"] if merge(args.repo, winner["pr"],
                                            dry_run=args.dry_run) else None
         else:
-            B.set_label(args.repo, winner["pr"], MERGE_FIRST, color=V.GREEN,
+            B.add_label(args.repo, winner["pr"], MERGE_FIRST, color=V.GREEN,
                         description="best verified gain of its round", dry_run=args.dry_run)
             print("   labelled, not merged (--merge is off)")
 
-        # Everyone else measured against a baseline that is about to move, or already has.
+        # Every other GAIN was measured against a baseline that is about to move. A result that
+        # did not pay keeps its own label: it was not a gain against either baseline.
         for r in scored:
-            if r["pr"] == winner["pr"]:
+            if r["pr"] == winner["pr"] or not r.get("payout_fraction", 0) > 0:
                 continue
             B.set_label(args.repo, r["pr"], NEEDS_REBASE, color=V.AMBER,
                         description="measured against a baseline that has since moved",
@@ -243,7 +309,7 @@ def run(args) -> dict:
     return {"started": started, "finished": time.strftime("%FT%TZ", time.gmtime()),
             "slots": args.slots, "evaluated": results,
             "winner": winner["pr"] if winner else None, "merged": merged,
-            "waiting": [p["number"] for p in waiting]}
+            "waiting": waiting}
 
 
 def main():
@@ -270,7 +336,9 @@ def main():
     ap.add_argument("--copycat-corpus", default=os.environ.get("BURNISH_COPYCAT_CORPUS", ""),
                     help="append-only copycat observation record; defaults to <ledger>/copycat")
     ap.add_argument("--impl-base", default="cuda")
-    ap.add_argument("--impl-candidate", default="cuda")
+    ap.add_argument("--impl-candidate", default="",
+                    help="force the candidate arm's implementation. Normally empty: it is the new "
+                         "kernel name each pull request registers.")
     ap.add_argument("--timeout", type=int, default=7200)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--json")

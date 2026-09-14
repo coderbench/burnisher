@@ -167,23 +167,28 @@ def status_for(root, generation_name, receipt_id, canonical, generation) -> dict
     """Whether this submission's credit stands, and why.
 
     Called by the ledger before compounding. A HELD submission credits nothing until the
-    disagreement is resolved -- by a third measurement, or by a superseding receipt that says
-    what went wrong.
+    disagreement is resolved -- by further measurements on other cards, or by a superseding receipt
+    that says what went wrong. The canonical receipt counts as one measurement: the credit stands
+    only while the measurements that agree with it outnumber the ones that do not, so one
+    disagreement holds it and a third measurement that agrees with the canonical one releases it.
     """
     challenges = load_challenges(root, generation_name, receipt_id)
     if not challenges:
         return {"held": False, "challenges": 0, "confirmations": 0, "disagreements": []}
     results = [(box, disagreement(canonical, c, generation)) for box, c in challenges]
     bad = [{"box": box, **d} for box, d in results if not d["agree"]]
+    confirmations = sum(1 for _, d in results if d["agree"])
+    held = len(bad) >= 1 + confirmations
     return {
-        "held": bool(bad),
+        "held": held,
         "challenges": len(results),
-        "confirmations": sum(1 for _, d in results if d["agree"]),
+        "confirmations": confirmations,
         "disagreements": bad,
         "_why_held": (
-            "At least one independent re-measurement disagrees with the canonical receipt by "
-            "more than the cell's own noise floor. One of them is wrong and the ledger does not "
-            "know which, so the credit is held rather than paid or withdrawn. A third "
-            "measurement breaks the tie."
-        ) if bad else None,
+            "Independent re-measurements that disagree with the canonical receipt by more than "
+            "the cell's own noise floor are at least as many as the measurements that agree with "
+            "it. One side is wrong and the ledger does not know which, so the credit is held "
+            "rather than paid or withdrawn. A further measurement on another card that agrees "
+            "with the canonical receipt releases it; a superseding receipt corrects it."
+        ) if held else None,
     }
