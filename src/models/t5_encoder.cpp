@@ -4,7 +4,12 @@
 // sentence matter: it is nearly the whole model and nearly none of the wall clock, which is why
 // its cells are on the memory axis of the frontier rather than the latency one.
 #include <cmath>
+#include <cstring>
+#include <map>
+#include <mutex>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 #include "burnisher/models.h"
 
@@ -42,6 +47,26 @@ int t5_relative_bucket(int relative_position, int num_buckets, int max_distance)
 }
 
 namespace {
+
+// The bucket of every (query, key) pair, once per sequence length. It depends on nothing else, and
+// recomputing it -- a logarithm per pair -- was part of what made a text encode spend as long on
+// the host as on the GPU.
+const std::vector<int>& relative_buckets(int64_t seq, int num_buckets) {
+    using Key = std::pair<int64_t, int>;
+    static std::map<Key, std::vector<int>>* tables = new std::map<Key, std::vector<int>>();
+    static std::mutex m;
+    std::lock_guard<std::mutex> lock(m);
+    auto it = tables->find({seq, num_buckets});
+    if (it != tables->end()) return it->second;
+    std::vector<int> t(static_cast<size_t>(seq * seq));
+    for (int64_t q = 0; q < seq; ++q) {
+        for (int64_t k = 0; k < seq; ++k) {
+            t[q * seq + k] = t5_relative_bucket(static_cast<int>(k - q), num_buckets, 128);
+        }
+    }
+    return tables->emplace(Key{seq, num_buckets}, std::move(t)).first->second;
+}
+
 }  // namespace
 
 T5Encoder::T5Encoder(T5Config cfg, const WeightSource& w, DType compute)
@@ -90,11 +115,30 @@ Tensor T5Encoder::forward(const Tensor& token_ids, const ImplSelection& impls) c
             "encoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight");
         Tensor rel = (rel_dev.device() == Device::CUDA) ? rel_dev.to_host() : rel_dev;
         const int buckets = static_cast<int>(rel.dim(0));
-        for (int64_t q = 0; q < S; ++q) {
-            for (int64_t k = 0; k < S; ++k) {
-                const int b = t5_relative_bucket(static_cast<int>(k - q), buckets, 128);
-                for (int h = 0; h < cfg_.num_heads; ++h) {
-                    bias.set((h * S + q) * S + k, rel.get(b * cfg_.num_heads + h));
+        const std::vector<int>& bucket = relative_buckets(S, buckets);
+        const int64_t heads = cfg_.num_heads;
+        if (rel.dtype() == bias.dtype() &&
+            (bias.dtype() == DType::F32 || bias.dtype() == DType::BF16)) {
+            // The stored bytes, copied. Reading a value and storing it back in the same dtype is
+            // exact, so this is the table the scalar loop below builds, without a conversion per
+            // element: 5.8 million of them at 300 tokens and 64 heads.
+            const size_t unit = bias.dtype() == DType::F32 ? 4 : 2;
+            const char* src = static_cast<const char*>(rel.data());
+            char* dst = static_cast<char*>(bias.data());
+            for (int64_t h = 0; h < heads; ++h) {
+                for (int64_t q = 0; q < S; ++q) {
+                    for (int64_t k = 0; k < S; ++k) {
+                        std::memcpy(dst + ((h * S + q) * S + k) * unit,
+                                    src + (bucket[q * S + k] * heads + h) * unit, unit);
+                    }
+                }
+            }
+        } else {
+            for (int64_t q = 0; q < S; ++q) {
+                for (int64_t k = 0; k < S; ++k) {
+                    for (int64_t h = 0; h < heads; ++h) {
+                        bias.set((h * S + q) * S + k, rel.get(bucket[q * S + k] * heads + h));
+                    }
                 }
             }
         }
