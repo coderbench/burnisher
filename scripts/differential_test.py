@@ -329,6 +329,10 @@ def main():
         print("!! needs torch and diffusers -- the REFERENCE implementation, deliberately not a "
               "dependency of the runtime or the harness.", file=sys.stderr)
         return 2
+    # The reference runs with TF32 off, as when the pinned latents are made. Torch leaves cuDNN's
+    # TF32 on by default, which would let the oracle round differently from the one it pins.
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
 
     against = "diffusers (the reference)" if args.against == "reference" else \
               f"impl '{args.against}' (this runtime)"

@@ -182,6 +182,10 @@ def main():
     args.dtype = {"fp32": "float32", "bf16": "bfloat16",
                   "fp16": "float16"}.get(args.dtype, args.dtype)
     dtype = getattr(torch, args.dtype)
+    # The oracle runs with TF32 off. Torch leaves cuDNN's TF32 on by default, so without this the
+    # reference's convolutions could round differently from one torch build or card to the next.
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
 
     print(f"reference: {json.dumps(versions())}")
     print(f"checkpoint: {gen['model']['repo']} @ {gen['model']['revision'][:12]}")
@@ -209,6 +213,7 @@ def main():
                  "candidate that produced its own oracle would pass.",
         "generation": args.generation,
         "reference_versions": versions(),
+        "tf32": {"matmul": False, "cudnn": False},
         "checkpoint": {"repo": gen["model"]["repo"], "revision": gen["model"]["revision"],
                        "text_encoder_repo": gen["model"]["text_encoder_repo"],
                        "text_encoder_revision": gen["model"]["text_encoder_revision"]},
