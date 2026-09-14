@@ -152,8 +152,12 @@ std::string stats_json(const OutputStats& s) {
 
 // Minimal .npy v1.0. Enough for a contiguous little-endian fp32 tensor, which is all that
 // crosses this boundary; numpy on the other side does the rest.
-void write_npy(const std::string& path, const Tensor& t) {
+void write_npy(const std::string& path, const Tensor& where) {
     if (path.empty()) return;
+    // Written from wherever the tensor lives. The pipeline hands its pixels back on the device, and
+    // reading those element by element is a fault, so a device tensor is copied back first. Every
+    // command writes after its timer has stopped, so the copy is never inside a measurement.
+    const Tensor t = where.device() == Device::CUDA ? where.to_host() : where;
     std::ofstream out(path, std::ios::binary);
     if (!out) throw std::runtime_error("cannot write " + path);
     std::ostringstream hdr;
