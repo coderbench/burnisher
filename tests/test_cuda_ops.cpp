@@ -205,11 +205,9 @@ int main(int argc, char** argv) {
     register_builtin_cpu_ops();
     register_cuda_ops();
     std::vector<std::string> impls(argv + 1, argv + argc);
-    if (impls.empty()) impls = {"cuda-vendor", "cuda-sdpa"};
+    if (impls.empty()) impls = {"cuda", "cuda-sdpa"};
     for (const auto& impl : impls) {
-        if (impl != "cuda" && AttentionRegistry::instance().has(impl)) {
-            fused_attention_matches_the_oracle(impl);
-        }
+        if (impl == "cuda" || impl == "cuda-sdpa") fused_attention_matches_the_oracle(impl);
         for (DType dt : {DType::F32, DType::BF16}) {
             // cuda-sdpa refuses what the fused op cannot run, which is most of these shapes.
             if (impl != "cuda-sdpa" && AttentionRegistry::instance().has(impl)) {

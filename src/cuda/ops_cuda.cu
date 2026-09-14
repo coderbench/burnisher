@@ -5,17 +5,21 @@
 // `scripts/differential_test.py` does exactly that, and the CPU side is itself verified against
 // the reference implementation.
 //
-// These kernels are written to be CORRECT and READABLE, not fast. That is deliberate and it is
-// the whole premise of the repository: v0 ships a complete, slow pipeline and contributors make
-// it fast. Every one of them is a starting point with an obvious next move, and the obvious next
-// moves are the backlog:
+// `cuda` is what somebody generating an image runs, so it stands on the vendor libraries and is
+// within reach of PyTorch on the same card (`eval/cells/BG-1/pytorch-baseline.json`):
 //
-//   gemm        goes through cuBLAS with a SEPARATE bias-and-activation pass. Fusing that
-//               epilogue is `issues/fused-adaln.md` and is measurable the day it lands.
-//   attention   one block per (batch, head, query) with a streaming softmax. No tiling, no
-//               shared-memory staging, no tensor cores. `issues/dit-attention.md`.
-//   norm        one block per row, a naive shared-memory reduction.
-//   modulate    the canonical fusion target: two flops per element and a full round trip.
+//   attention   cuDNN's fused SDPA for the bf16 calls it can express exactly; cuBLAS scores and
+//               cuDNN's softmax, in float, for fp32, for T5's biased attention and for the rest.
+//   conv2d      cuDNN with a deterministic heuristic algorithm, computed in float.
+//   norm        GroupNorm reduced in fixed chunks; LayerNorm and RMSNorm one block per row.
+//   gemm        cuBLAS with a SEPARATE bias-and-activation pass. Fusing that epilogue is still
+//               open: `issues/fused-adaln.md`.
+//   modulate    unfused AdaLN modulation, the canonical fusion target.
+//
+// The ceiling is still well past all of it, and closing that gap is the work that is paid: kernels
+// written for this architecture and this card, fusion, fp8 and NVFP4. The first kernels, written to
+// be correct and readable rather than fast, stay registered under their own names -- `cuda-tiled`,
+// `cuda-direct`, `cuda-rowblock` -- as the CPU ones do.
 //
 // A contributor who beats any of them registers a new name and the harness measures the
 // difference in one process, one model load, one thermal state.
@@ -765,6 +769,18 @@ __global__ void k_from_float(const float* in, T* out, int64_t n) {
     }
 }
 
+// The rounding pass of a bf16 convolution, with the bias added on the way. Adding the bias as its
+// own full-resolution pass before rounding computed the same float sum and cost a tenth of the
+// VAE decode.
+template <typename T>
+__global__ void k_from_float_bias(const float* in, const float* bias, T* out, int64_t n,
+                                  int64_t channels, int64_t spatial) {
+    for (int64_t i = blockIdx.x * (int64_t)blockDim.x + threadIdx.x; i < n;
+         i += (int64_t)gridDim.x * blockDim.x) {
+        st(out, i, in[i] + bias[(i / spatial) % channels]);
+    }
+}
+
 template <typename T>
 __global__ void k_mask_and_bias(float* scores, const T* bias, const T* key_mask, int64_t n,
                                 int64_t kv_len, int64_t b) {
@@ -1167,12 +1183,18 @@ void conv2d_dnn(const Conv2dArgs& a) {
     const float one = 1.0f, zero = 0.0f;
     dnn_ok(cudnnConvolutionForward(dnn(), &one, p.x, x, p.w, w, p.conv, p.algo, workspace.data(),
                                    p.workspace, &zero, p.y, y), "convolution");
-    if (bias) dnn_ok(cudnnAddTensor(dnn(), &one, p.bias, bias, &one, p.y, y), "bias");
-    if (sizeof(T) != sizeof(float)) {
-        const int grid = (int)std::min<int64_t>(65535, (n_out + kBlock - 1) / kBlock);
-        k_from_float<T><<<grid, kBlock>>>(y, (T*)a.out->data(), n_out);
-        check_launch("conv2d round");
+    if (sizeof(T) == sizeof(float)) {
+        if (bias) dnn_ok(cudnnAddTensor(dnn(), &one, p.bias, bias, &one, p.y, y), "bias");
+        return;
     }
+    const int grid = (int)std::min<int64_t>(65535, (n_out + kBlock - 1) / kBlock);
+    if (bias) {
+        k_from_float_bias<T><<<grid, kBlock>>>(y, bias, (T*)a.out->data(), n_out, a.c_out,
+                                               h_out * w_out);
+    } else {
+        k_from_float<T><<<grid, kBlock>>>(y, (T*)a.out->data(), n_out);
+    }
+    check_launch("conv2d round");
 }
 
 void conv2d_cuda_dnn(const Conv2dArgs& a) {
@@ -1390,40 +1412,42 @@ void register_cuda_ops() {
     register_impl<GemmArgs>("gemm", "cuda", gemm_cuda,
                             "cuBLAS matmul with a SEPARATE bias/activation pass; fusing that "
                             "epilogue is issues/fused-adaln.md");
-    // Three tile sizes, registered as three names.
+    register_impl<AttentionArgs>("attention", "cuda", attention_cuda_vendor,
+                                 "cuDNN fused SDPA for bf16 without bias; cuBLAS scores and "
+                                 "cuDNN softmax in float otherwise -- issues/dit-attention.md");
+    register_impl<AttentionArgs>("attention", "cuda-sdpa", attention_cuda_sdpa,
+                                 "cuDNN fused SDPA only; refuses a call it cannot run");
+    // The first attention kernel at three tile sizes, registered as three names.
     //
     // This is what the registry is FOR, and it is the smallest honest demonstration of the whole
     // mechanism: three kernels that compute the same thing, differing in one constant, A/B'd in
     // one process against one another. The tile decides how much shared memory a block holds and
     // how many synchronisation points a row costs, and which one wins is a question for the
     // hardware rather than for an argument.
-    register_impl<AttentionArgs>("attention", "cuda", attention_cuda_tiled<256>,
+    register_impl<AttentionArgs>("attention", "cuda-tiled", attention_cuda_tiled<256>,
                                  "tiled online softmax, 256 keys per tile, deterministic; "
-                                 "no tensor cores -- issues/dit-attention.md");
-    register_impl<AttentionArgs>("attention", "cuda-vendor", attention_cuda_vendor,
-                                 "cuDNN fused SDPA for bf16 without bias; cuBLAS scores and "
-                                 "cuDNN softmax in float otherwise");
-    register_impl<AttentionArgs>("attention", "cuda-sdpa", attention_cuda_sdpa,
-                                 "cuDNN fused SDPA only; refuses a call it cannot run");
-    register_impl<NormArgs>("norm", "cuda-vendor", norm_cuda_vendor,
-                            "GroupNorm in fixed chunks, double sums; LayerNorm as cuda");
-    register_impl<Conv2dArgs>("conv2d", "cuda-vendor", conv2d_cuda_dnn,
-                              "cuDNN, deterministic heuristic algorithm, bias via cudnnAddTensor");
+                                 "no tensor cores");
     register_impl<AttentionArgs>("attention", "cuda-tile64", attention_cuda_tiled<64>,
                                  "the same kernel at 64 keys per tile: less shared memory, more "
                                  "synchronisation points per row");
     register_impl<AttentionArgs>("attention", "cuda-tile1024", attention_cuda_tiled<1024>,
                                  "the same kernel at 1024 keys per tile: fewer barriers, four "
                                  "times the shared memory, fewer blocks resident");
-    register_impl<NormArgs>("norm", "cuda", norm_cuda,
-                            "one block per row, naive shared-memory reduction, fp32 accumulators");
+    register_impl<NormArgs>("norm", "cuda", norm_cuda_vendor,
+                            "GroupNorm in fixed chunks with double sums; LayerNorm and RMSNorm "
+                            "one block per row");
+    register_impl<NormArgs>("norm", "cuda-rowblock", norm_cuda,
+                            "one block per row or group, naive shared-memory reduction, fp32 "
+                            "accumulators");
     register_impl<ModulateArgs>("modulate", "cuda", modulate_cuda,
                                 "unfused AdaLN modulation: a full activation round trip for two "
                                 "flops per element. THE fusion target");
     register_impl<ActivationArgs>("activation", "cuda", activation_cuda, "elementwise");
-    register_impl<Conv2dArgs>("conv2d", "cuda", conv2d_cuda,
-                              "direct convolution, one thread per output element; "
+    register_impl<Conv2dArgs>("conv2d", "cuda", conv2d_cuda_dnn,
+                              "cuDNN, deterministic heuristic algorithm, in float -- "
                               "issues/vae-decode.md");
+    register_impl<Conv2dArgs>("conv2d", "cuda-direct", conv2d_cuda,
+                              "direct convolution, one thread per output element");
     register_impl<AddArgs>("add", "cuda", add_cuda, "residual and broadcast add");
     register_impl<ChunkArgs>("chunk", "cuda", chunk_cuda, "AdaLN-single modulation chunks");
     register_impl<PatchArgs>("patch", "cuda", patch_cuda, "patchify and unpatchify");

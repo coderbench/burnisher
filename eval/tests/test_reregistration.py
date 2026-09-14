@@ -72,7 +72,7 @@ class TestReregistration(unittest.TestCase):
         v = RR.judge(candidate('register_impl<AttentionArgs>("attention", "fast", '
                                'attention_cuda_tiled<256>, "x");'), BASE)
         self.assertEqual(v["outcome"], "REREGISTERED")
-        self.assertEqual(v["findings"][0]["matches"]["name"], "cuda")
+        self.assertEqual(v["findings"][0]["matches"]["name"], "cuda-tiled")
 
     def test_the_new_names_are_reported_as_what_the_candidate_arm_can_run(self):
         v = RR.judge(candidate('register_impl<ModulateArgs>("modulate", "fast", fastmod_cuda, "f");',
