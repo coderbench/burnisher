@@ -26,6 +26,8 @@ register_impl<AttentionArgs>("attention", "flash-sm120", my_kernel, "what it doe
 - **Never change an existing kernel in place.** The validator measures the new name you register
   against `cuda`, in the same binary. A kernel changed in place is measured against itself, so it is
   not evaluated (`burnish:no-candidate`).
+- **To make an existing kernel faster,** copy it, change the copy and register the copy under a new
+  name. A copy that is 95% or more the same code is `burnish:reregistered`.
 - Ops that don't register your name run `cuda`. Registering one kernel is normal.
 - Register one new name. If you register several, put the one to measure in the pull request's
   `Implementation name` field.
