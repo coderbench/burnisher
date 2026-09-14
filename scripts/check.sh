@@ -17,8 +17,11 @@ step "the whole graph, on synthetic weights"
 step "harness tests"
 python3 -m unittest discover -s eval -t eval -p 'test_*.py' || fail=1
 
-step "the frozen generation still matches configs/"
+step "the frozen generations still match configs/"
 python3 eval/make_generation.py --check || fail=1
+# BG-2 too: its tolerance lives in configs/tolerance.json and is frozen into generation.json, and
+# the gate reads the frozen copy. Checking only BG-1 once left BG-2's gate on a stale threshold.
+python3 eval/make_generation.py --name BG-2 --resolution 512 --check || fail=1
 
 step "the generated documents are regenerable"
 # docs/ROOFLINE.md and issues/ are GENERATED from configs/. A number typed into either by hand

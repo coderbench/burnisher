@@ -1,0 +1,73 @@
+{
+ "_device_note": "Where the REFERENCE ran. It is the oracle, not the thing being timed, so it may run anywhere -- but fp32 on a GPU and fp32 on a CPU are not bit-identical, and a receipt should be able to say which produced its oracle.",
+ "_pin_note": "A moved reference version, checkpoint revision, token-id set or noise tensor is a CHANGED ORACLE and therefore a new generation, never an edit.",
+ "_what": "The pinned reference latents: the oracle the correctness gate compares against. Produced by the REFERENCE implementation, never by this runtime -- a candidate that produced its own oracle would pass.",
+ "checkpoint": {
+  "repo": "PixArt-alpha/PixArt-Sigma-XL-2-1024-MS",
+  "revision": "e102b3591cc82e97071b8b4cb90d834d0c487207",
+  "text_encoder_repo": "PixArt-alpha/pixart_sigma_sdxlvae_T5_diffusers",
+  "text_encoder_revision": "2c17b4e85261cd549b4068d086b7c2ba9d468e9f"
+ },
+ "device": "cuda",
+ "dtype": "float32",
+ "generation": "BG-2",
+ "guidance_scale": 4.5,
+ "latents": {
+  "dense-detail": {
+   "absmax": 4.278724670410156,
+   "mean": 0.04833901673555374,
+   "sha256": "44b51497a15f4cdd6df0787be83084e99253eb638da9a15977e470942f7535a2",
+   "shape": [
+    1,
+    4,
+    64,
+    64
+   ],
+   "std": 1.2633947134017944
+  },
+  "flat-graphic": {
+   "absmax": 5.6597490310668945,
+   "mean": 0.041262418031692505,
+   "sha256": "dc2d8bd3fe8fba782fa5938b8ce29b98fce43c0a6791a6eecb431ca516c8fc93",
+   "shape": [
+    1,
+    4,
+    64,
+    64
+   ],
+   "std": 2.0539138317108154
+  },
+  "long-caption": {
+   "absmax": 3.760828971862793,
+   "mean": 0.22334901988506317,
+   "sha256": "8c9e993d9167dfcdbe814c84885e1b2910c82f8edc7730b96c1aadf091c943fb",
+   "shape": [
+    1,
+    4,
+    64,
+    64
+   ],
+   "std": 1.3013827800750732
+  },
+  "short-caption": {
+   "absmax": 5.25076150894165,
+   "mean": 0.2097715586423874,
+   "sha256": "cf7e1028da46aebbf533e8bfab034c660a25a408049c2eeb709c4e62478a3248",
+   "shape": [
+    1,
+    4,
+    64,
+    64
+   ],
+   "std": 2.1361348628997803
+  }
+ },
+ "noise_sha256": "e3a0022a249bd0e56277a2ee60290bf0c13cb90a87359d94065710e3d9ad8203",
+ "reference_versions": {
+  "diffusers": "0.35.1",
+  "torch": "2.12.0+cu130",
+  "transformers": "4.57.1"
+ },
+ "steps": 20,
+ "token_ids_digest": "6834b2b28b5ae24fa2f0cc10088875d2c50274f9967c0f2de0daac321667953b"
+}

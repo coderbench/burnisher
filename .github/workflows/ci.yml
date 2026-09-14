@@ -35,7 +35,9 @@ jobs:
       - name: the frozen generation still matches configs/
         # If a config moved and the generation was not regenerated, the published ceiling and the
         # scorer disagree -- and the disagreement is invisible until a receipt is wrong.
-        run: python3 eval/make_generation.py --check
+        run: |
+          python3 eval/make_generation.py --check
+          python3 eval/make_generation.py --name BG-2 --resolution 512 --check
       - name: the published roofline table is regenerable
         # docs/ROOFLINE.md is generated. A number typed into it by hand would contradict the
         # generation, which is the file the scorer actually reads.
