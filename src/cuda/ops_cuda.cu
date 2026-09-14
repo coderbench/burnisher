@@ -22,7 +22,9 @@
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <cuda_bf16.h>
+#include <cudnn.h>
 
+#include <map>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -588,6 +590,305 @@ void gemm_cuda(const GemmArgs& a) {
     }
 }
 
+// --- attention through cuBLAS -----------------------------------------------------------
+// Scores as one batched GEMM per batch row, a masked softmax that owns each query row, and the
+// weighted values as a second batched GEMM.
+//
+// IN FLOAT, whatever the tensors store. Values are computed in float and rounded only when they
+// are stored, which is the rule every kernel here follows and the one the CPU oracle defines. So a
+// bf16 call reads Q, K and V into float, and only the output is rounded.
+//
+// fp32 is exact and bf16 may use TF32. The correctness gate and the fidelity objective are both
+// fp32 runs against the fp32 reference, which runs with TF32 off, so an fp32 call computes plain
+// fp32. A bf16 call is gated by neither, and TF32's fifteen mantissa bits are still twice the
+// precision of the bf16 it stores; on this card they are also the tensor cores, and plain fp32
+// attention GEMMs were a third of a denoising step.
+//
+// No reordering copy. The head-last layout [batch, seq, heads, head_dim] already holds every
+// (batch, head) matrix in column-major form: for one batch row, column j of head h starts at
+// `j * heads * head_dim + h * head_dim` and runs head_dim elements. So the leading dimension is
+// heads * head_dim, the stride between heads is head_dim, and cuBLAS reads the projections in
+// place.
+//
+// DETERMINISTIC. Both GEMMs are fixed cuBLAS algorithms over fixed shapes, and the softmax is
+// cuDNN's, which has no algorithm to choose. The first version reduced each row on one GPU thread
+// in index order, and that single kernel was three quarters of a denoising step.
+
+cudnnHandle_t dnn();
+void dnn_ok(cudnnStatus_t st, const char* what);
+
+// A device buffer kept across calls. The score matrix is a gigabyte at the VAE mid-block, and a
+// forward pass that allocated and zeroed it per call would spend its time in the allocator.
+Tensor& scratch(int slot, int64_t numel, DType dtype) {
+    static Tensor slots[8];
+    Tensor& t = slots[slot];
+    if (!t.defined() || t.dtype() != dtype || t.numel() < numel) {
+        t = Tensor();
+        t = Tensor({numel}, dtype, Device::CUDA);
+    }
+    return t;
+}
+
+template <typename T>
+__global__ void k_to_float(const T* in, float* out, int64_t n) {
+    for (int64_t i = blockIdx.x * (int64_t)blockDim.x + threadIdx.x; i < n;
+         i += (int64_t)gridDim.x * blockDim.x) {
+        out[i] = ld(in, i);
+    }
+}
+
+// A bf16 operand as float, in scratch `slot`. An fp32 operand is used where it is.
+template <typename T>
+const float* as_float(const T* in, int64_t n, int slot) {
+    if (sizeof(T) == sizeof(float)) return (const float*)in;
+    Tensor& t = scratch(slot, n, DType::F32);
+    const int grid = (int)std::min<int64_t>(65535, (n + kBlock - 1) / kBlock);
+    k_to_float<T><<<grid, kBlock>>>(in, (float*)t.data(), n);
+    check_launch("attention upcast");
+    return (const float*)t.data();
+}
+
+// The key mask as -inf and T5's additive bias, before the softmax. One element per thread: every
+// element is independent, so there is no reduction here to keep in order.
+template <typename T>
+__global__ void k_from_float(const float* in, T* out, int64_t n) {
+    for (int64_t i = blockIdx.x * (int64_t)blockDim.x + threadIdx.x; i < n;
+         i += (int64_t)gridDim.x * blockDim.x) {
+        st(out, i, in[i]);
+    }
+}
+
+template <typename T>
+__global__ void k_mask_and_bias(float* scores, const T* bias, const T* key_mask, int64_t n,
+                                int64_t kv_len, int64_t b) {
+    for (int64_t e = blockIdx.x * (int64_t)blockDim.x + threadIdx.x; e < n;
+         e += (int64_t)gridDim.x * blockDim.x) {
+        if (key_mask && ld(key_mask, b * kv_len + e % kv_len) == 0.0f) {
+            scores[e] = -INFINITY;
+        } else if (bias) {
+            scores[e] += ld(bias, e);   // bias is [heads, q_len, kv_len], laid out as the scores are
+        }
+    }
+}
+
+// A row with every key masked comes out of the softmax as 0/0. It attends to nothing.
+__global__ void k_nan_to_zero(float* w, int64_t n) {
+    for (int64_t e = blockIdx.x * (int64_t)blockDim.x + threadIdx.x; e < n;
+         e += (int64_t)gridDim.x * blockDim.x) {
+        if (w[e] != w[e]) w[e] = 0.0f;
+    }
+}
+
+template <typename T>
+__global__ void k_to_head_last(const float* in, T* out, int64_t heads, int64_t seq, int64_t dim,
+                               int64_t base) {
+    const int64_t n = heads * seq * dim;
+    for (int64_t e = blockIdx.x * (int64_t)blockDim.x + threadIdx.x; e < n;
+         e += (int64_t)gridDim.x * blockDim.x) {
+        const int64_t h = e / (seq * dim);
+        const int64_t i = (e / dim) % seq;
+        const int64_t d = e % dim;
+        st(out, base + (i * heads + h) * dim + d, in[e]);
+    }
+}
+
+template <typename T>
+void attention_blas(const AttentionArgs& a) {
+    const int64_t H = a.heads, S = a.q_len, K = a.kv_len, D = a.head_dim;
+    const cublasComputeType_t compute =
+        (sizeof(T) == sizeof(float)) ? CUBLAS_COMPUTE_32F : CUBLAS_COMPUTE_32F_FAST_TF32;
+    const float scale = a.scale > 0.0f ? a.scale : rsqrtf((float)D);
+    const float zero = 0.0f, one = 1.0f;
+    const int lead = (int)(H * D);
+    const float* scores = (const float*)scratch(0, H * S * K, DType::F32).data();
+    const float* weights = (const float*)scratch(6, H * S * K, DType::F32).data();
+    const float* values = (const float*)scratch(1, H * S * D, DType::F32).data();
+
+    // One softmax over each row of the [heads * q_len, kv_len] score matrix.
+    cudnnTensorDescriptor_t rows_desc;
+    dnn_ok(cudnnCreateTensorDescriptor(&rows_desc), "softmax descriptor");
+    dnn_ok(cudnnSetTensor4dDescriptor(rows_desc, CUDNN_TENSOR_NCHW, CUDNN_DATA_FLOAT, (int)(H * S),
+                                      (int)K, 1, 1), "softmax shape");
+    struct Release {
+        cudnnTensorDescriptor_t d;
+        ~Release() { cudnnDestroyTensorDescriptor(d); }
+    } release{rows_desc};
+
+    for (int64_t b = 0; b < a.batch; ++b) {
+        const float* q = as_float((const T*)a.q->data() + b * S * H * D, S * H * D, 3);
+        const float* k = as_float((const T*)a.k->data() + b * K * H * D, K * H * D, 4);
+        const float* v = as_float((const T*)a.v->data() + b * K * H * D, K * H * D, 5);
+
+        // scores[h][i * K + j] = scale * q(i) . k(j): column-major K x S = scale * K^T Q.
+        cublasStatus_t st = cublasGemmStridedBatchedEx(
+            handle(), CUBLAS_OP_T, CUBLAS_OP_N, (int)K, (int)S, (int)D, &scale,
+            k, CUDA_R_32F, lead, (long long)D, q, CUDA_R_32F, lead, (long long)D, &zero,
+            (float*)scores, CUDA_R_32F, (int)K, (long long)(S * K), (int)H,
+            compute, CUBLAS_GEMM_DEFAULT);
+        if (st != CUBLAS_STATUS_SUCCESS) {
+            throw std::runtime_error("cuda attention: score GEMM failed, status " +
+                                     std::to_string((int)st));
+        }
+
+        const int64_t n_scores = H * S * K;
+        const int mgrid = (int)std::min<int64_t>(65535, (n_scores + kBlock - 1) / kBlock);
+        if (a.bias || a.key_mask) {
+            k_mask_and_bias<T><<<mgrid, kBlock>>>(
+                (float*)scores, a.bias ? (const T*)a.bias->data() : nullptr,
+                a.key_mask ? (const T*)a.key_mask->data() : nullptr, n_scores, K, b);
+            check_launch("attention mask and bias");
+        }
+        dnn_ok(cudnnSoftmaxForward(dnn(), CUDNN_SOFTMAX_ACCURATE, CUDNN_SOFTMAX_MODE_CHANNEL, &one,
+                                   rows_desc, scores, &zero, rows_desc, (float*)weights),
+               "softmax");
+        if (a.key_mask) {
+            k_nan_to_zero<<<mgrid, kBlock>>>((float*)weights, n_scores);
+            check_launch("attention masked rows");
+        }
+
+        // values[h][i * D + d] = sum_j v(j, d) w(i, j): column-major D x S = V W.
+        st = cublasGemmStridedBatchedEx(
+            handle(), CUBLAS_OP_N, CUBLAS_OP_N, (int)D, (int)S, (int)K, &one,
+            v, CUDA_R_32F, lead, (long long)D, weights, CUDA_R_32F, (int)K, (long long)(S * K),
+            &zero, (float*)values, CUDA_R_32F, (int)D, (long long)(S * D), (int)H,
+            compute, CUBLAS_GEMM_DEFAULT);
+        if (st != CUBLAS_STATUS_SUCCESS) {
+            throw std::runtime_error("cuda attention: value GEMM failed, status " +
+                                     std::to_string((int)st));
+        }
+
+        const int64_t n = H * S * D;
+        const int vgrid = (int)std::min<int64_t>(65535, (n + kBlock - 1) / kBlock);
+        k_to_head_last<T><<<vgrid, kBlock>>>(values, (T*)a.out->data(), H, S, D, b * S * H * D);
+        check_launch("attention scatter");
+    }
+}
+
+void attention_cuda_blas(const AttentionArgs& a) {
+    require_device(*a.q, "attention", "q");
+    require_same_dtype(*a.q, *a.k, "attention");
+    require_same_dtype(*a.q, *a.v, "attention");
+    if (a.heads * a.head_dim > 2147483647LL || a.kv_len > 2147483647LL ||
+        a.q_len > 2147483647LL) {
+        throw std::runtime_error("cuda attention: dimension over cuBLAS's int range");
+    }
+    DISPATCH(*a.q, T, attention_blas<T>(a));
+}
+
+// --- conv2d through cuDNN ---------------------------------------------------------------
+// One plan per shape: descriptors, the algorithm and its workspace, chosen once.
+//
+// The algorithm is cuDNN's HEURISTIC choice, filtered to deterministic algorithms, and never
+// `cudnnFindConvolutionForwardAlgorithm`: that one times candidates on the live device, so two
+// processes can pick different algorithms and produce different last bits, which the
+// determinism gate refuses.
+//
+// IN FLOAT, as attention is: cuDNN's legacy convolution API does not take bf16 at all, and
+// computing in float and rounding only the stored result is the rule the CPU oracle defines
+// anyway. So every plan is an fp32 plan, and a bf16 call reads its operands into float and rounds
+// its output once. As in attention, fp32 is exact and a bf16 call may use TF32.
+
+cudnnHandle_t dnn() {
+    static cudnnHandle_t h = nullptr;
+    static std::once_flag once;
+    std::call_once(once, [] {
+        if (cudnnCreate(&h) != CUDNN_STATUS_SUCCESS) throw std::runtime_error("cudnnCreate failed");
+    });
+    return h;
+}
+
+void dnn_ok(cudnnStatus_t st, const char* what) {
+    if (st != CUDNN_STATUS_SUCCESS) {
+        throw std::runtime_error(std::string("cudnn ") + what + ": " + cudnnGetErrorString(st));
+    }
+}
+
+struct ConvPlan {
+    cudnnTensorDescriptor_t x, y, bias;
+    cudnnFilterDescriptor_t w;
+    cudnnConvolutionDescriptor_t conv;
+    cudnnConvolutionFwdAlgo_t algo;
+    size_t workspace;
+};
+
+const ConvPlan& conv_plan(const Conv2dArgs& a, int64_t h_out, int64_t w_out, bool tf32) {
+    static std::map<std::vector<int64_t>, ConvPlan> plans;
+    static std::mutex m;
+    const std::vector<int64_t> key{a.batch, a.c_in, a.h_in, a.w_in, a.c_out, a.k, a.pad, tf32};
+    std::lock_guard<std::mutex> lock(m);
+    auto it = plans.find(key);
+    if (it != plans.end()) return it->second;
+
+    const cudnnDataType_t dt = CUDNN_DATA_FLOAT;
+    ConvPlan p{};
+    dnn_ok(cudnnCreateTensorDescriptor(&p.x), "input descriptor");
+    dnn_ok(cudnnCreateTensorDescriptor(&p.y), "output descriptor");
+    dnn_ok(cudnnCreateTensorDescriptor(&p.bias), "bias descriptor");
+    dnn_ok(cudnnCreateFilterDescriptor(&p.w), "filter descriptor");
+    dnn_ok(cudnnCreateConvolutionDescriptor(&p.conv), "convolution descriptor");
+    dnn_ok(cudnnSetTensor4dDescriptor(p.x, CUDNN_TENSOR_NCHW, dt, (int)a.batch, (int)a.c_in,
+                                      (int)a.h_in, (int)a.w_in), "input shape");
+    dnn_ok(cudnnSetTensor4dDescriptor(p.y, CUDNN_TENSOR_NCHW, dt, (int)a.batch, (int)a.c_out,
+                                      (int)h_out, (int)w_out), "output shape");
+    dnn_ok(cudnnSetTensor4dDescriptor(p.bias, CUDNN_TENSOR_NCHW, dt, 1, (int)a.c_out, 1, 1),
+           "bias shape");
+    dnn_ok(cudnnSetFilter4dDescriptor(p.w, dt, CUDNN_TENSOR_NCHW, (int)a.c_out, (int)a.c_in,
+                                      (int)a.k, (int)a.k), "filter shape");
+    // Cross-correlation, as the reference computes and as the direct kernel indexes.
+    dnn_ok(cudnnSetConvolution2dDescriptor(p.conv, (int)a.pad, (int)a.pad, 1, 1, 1, 1,
+                                           CUDNN_CROSS_CORRELATION, dt), "convolution");
+    dnn_ok(cudnnSetConvolutionMathType(p.conv, tf32 ? CUDNN_TENSOR_OP_MATH : CUDNN_DEFAULT_MATH),
+           "math type");
+
+    cudnnConvolutionFwdAlgoPerf_t perf[CUDNN_CONVOLUTION_FWD_ALGO_COUNT];
+    int returned = 0;
+    dnn_ok(cudnnGetConvolutionForwardAlgorithm_v7(dnn(), p.x, p.w, p.conv, p.y,
+                                                  CUDNN_CONVOLUTION_FWD_ALGO_COUNT, &returned,
+                                                  perf), "algorithm heuristic");
+    bool found = false;
+    for (int i = 0; i < returned && !found; ++i) {
+        if (perf[i].status == CUDNN_STATUS_SUCCESS && perf[i].determinism == CUDNN_DETERMINISTIC) {
+            p.algo = perf[i].algo;
+            found = true;
+        }
+    }
+    if (!found) {
+        throw std::runtime_error("cudnn: no deterministic forward algorithm for this convolution");
+    }
+    dnn_ok(cudnnGetConvolutionForwardWorkspaceSize(dnn(), p.x, p.w, p.conv, p.y, p.algo,
+                                                   &p.workspace), "workspace size");
+    return plans.emplace(key, p).first->second;
+}
+
+template <typename T>
+void conv2d_dnn(const Conv2dArgs& a) {
+    const int64_t h_out = a.h_in + 2 * a.pad - a.k + 1;
+    const int64_t w_out = a.w_in + 2 * a.pad - a.k + 1;
+    const int64_t n_out = a.batch * a.c_out * h_out * w_out;
+    const ConvPlan& p = conv_plan(a, h_out, w_out, sizeof(T) != sizeof(float));
+    const float* x = as_float((const T*)a.x->data(), a.batch * a.c_in * a.h_in * a.w_in, 3);
+    const float* w = as_float((const T*)a.weight->data(), a.c_out * a.c_in * a.k * a.k, 4);
+    const float* bias = a.bias ? as_float((const T*)a.bias->data(), a.c_out, 5) : nullptr;
+    float* y = (sizeof(T) == sizeof(float)) ? (float*)a.out->data()
+                                            : (float*)scratch(7, n_out, DType::F32).data();
+    Tensor& workspace = scratch(2, (int64_t)(p.workspace / 4) + 1, DType::F32);
+    const float one = 1.0f, zero = 0.0f;
+    dnn_ok(cudnnConvolutionForward(dnn(), &one, p.x, x, p.w, w, p.conv, p.algo, workspace.data(),
+                                   p.workspace, &zero, p.y, y), "convolution");
+    if (bias) dnn_ok(cudnnAddTensor(dnn(), &one, p.bias, bias, &one, p.y, y), "bias");
+    if (sizeof(T) != sizeof(float)) {
+        const int grid = (int)std::min<int64_t>(65535, (n_out + kBlock - 1) / kBlock);
+        k_from_float<T><<<grid, kBlock>>>(y, (T*)a.out->data(), n_out);
+        check_launch("conv2d round");
+    }
+}
+
+void conv2d_cuda_dnn(const Conv2dArgs& a) {
+    require_device(*a.x, "conv2d");
+    require_same_dtype(*a.x, *a.weight, "conv2d");
+    DISPATCH(*a.x, T, conv2d_dnn<T>(a));
+}
+
 // --- conv2d -----------------------------------------------------------------------------
 // Direct convolution, one thread per output element. No im2col, no implicit GEMM, no tensor
 // cores. The VAE's shapes are few and fixed, which is exactly what makes a specialised path
@@ -807,6 +1108,10 @@ void register_cuda_ops() {
     register_impl<AttentionArgs>("attention", "cuda", attention_cuda_tiled<256>,
                                  "tiled online softmax, 256 keys per tile, deterministic; "
                                  "no tensor cores -- issues/dit-attention.md");
+    register_impl<AttentionArgs>("attention", "cuda-vendor", attention_cuda_blas,
+                                 "cuBLAS batched scores and values, one masked softmax per row");
+    register_impl<Conv2dArgs>("conv2d", "cuda-vendor", conv2d_cuda_dnn,
+                              "cuDNN, deterministic heuristic algorithm, bias via cudnnAddTensor");
     register_impl<AttentionArgs>("attention", "cuda-tile64", attention_cuda_tiled<64>,
                                  "the same kernel at 64 keys per tile: less shared memory, more "
                                  "synchronisation points per row");

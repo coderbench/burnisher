@@ -58,7 +58,18 @@ if(BURNISHER_BUILD_CUDA)
   target_compile_definitions(burnisher_core PUBLIC BURNISHER_CUDA=1)
   set_target_properties(burnisher_core PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
   find_package(CUDAToolkit REQUIRED)
-  target_link_libraries(burnisher_core PUBLIC CUDA::cudart CUDA::cublas)
+  # cuDNN is REQUIRED with CUDA, not optional. The `cuda` baseline's convolutions go through it,
+  # and a build that quietly fell back to another kernel would be a different baseline on every
+  # box that lacked it -- every score measured against it would be against the wrong thing.
+  find_path(CUDNN_INCLUDE_DIR cudnn.h
+            HINTS ${CUDAToolkit_INCLUDE_DIRS} PATH_SUFFIXES include x86_64-linux-gnu)
+  find_library(CUDNN_LIBRARY cudnn HINTS ${CUDAToolkit_LIBRARY_DIR} PATH_SUFFIXES lib64 lib)
+  if(NOT CUDNN_INCLUDE_DIR OR NOT CUDNN_LIBRARY)
+    message(FATAL_ERROR "The CUDA build needs cuDNN 9 and its headers. On Ubuntu, from NVIDIA's "
+                        "CUDA repository: apt install libcudnn9-dev-cuda-<CUDA major>")
+  endif()
+  target_include_directories(burnisher_core PRIVATE ${CUDNN_INCLUDE_DIR})
+  target_link_libraries(burnisher_core PUBLIC CUDA::cudart CUDA::cublas ${CUDNN_LIBRARY})
 endif()
 
 add_executable(burnisher tools/burnisher_main.cpp)
@@ -71,6 +82,12 @@ if(BURNISHER_BUILD_TESTS)
     target_link_libraries(${t} PRIVATE burnisher_core)
     add_test(NAME ${t} COMMAND ${t})
   endforeach()
+  if(BURNISHER_BUILD_CUDA)
+    # The device kernels against the CPU oracle. Passes as skipped where there is no GPU.
+    add_executable(test_cuda_ops tests/test_cuda_ops.cpp)
+    target_link_libraries(test_cuda_ops PRIVATE burnisher_core)
+    add_test(NAME test_cuda_ops COMMAND test_cuda_ops)
+  endif()
   # Every entry point must answer --help. It is the cheapest possible check that a binary is not
   # simply broken, and it is the one that catches a bad refactor before a benchmark run does.
   add_test(NAME burnisher_help COMMAND burnisher --help)

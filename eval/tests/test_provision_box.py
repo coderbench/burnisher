@@ -52,6 +52,10 @@ class TestProvisioningABox(unittest.TestCase):
         self.assertIn('allow_patterns=["text_encoder/*", "tokenizer/*"]', self.SRC)
         self.assertIn("import numpy, huggingface_hub, sentencepiece", self.SRC)
 
+    def test_cudnn_matches_the_toolkit_and_is_installed_before_the_build(self):
+        self.assertIn('"libcudnn9-dev-cuda-$CUDA_MAJOR"', self.SRC)
+        self.assertLess(self.SRC.index("libcudnn9-dev-cuda-"), self.SRC.index("scripts/build_cuda.sh"))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

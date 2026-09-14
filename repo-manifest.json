@@ -206,6 +206,7 @@
   "src/models/weights.cpp",
   "src/sched/dpm_solver.cpp",
   "tests/check.h",
+  "tests/test_cuda_ops.cpp",
   "tests/test_models.cpp",
   "tests/test_ops.cpp",
   "tests/test_scheduler.cpp",

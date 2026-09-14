@@ -78,6 +78,10 @@ if ! dpkg -s $TOOLKIT cmake build-essential cron python3-pip gh >/dev/null 2>&1;
     apt-get update -q
     apt-get install -y -q --no-install-recommends $TOOLKIT cmake build-essential cron python3-pip gh
 fi
+# cuDNN for the CUDA major the toolkit is, because the build links the one its headers match.
+CUDA_MAJOR="$(/usr/local/cuda/bin/nvcc --version | grep -oE 'release [0-9]+' | grep -oE '[0-9]+')"
+dpkg -s "libcudnn9-dev-cuda-$CUDA_MAJOR" >/dev/null 2>&1 || \
+    apt-get install -y -q --no-install-recommends "libcudnn9-dev-cuda-$CUDA_MAJOR"
 python3 -c "import numpy, huggingface_hub, sentencepiece" 2>/dev/null || \
     python3 -m pip install -q --break-system-packages numpy huggingface_hub sentencepiece
 
