@@ -9,7 +9,10 @@
 // arbitrary because they are: they are whatever the pinned reference does, and a "cleaner"
 // choice is a silently different model.
 #include <cmath>
+#include <map>
+#include <mutex>
 #include <stdexcept>
+#include <tuple>
 #include <vector>
 
 #include "burnisher/models.h"
@@ -29,10 +32,13 @@ std::string blk(int i, const std::string& tail) {
 void sincos_1d(int dim, const std::vector<double>& pos, std::vector<double>* out) {
     const int half = dim / 2;
     out->assign(pos.size() * dim, 0.0);
+    // The frequencies depend only on the channel. Computed once per channel rather than once per
+    // position and channel, with the same expression, so every value is bit for bit what it was.
+    std::vector<double> omega(half);
+    for (int i = 0; i < half; ++i) omega[i] = 1.0 / std::pow(10000.0, static_cast<double>(i) / half);
     for (size_t m = 0; m < pos.size(); ++m) {
         for (int i = 0; i < half; ++i) {
-            const double omega = 1.0 / std::pow(10000.0, static_cast<double>(i) / half);
-            const double a = pos[m] * omega;
+            const double a = pos[m] * omega[i];
             (*out)[m * dim + i] = std::sin(a);
             (*out)[m * dim + half + i] = std::cos(a);
         }
@@ -71,6 +77,33 @@ std::vector<double> dit_position_embedding(int dim, int grid, int base_size,
 }
 
 namespace {
+
+// The position table for one shape, built and placed once per process.
+//
+// It is a closed-form function of the shape, and it was rebuilt on the host for every forward:
+// two and a half million `pow` calls, as many `sin` and `cos`, a scalar store per element and an
+// 18 MB upload -- more wall clock than the whole denoising step spent on the GPU once attention was
+// fused. The key is everything the table depends on, so a cached table is the table that would
+// have been built.
+const Tensor& position_table(int64_t d, int64_t grid, int base, DType dtype, Device device) {
+    using Key = std::tuple<int64_t, int64_t, int, int, int>;
+    static std::map<Key, Tensor>* tables = new std::map<Key, Tensor>();   // leaked, as device memory outlives statics
+    static std::mutex m;
+    const Key key{d, grid, base, static_cast<int>(dtype), static_cast<int>(device)};
+    std::lock_guard<std::mutex> lock(m);
+    auto it = tables->find(key);
+    if (it != tables->end()) return it->second;
+    // ORACLE: interpolation_scale is 2 for the 1024px checkpoint and is part of the pin.
+    std::vector<double> pe =
+        dit_position_embedding(static_cast<int>(d), static_cast<int>(grid), base, 2.0);
+    // Built on the HOST -- it is a closed-form function of the shape, not of any tensor -- and then
+    // uploaded once. Filling a device tensor with scalar stores would be a fault, which is the
+    // shape of mistake this whole device boundary exists to make loud rather than subtle.
+    Tensor host({grid * grid, d}, dtype);
+    for (int64_t i = 0; i < grid * grid * d; ++i) host.set(i, static_cast<float>(pe[i]));
+    return tables->emplace(key, device == Device::CUDA ? host.to_device() : host).first->second;
+}
+
 }  // namespace
 
 PixArtDiT::PixArtDiT(DiTConfig cfg, const WeightSource& w, DType compute)
@@ -111,18 +144,8 @@ Tensor PixArtDiT::forward(const Tensor& latent, double timestep, const Tensor& c
         Tensor flat = patches.reshape({M, cfg_.in_channels * patch * patch});
         gemm(GemmArgs{&flat, &pw, &pb, &x, M, d, cfg_.in_channels * patch * patch, true});
         const int base = cfg_.sample_size / static_cast<int>(patch);
-        // ORACLE: interpolation_scale is 2 for the 1024px checkpoint and is part of the pin.
-        std::vector<double> pe = dit_position_embedding(
-            static_cast<int>(d), static_cast<int>(grid), base, 2.0);
-        // Computed on the host once per forward -- it depends only on the shape -- then added
-        // through the op, broadcast over the batch. The table is [N, d] and x is [B*N, d].
-        // Built on the HOST -- it is a closed-form function of the shape, not of any tensor --
-        // and then uploaded once. Allocating it on the device and filling it with scalar stores
-        // would be a fault, which is the shape of mistake this whole device boundary exists to
-        // make loud rather than subtle.
-        Tensor pos_host({N, d}, dtype_);
-        for (int64_t i = 0; i < N * d; ++i) pos_host.set(i, static_cast<float>(pe[i]));
-        Tensor pos = (impls.device == Device::CUDA) ? pos_host.to_device() : pos_host;
+        // Added through the op, broadcast over the batch. The table is [N, d] and x is [B*N, d].
+        const Tensor& pos = position_table(d, grid, base, dtype_, impls.device);
         add(AddArgs{&x, &pos, &x, B, N * d, 1.0f, true});
     }
 
