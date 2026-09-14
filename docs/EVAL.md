@@ -217,8 +217,11 @@ build, its tests and every launch of the runtime -- runs as a separate account n
   step ends.
 - **Checked every round, as the account.** Nothing is evaluated if the account can read
   `.env.eval`, `gh`'s config or ssh keys; can write the checkout, the ledger, the copycat record,
-  the gate cache, the weights or the noise; cannot read the weights or see the GPU; if a git remote
-  URL carries credentials; or if a lock is in a directory anyone can write.
+  the gate cache, the weights or the noise; cannot read the weights or see the GPU; can connect to
+  any service but ssh; if a git remote URL carries credentials; or if a lock is in a directory
+  anyone can write.
+- **Stop the notebook server a rented image starts.** It runs as root, runs whatever its token
+  holder sends, and its token is in its command line, which every account can read.
 - **`--no-sandbox` runs everything as the evaluator.** Only on a machine with nothing to protect.
 
 Limits:

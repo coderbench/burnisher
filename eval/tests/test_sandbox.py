@@ -244,6 +244,23 @@ class TestTheAccessCheck(unittest.TestCase):
             f"can read {t / 'open-secret'}", f"can write {t / 'state'}",
             f"cannot read {t / 'weights'}", f"cannot reach {t / 'missing'}"])
 
+    def test_a_listening_service_other_than_ssh_is_reported_once(self):
+        """A root notebook server on 8888, seen over IPv4 and IPv6. Docker's resolver and an
+        established connection are not services the account can drive."""
+        t = self.t
+        header = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt uid\n"
+        (t / "tcp").write_text(header +
+            "   0: 00000000:0016 00000000:0000 0A 00000000:00000000 00:00000000 00000000 0\n"
+            "   1: 00000000:22B8 00000000:0000 0A 00000000:00000000 00:00000000 00000000 0\n"
+            "   2: 0B00007F:B0B1 00000000:0000 0A 00000000:00000000 00:00000000 00000000 0\n"
+            "   3: 0100007F:1F90 0100007F:D431 01 00000000:00000000 00:00000000 00000000 0\n")
+        (t / "tcp6").write_text(header +
+            "   0: 00000000000000000000000000000000:22B8 00000000000000000000000000000000:0000 "
+            "0A 00000000:00000000 00:00000000 00000000 0\n")
+        spec = {"secrets": [], "protected": [], "readable": [],
+                "net": [str(t / "tcp"), str(t / "tcp6")], "allowed_ports": [22]}
+        self.assertEqual(SB._probe(spec), ["can connect to the service listening on port 8888"])
+
     def test_the_source_shipped_to_the_account_gives_the_same_answer(self):
         r = subprocess.run([sys.executable, "-c", SB.PROBE, json.dumps(self.spec())],
                            capture_output=True, text=True, check=True)

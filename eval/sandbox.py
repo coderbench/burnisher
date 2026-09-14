@@ -244,6 +244,25 @@ def _probe(spec):
             p, os.R_OK | (os.X_OK if os.path.isdir(p) else 0))), None)
         if hit or errors:
             found.append(f"cannot read {hit or errors[0].filename}")
+    # A local service runs whatever its clients send, as its owner. A notebook server started as
+    # root is the usual one on a rented image, and its token is in its world-readable command line.
+    ports = []
+    for table in spec.get("net", []):
+        try:
+            rows = open(table).read().splitlines()[1:]
+        except OSError:
+            continue
+        for row in rows:
+            cols = row.split()
+            if len(cols) < 4 or cols[3] != "0A":                  # 0A is LISTEN
+                continue
+            addr, port = cols[1].rsplit(":", 1)
+            port = int(port, 16)
+            # 0B00007F is 127.0.0.11, Docker's embedded name resolver, which only answers lookups.
+            if port not in spec.get("allowed_ports", []) and addr != "0B00007F" \
+                    and port not in ports:
+                ports.append(port)
+    found += [f"can connect to the service listening on port {p}" for p in ports]
     return found
 
 
@@ -251,7 +270,8 @@ PROBE = ("import json, sys\n" + textwrap.dedent(inspect.getsource(_probe))
          + "\nprint(json.dumps(_probe(json.loads(sys.argv[1]))))\n")
 
 
-def preflight(sandbox: Sandbox, *, secrets=(), protected=(), readable=()) -> list:
+def preflight(sandbox: Sandbox, *, secrets=(), protected=(), readable=(),
+              allowed_ports=(22,)) -> list:
     """Every way this box lets the account reach the evaluator, checked as the account. Empty is go."""
     problems = []
     try:
@@ -263,6 +283,7 @@ def preflight(sandbox: Sandbox, *, secrets=(), protected=(), readable=()) -> lis
     spec = {key: [str(p) for p in paths if p]
             for key, paths in (("secrets", secrets), ("protected", protected),
                                ("readable", readable))}
+    spec.update(net=["/proc/net/tcp", "/proc/net/tcp6"], allowed_ports=list(allowed_ports))
     try:
         r = sandbox.run([sys.executable, "-c", PROBE, json.dumps(spec)], capture_output=True,
                         text=True, timeout=1800, cwd="/")
