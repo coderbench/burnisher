@@ -4,34 +4,29 @@
 
 ## Kind
 
-- [ ] **Kernel** — registered under a new name beside the existing one
-- [ ] **New cell** — see `docs/CARTOGRAPHY.md`
-- [ ] **Instrument** — touches `eval/`, `configs/`, `schemas/`, `tools/burnish`, `scripts/`, `.github/`
-      or `.gittensor/` (not scored)
-- [ ] **Docs / build / other**
+- [ ] **Kernel:** a new kernel name, registered beside the existing ones
+- [ ] **New cell:** see `docs/CARTOGRAPHY.md`
+- [ ] **Instrument:** touches `eval/`, `configs/`, `schemas/`, `tools/burnish`, `scripts/` (except
+      `scripts/build*`), `.github/` or `.gittensor/`. Not scored.
+- [ ] **Docs, build or other**
 
 ## For a kernel
 
 **Implementation name:** `<name>`
 
-<!-- The validator measures the new kernel name this PR registers. The field is read only when the
-PR registers more than one new name. -->
+<!-- Read only when this pull request registers more than one new kernel name. -->
 
 - [ ] `burnisher info` lists it
 - [ ] `scripts/check.sh` passes
-
-Optional — the validator measures every submission. If you measured it on an RTX 5090, paste the
-`tools/burnish score` summary. Never type a number by hand.
-
-```
-```
+- [ ] Optional: measured on an RTX 5090, with the `tools/burnish receipt show` output pasted below
+      (never retype a number)
 
 ## For an instrument change
 
-- [ ] I did not remove or relax a guard, or I explain which incident it encodes and why it no
-      longer applies
-- [ ] I did not edit an existing generation under `eval/cells/`
+- [ ] No guard is removed or relaxed, or the description names the incident it encodes and why it
+      no longer applies
+- [ ] No existing generation under `eval/cells/` is edited
 
 ## Checks
 
-- [ ] Commit messages are one line, `<type>: <description>`, 72 characters or fewer
+- [ ] Every commit message is one line, `<type>: <description>`, 72 characters or fewer
