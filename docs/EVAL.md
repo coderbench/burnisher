@@ -131,11 +131,7 @@ burnish:gap+0.0342
 That is the fraction of this generation's **remaining** arithmetic-roofline gap that your change
 closed. It is the payout basis itself — not an input to a tier table.
 
-There is no XS/S/M/L/XL here and the absence is deliberate. A tier boundary pays two
-differently-measured submissions identically, and two almost-identical ones differently. The
-number is already in `[0, 1]`, already comparable across cells and models, and already
-self-terminating — the same kernel win is worth less once the gap it closes is smaller. Bucketing
-it discards the only property that makes it worth computing.
+There is no XS/S/M/L/XL here and the absence is deliberate; why is in `docs/SCORING.md`.
 
 Every other outcome carries a reason instead of a number, because a number published about a
 submission that was never resolved, never correct, or never measured would be read as a score:

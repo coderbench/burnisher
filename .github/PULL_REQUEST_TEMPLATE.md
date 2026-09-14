@@ -17,6 +17,9 @@
 - [ ] Registered a new name; did **not** replace an existing implementation
 - [ ] `burnisher info` lists it
 - [ ] `burnish gate --impl <name> --repeats 10` passed — determinism **and** correctness
+The validator measures every submission, so the rest of this section is optional. If you
+measured it yourself on an RTX 5090:
+
 - [ ] `burnish bench --impl-candidate <name> --gate-result gate.json --gate-base-result gate-base.json` run on the pinned hardware
 - [ ] Held-out shapes were run (no `--skip-held-out`)
 
@@ -37,9 +40,7 @@ receipt from raw measurements that are themselves in the receipt.
 
 ## For an instrument change
 
-`eval/run_from_base.sh` overlays the instrument from the base commit, so this change is reported
-and then discarded for scoring purposes. That is not a rejection — improving the evaluator is a
-real contribution, and the evaluator is where the bugs are.
+Instrument changes are not scored as speedups; `docs/EVAL.md` says how they are handled.
 
 - [ ] I did not remove or relax a guard
 - [ ] …or, if I did: which incident does it encode, and why does it no longer apply?

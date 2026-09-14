@@ -4,8 +4,8 @@ A native C++/CUDA **image and video generation** runtime for consumer Blackwell 
 instrument that scores changes to it.
 
 A burnisher is the tool a mezzotint printmaker uses on a plate roughened to solid black — pure
-noise — pressing it smooth until the image emerges. It is the instrument that removes noise to
-produce a picture. It also means to polish by repeated passes, which is what contributors do here.
+noise — pressing it smooth until the image emerges. It also means to polish by repeated passes,
+which is what contributors do here.
 
 ```
 burnish roofline          # how big every box is, and how full
@@ -14,6 +14,9 @@ burnish bench ... | burnish score   # a number with an interval on it
 burnish audit             # re-derive somebody else's verdict. no GPU, two seconds
 ```
 
+**Here to contribute?** Read `CONTRIBUTING.md`. It is the one page you need; everything else is
+linked from it when you need it.
+
 ---
 
 ## Read this first
@@ -21,43 +24,17 @@ burnish audit             # re-derive somebody else's verdict. no GPU, two secon
 **The instrument is complete, and it has scored a real run on the pinned hardware.** The runtime
 runs end to end on CPU and CUDA, reproduces itself byte for byte, loads the real pinned
 checkpoint, and passes the correctness gate against committed reference latents. Every
-implemented cell has a measured achieved fraction and its own measured noise floor. The device
-peaks behind those cells are probed, not vendor.
+implemented cell has a measured achieved fraction and its own measured noise floor.
 
 **What that measurement says is that the runtime is very slow, which is the plan.** `dit-step` is
-at **1.5%** of its arithmetic ceiling, `vae-decode`
-at **0.8%**, `t5-encode` at
-**18.2%**. v0 ships a correct, complete, *slow*
-pipeline; contributors make it fast and are paid for the fraction of the remaining gap they
-close. The kernels are deliberately naive — no tensor cores, convolution one thread per output
-element, every GEMM epilogue a separate pass.
+at **1.5%** of its arithmetic ceiling, `vae-decode` at **0.8%**, `t5-encode` at **18.2%**. v0
+ships a correct, complete, *slow* pipeline; contributors make it fast and are paid for the
+fraction of the remaining gap they close. The kernels are deliberately naive — no tensor cores,
+convolution one thread per output element, every GEMM epilogue a separate pass.
 
-**What is not known** is in `docs/STATUS.md`, along with the five correctness defects the runtime
-had, how each was found, and the first receipt the instrument ever produced — which was a
-regression, and which found a bug in the runtime on its way to saying so. Overselling the surface is the single
-failure mode that kills a subnet, so that page comes before the pitch.
-
----
-
-## The evaluation is checkable by anyone
-
-Scoring here is a pure function of recorded measurements — no device, no clock, no randomness. A
-receipt measured on a Blackwell part re-derives, figure for figure, on a laptop. So the record is
-not a grade a bot decided; the record is the **measurements**, and the verdict is a derivation
-anyone can repeat:
-
-```bash
-burnish audit pr-000042-raw.json pr-000042.json
-```
-
-That catches a scoring bug, an edited receipt, or a verdict that does not follow from its own
-data — including a receipt whose digest was recomputed to cover the edit. What it cannot catch is
-a measurement that never happened, and nothing arithmetic can. For that, re-measure on your own
-5090 and file a counter-receipt with `burnish challenge`; a disagreement beyond the cell's own
-noise floor holds the credit rather than paying it.
-
-A paying outcome carries the number, not a grade: `burnish:gap+0.0342` is the fraction of the
-remaining roofline gap the change closed. `docs/EVAL.md` is the whole loop.
+**What is not known** is in `docs/STATUS.md`, along with every defect found so far and the first
+receipt the instrument ever produced. Overselling the surface is the single failure mode that
+kills a subnet, so that page comes before the pitch.
 
 ---
 
@@ -67,132 +44,40 @@ Gittensor SN74 pays merged PRs carrying a bot-verified marginal speedup, built f
 pinned RTX 5090 hardware, correctness gated before speed counts. This repository is being built to
 become a second scored target under that mechanism.
 
-### Position relative to SparkInfer
-
 [`gittensor-ai-lab/sparkinfer`](https://github.com/gittensor-ai-lab/sparkinfer) is the existing
-SN74 target: a native C++/CUDA **LLM** runtime for consumer Blackwell. It does text decode and
-prefill, scored on contexts 128/512/4k/16k/32k plus concurrency. It accepts images as *input* via
-a vision tower; its own `docs/image_input.md` says "It does not generate images." Its "DFlash
-block-diffusion speculative decode" is block diffusion as a *text drafting* strategy — same word,
-unrelated mechanism, no pixels.
-
-**SparkInfer is not running out of room**, and this repository does not claim otherwise. Recent
-PRs there land 1.2×–1.9× on the concurrency axes. Burnisher is the **generation** counterpart, not
-a competitor: a different workload class — compute-bound, iterative, fresh shapes per model and
-resolution — that a text runtime structurally cannot reach.
-
-The *shape* is matched deliberately, so a contributor transfers without relearning the workflow:
-small native binary, no Python runtime dependency, sm_120/sm_121, RTX 5090 / DGX Spark /
-RTX PRO 6000. The *scoring* is deliberately different, and that is the next section.
+target: a native C++/CUDA **LLM** runtime for the same hardware. It does not generate images — its
+own `docs/image_input.md` says so. Burnisher is the **generation** counterpart, not a competitor:
+compute-bound, iterative, fresh shapes per model and resolution. The contributor workflow is
+matched deliberately; the scoring is deliberately different.
 
 ---
 
-## Scoring: the fraction of the remaining roofline gap you close
+## How a change is scored, in five lines
 
-Full detail in `docs/SCORING.md`. The short version:
+1. **You are paid the fraction of the remaining gap you close:**
+   `(a_candidate − a_base) / (1 − a_base)`, where `a` is how close a cell is to its ceiling.
+2. **A gain counts only if it clears that cell's own measured noise floor**, not a fixed 2%.
+3. **Faster but hungrier or less faithful pays nothing** — latency, VRAM and fidelity form a
+   frontier.
+4. **Correctness is gated before anything is timed**, and a held-out shape drawn after your code is
+   frozen catches kernels tuned to one shape.
+5. **Opening a new cell pays too** — that is cartography.
 
-**1. Score is `(a_candidate − a_base) / (1 − a_base)`,** where `a = ceiling / measured` is the
-fraction of a cell's arithmetic roofline it achieves. Taking a cell from 40% to 55% closes 0.25 of
-what was left. So does taking it from 90% to 92.5%.
-
-This fixes an inverted reward. Under raw percent, a 20% gain on a cell at 10% of roofline outscores
-a 2% gain on a cell at 95% — the first is ordinary, the second is extraordinary. Here:
-
-| change | gap closed |
-|:--|--:|
-| 20% faster, cell at 10% of roofline | 0.022 |
-| 2% faster, cell at 95% of roofline | **0.388** |
-
-It also self-terminates. A cell's total closable gap is 1.0, the ledger compounds toward it, and
-the physically available speedup shrinks to `1/achieved`. Grinding an exhausted cell stops paying
-and opening a new one starts paying more — so axis supply becomes an incentive rather than an
-admin chore.
-
-**2. Credit against the measured noise floor, not a constant.** Each cell publishes its own
-run-to-run spread, measured by repeated paired control runs, and a gain is credited only when it
-clears that floor under a paired bootstrap at a stated confidence. A 2% threshold is a guess at the
-noise: it throws away a real 0.5% gain on a quiet cell and pays for a meaningless 3% on a noisy one.
-
-The floor is published **in the currency of the score**, because the same 1% noise means completely
-different things in different cells:
-
-| cell at | floor | as gap-closed | floors of room |
-|--:|--:|--:|--:|
-| 40% of roofline | 1.0% | 0.007 | 148 |
-| 95% of roofline | 1.0% | 0.193 | 5.2 |
-
-**3. No letter grades.** A receipt reports gap closed, the interval, the cell's floor, whether it
-resolved, and the frontier position. A number with an interval cannot be argued into a higher
-bucket. A schema test fails if `XS`, `XL`, `tier`, `grade` or `band` appears anywhere.
-
-**4. Both objectives count.** Latency, peak VRAM and output fidelity form a frontier. Faster but
-4 GB hungrier is `MOVED_ALONG_FRONTIER` and credits nothing — it is a trade the runtime could
-already make. So is staying inside the correctness tolerance while measurably degrading.
-
-**5. Cartography pays.** Adding a cell nobody had measured, with its reference implementation and
-its calibration, is a scored contribution. `docs/CARTOGRAPHY.md`. Finding that a cell *cannot*
-resolve a contribution is also a successful one.
-
-**6. Anti-gaming, non-negotiable.** Held-out shapes drawn at evaluation time from the base commit
-after the candidate is frozen; the instrument overlaid from the base commit so a submission cannot
-edit the ruler; an append-only ledger written outside the candidate's reach; a partial matrix
-credits nothing; a frozen generation cannot be edited.
+Why each rule is shaped the way it is: `docs/SCORING.md`. What happens to a pull request, what
+every label means, and how to check a verdict yourself: `docs/EVAL.md`. New cells:
+`docs/CARTOGRAPHY.md`.
 
 ---
 
-## What v0 pins, and why
+## Where the work is
 
-`burnish screen` answers six questions from config files and arithmetic, before downloading any
-weights. The answers are written up in `docs/SCREEN.md`. It picks:
+`issues/README.md` — the open items, each carrying its own arithmetic. `burnish roofline` prints
+every cell's ceiling and how full it is; `docs/ROOFLINE.md` is the same table, generated.
 
-**PixArt-Sigma XL-2 at 1024px**, 20 steps, CFG, DPM-Solver++ 2M. A real DiT (4096 image tokens at
-1024px), a T5-XXL text encoder eight times the size of the denoiser, an SD-family VAE. Ungated and
-redistributable — which ruled out FLUX.1-schnell, whose Apache-2.0 weights sit behind a
-HuggingFace gate that returns 401 to `curl`.
-
-| stage | runs | ceiling | share | resident params |
-|:--|--:|--:|--:|--:|
-| `t5-encode` | 1 | 23.1 ms | 2.0% | 9.53 GB |
-| `dit-step` | 20 | 54.4 ms | 94.3% | 1.22 GB |
-| `vae-decode` | 1 | 43.0 ms | 3.7% | 0.10 GB |
-
-**The text encoder is 89% of the checkpoint and 2% of the clock.** It runs once; the DiT runs
-twenty times. A screen that ranked stages by parameter count — the natural thing to do — would send
-a contributor to the biggest weights in the model and a fiftieth of the wall time. It is a
-*memory-axis* cell instead: 9.53 GB idle on a 32 GiB card for the whole denoise loop, and the
-frontier scores peak VRAM.
-
----
-
-## The roofline table
-
-`burnish roofline` publishes, per `(stage, shape, dtype)` cell:
-
-```
-  cell                       runs    ceiling   bound       ai  fuse  achieved    left   floor  res
-  t5-encode/1024/bf16           1    23.08ms compute      607  1.04     18.2%   5.51x   3.753  yes
-  dit-step/1024/bf16           20    54.45ms compute    10864  1.16      1.5%  65.59x   0.578  yes
-  vae-decode/1024/bf16          1    43.00ms compute    99505  1.32      0.8% 126.37x   0.259  yes
-  dit-step/1024/fp8            20    31.70ms compute    21715  1.28        --      --      --   --
-  dit-step/1024/nvfp4          20    15.85ms compute    38565  1.58        --      --      --   --
-```
-
-`ceiling` is arithmetic: `max(flops / peak, unavoidable_bytes / bandwidth)`. `unavoidable_bytes` is
-weights-read-once plus stage input plus stage output, excluding every intermediate — because an
-intermediate is removable by fusion, and **a ceiling that moved when you fused would not be a
-ceiling**. `fuse` is the sum of per-op bounds over the whole-stage bound, which is what fusion is
-worth before anybody writes a kernel.
-
-`achieved`, `left` and `floor` are **measurements**, from calibrating BG-1 on the pinned part. The
-fp8 and NVFP4 cells print `--` because they have no implementation to measure: the size of the box
-is known and how full it is is not. That is stated on the table itself, not buried.
-
-The peaks behind those ceilings *are* measured: `burnish probe` has run on the pinned 5090 and
-found **1506.7 GB/s** sustained and **236.9 TFLOPS** on a well-tuned bf16 GEMM. That corrects a
-claim this README used to make — that a vendor peak is always optimistic, so the published room is
-always an overstatement. The bandwidth figure was indeed optimistic (1792 assumed), but the bf16
-figure was *pessimistic* (209.5 assumed against 236.9 achieved). The error runs whichever way the
-assumption was wrong, and only a probe settles it.
+**Read `issues/weight-formats.md` before picking a quantization cell.** One DiT step costs 3.266 s
+at fp32 and 3.576 s at bf16 — halving the weight traffic made it *slower*. At 1.5% of its ceiling
+the step is bound by neither bytes nor flops, so an fp8 or NVFP4 cell is worth much less than its
+published ceiling until the kernels in front of it improve.
 
 ---
 
@@ -215,32 +100,16 @@ scripts/verify_checkpoint_layout.py --against-saved   # names and shapes vs the 
 scripts/differential_test.py --weights DIR --stage vae-decode   # vs the reference, same weights
 ```
 
-Everything above needs no GPU. Everything that produces a **measurement** —
-`burnish probe | calibrate | gate | bench` — refuses to run without a device rather than
-estimating. There is no fallback and there is not supposed to be one.
+Everything that produces a **measurement** — `burnish probe | calibrate | gate | bench` — refuses to
+run without a device rather than estimating. There is no fallback and there is not supposed to be
+one.
 
 ---
 
 ## How the runtime is arranged
 
-A contributor adds a kernel by **registering a new name beside the old one**, never by replacing a
-file:
-
-```cpp
-register_impl<AttentionArgs>("attention", "flash-sm120", my_kernel, "…");
-```
-
-So base and candidate run in one process, one model load, one thermal state; the old
-implementation stays runnable forever; and `--impl <name>` fails loudly if the name is not
-registered rather than silently measuring something else. The harness compares the impl the
-runtime *reports* against the one it asked for and refuses a run that fell back.
-
-**One name, fifteen ops.** `--impl flash-sm120` applies to whichever ops register that name and
-leaves the rest on the baseline **for the device the run is placed on** — `cuda` on a CUDA run,
-the host kernels on CPU. So a submission that registers one attention variant takes the fallback
-for the other fourteen ops, which is the normal case rather than an edge case, and the fallback
-has to be device-correct or nothing runs. The runtime reports the resolved name for every op in
-`effective.impls`, and the harness refuses a run whose report disagrees with the request.
+A kernel is added by **registering a new name beside the old one**, never by replacing a file —
+`CONTRIBUTING.md` says how, `docs/ARCHITECTURE.md` says why.
 
 ```
 include/burnisher/     tensor, dtype, op registry, models, scheduler, pipeline
@@ -248,66 +117,47 @@ src/cpu/               reference implementations — the correctness ORACLE, not
 src/cuda/              device allocator and probe (device.cu), and the op backend (ops_cuda.cu)
 src/models/            T5 encoder, PixArt DiT, VAE decoder as explicit graphs over the registry
 eval/burnscore/        the scorer: geometry, roofline, floor, bootstrap, frontier, receipt, ledger
-eval/cells/BG-1/       the frozen generation: definition, calibration, prompts, receipts
+eval/cells/            the frozen generations: definition, calibration, prompts, receipts
 tools/burnish          the harness CLI
 issues/                the backlog, with every figure computed from configs/
 ```
 
-The op sequence in `src/models/pixart_dit.cpp` is meant to be read side by side with the op
-enumeration in `eval/burnscore/geometry.py`. If they drift, the published ceiling stops describing
-the thing that runs and nothing else would notice.
+The op sequence in `src/models/pixart_dit.cpp` must match the op enumeration in
+`eval/burnscore/geometry.py`; if they drift, the published ceiling stops describing what runs.
 
 ---
 
-## Where the work is
+## Which document answers what
 
-`issues/README.md` — twelve open items, each carrying its own arithmetic, plus two closed ones
-kept for the record of what they cost.
-
-**Read `weight-formats` before picking a quantization cell.** A measurement there says one DiT
-step costs 3.266 s at fp32 and 3.576 s at bf16 — halving the weight traffic made it *slower*. At
-1.5% of its ceiling the step is bound by neither bytes nor flops, so an fp8 or NVFP4 cell is
-worth much less than its published ceiling until the work that makes this path bandwidth-bound
-lands first. That is the difference between a `basis: model` number and a `basis: measured` one,
-and it is the whole reason the distinction is enforced.
-
-The rest: DiT attention at 4k–16k tokens (fp8/NVFP4), VAE decode tiling and the 16384-token mid-block
-attention, T5 quantization and caching, fused AdaLN, weight formats on silicon with no reference
-tuning, step caching, CUDA-graph capture of the 571-launch denoise loop, offload and streaming,
-per-resolution shape specialisation, temporal and sparse attention for video.
+| document | for | answers |
+|:--|:--|:--|
+| `CONTRIBUTING.md` | contributors | how to pick, write, check and submit a change, and what comes back |
+| `issues/README.md` | contributors | what to work on, with the arithmetic for each item |
+| `docs/SCORING.md` | contributors, skeptics | why the score is gap-closed, floor-credited and frontier-based |
+| `docs/EVAL.md` | contributors, validators | the evaluation loop, labels, rounds, audits, challenges, the instrument guard |
+| `docs/CARTOGRAPHY.md` | contributors | what a new cell must come with, and how it is paid |
+| `docs/CORRECTNESS.md` | contributors | the correctness gate and its tolerance |
+| `docs/ARCHITECTURE.md` | contributors | how the runtime and harness fit, and why |
+| `docs/HARDWARE.md` | validators | the measurement box and the order to run things in |
+| `docs/STATUS.md` | everyone | what is measured, what is not, and every defect found so far |
+| `docs/SCREEN.md`, `docs/ROOFLINE.md` | skeptics | why v0 pins this model, and every ceiling (both generated) |
 
 ---
 
 ## The rules this repository was built around
 
-Every one was learned by somebody getting it wrong.
+Every one was learned by somebody getting it wrong; `docs/STATUS.md` and `docs/HARDWARE.md` say
+how.
 
-- **Never publish a predicted figure as a gain.** Cost-model output carries `basis: "model"`, and
-  `eval/tests/test_schemas.py` fails if a modelled figure reaches a measured field.
-- **The evaluator is where the bugs are.** A broken evaluator prints a confident number. Never
-  remove a guard without knowing which incident it encodes — they are all named where they live.
-  (Five correctness defects in the runtime so far, plus the harness defects `docs/STATUS.md`
-  records. The runtime five are the instructive set: attention read `[batch, heads, seq, dim]`
-  over buffers laid out `[batch, seq, heads, dim]`; the CUDA gather read fp32 token ids as bf16;
-  padding was never masked; the output patch ordering was transposed;
-  and the sampler used the Karras sigma ratio where the reference uses the variance-preserving
-  one — 157 against 0.99998 at t=999. Every one is a *deterministic* wrong answer, so a
-  determinism test passes it and two implementations wrong the same way agree with each other.
-  The last two were caught only by comparing against the reference implementation. See
-  `docs/STATUS.md`.)
-- **An axis whose spread sits inside its own noise is open, not solved.**
+- **Never publish a predicted figure as a gain.** Modelled output carries `basis: "model"`, and
+  `eval/tests/test_schemas.py` fails if one reaches a measured field.
+- **The evaluator is where the bugs are.** Never remove a guard without knowing which incident it
+  encodes — they are named where they live.
 - **Correctness before speed, always.** A submission failing the gate is rejected, not traded off.
-- **Never type a benchmark number by hand.** Every figure in `docs/ROOFLINE.md`, `docs/SCREEN.md`
-  and `issues/` is generated; CI fails if any of them is stale.
-- **Check the assumption rather than restating it.** The runtime's 962 required tensor names were
-  written from the reference implementation's module structure — usually right, and not evidence.
-  Reading the real checkpoint's safetensors headers by HTTP range request (1.8 MB, not 22 GB)
-  turned that into evidence and found a wrong shape declaration on the first run.
-- **Never run two benchmarks at once.** They race for VRAM and the harness turns the loser into a
-  plausible-looking number.
-- **Clocks cannot be pinned in a container**, so only paired interleaved same-box deltas mean
-  anything.
-- **Kill by PID.** `pkill -f` over ssh kills your own session.
+- **An axis whose spread sits inside its own noise is open, not solved.**
+- **Never type a benchmark number by hand.** `docs/ROOFLINE.md`, `docs/SCREEN.md` and `issues/`
+  are generated, and CI fails if any of them is stale.
+- **Never run two benchmarks at once, and kill by PID.** `docs/HARDWARE.md`.
 
 ---
 
