@@ -261,6 +261,7 @@ def evaluate(repo, pr, args) -> dict:
              "--base", args.base, "--worktree", str(wt),
              "--impl-base", args.impl_base, "--impl-candidate", args.impl_candidate,
              "--pr", str(num), "--ledger", args.ledger,
+             "--generation", args.generation,
              "--weights", args.weights, "--noise", args.noise,
              *(["--calibration", args.calibration] if args.calibration else []),
              "--work-dir", str(out_dir)],
@@ -385,6 +386,9 @@ def main():
     ap.add_argument("--ledger", default=os.environ.get("BURNISH_LEDGER", ""))
     ap.add_argument("--weights", default=os.environ.get("BURNISH_WEIGHTS", ""))
     ap.add_argument("--noise", default=os.environ.get("BURNISH_NOISE", ""))
+    ap.add_argument("--generation", default=os.environ.get("BURNISH_GENERATION", "BG-1"),
+                    help="the frozen generation this round scores; --noise must be that "
+                         "generation's pinned noise")
     ap.add_argument("--calibration", default=os.environ.get("BURNISH_CALIBRATION", ""),
                     help="an anchor other than the generation's committed one. Normally empty: "
                          "every card of the pinned class scores against the committed anchor.")

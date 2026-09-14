@@ -45,5 +45,21 @@ class TestEveryStageGetsTheGeneration(unittest.TestCase):
                               f"default generation instead of the one being scored:\n{call}")
 
 
+
+class TestTheBotScoresTheGenerationItIsGiven(unittest.TestCase):
+    """The bot drove `score_submission.sh` without a generation, so every round scored BG-1."""
+
+    def test_the_bot_passes_the_generation_to_score_submission(self):
+        src = (ROOT / "eval" / "pr_bot.py").read_text()
+        start = src.index('/ "score_submission.sh"')
+        call = src[start:src.index("capture_output", start)]
+        self.assertIn('"--generation", args.generation', call)
+
+    def test_the_bot_and_the_round_runner_accept_a_generation(self):
+        for name in ("pr_bot.py", "round.py"):
+            src = (ROOT / "eval" / name).read_text()
+            self.assertIn('ap.add_argument("--generation"', src, name)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
