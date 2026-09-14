@@ -29,12 +29,12 @@ at **1.5%** of its arithmetic ceiling, `vae-decode`
 at **0.8%**, `t5-encode` at
 **18.2%**. v0 ships a correct, complete, *slow*
 pipeline; contributors make it fast and are paid for the fraction of the remaining gap they
-close. The kernels are deliberately naive — no tiling, no tensor cores, every GEMM epilogue a
-separate pass.
+close. The kernels are deliberately naive — no tensor cores, convolution one thread per output
+element, every GEMM epilogue a separate pass.
 
-**What is not known** is in `docs/STATUS.md`, along with the six defects the runtime had, how
-each was found, and the first receipt the instrument ever produced — which was a regression, and
-which found a bug in the runtime on its way to saying so. Overselling the surface is the single
+**What is not known** is in `docs/STATUS.md`, along with the five correctness defects the runtime
+had, how each was found, and the first receipt the instrument ever produced — which was a
+regression, and which found a bug in the runtime on its way to saying so. Overselling the surface is the single
 failure mode that kills a subnet, so that page comes before the pitch.
 
 ---
@@ -152,9 +152,9 @@ HuggingFace gate that returns 401 to `curl`.
 
 | stage | runs | ceiling | share | resident params |
 |:--|--:|--:|--:|--:|
-| `t5-encode` | 1 | 26.9 ms | 2.0% | 9.53 GB |
-| `dit-step` | 20 | 63.4 ms | 94.3% | 1.22 GB |
-| `vae-decode` | 1 | 50.1 ms | 3.7% | 0.10 GB |
+| `t5-encode` | 1 | 23.1 ms | 2.0% | 9.53 GB |
+| `dit-step` | 20 | 54.4 ms | 94.3% | 1.22 GB |
+| `vae-decode` | 1 | 43.0 ms | 3.7% | 0.10 GB |
 
 **The text encoder is 89% of the checkpoint and 2% of the clock.** It runs once; the DiT runs
 twenty times. A screen that ranked stages by parameter count — the natural thing to do — would send
@@ -170,11 +170,11 @@ frontier scores peak VRAM.
 
 ```
   cell                       runs    ceiling   bound       ai  fuse  achieved    left   floor  res
-  t5-encode/1024/bf16           1    26.87ms compute      607  1.03        --      --      --   --
-  dit-step/1024/bf16           20    63.40ms compute    10864  1.12        --      --      --   --
-  vae-decode/1024/bf16          1    50.06ms compute    99505  1.23        --      --      --   --
-  dit-step/1024/fp8            20    31.70ms compute    21715  1.23        --      --      --   --
-  dit-step/1024/nvfp4          20    15.85ms compute    38565  1.49        --      --      --   --
+  t5-encode/1024/bf16           1    23.08ms compute      607  1.04     18.2%   5.51x   3.753  yes
+  dit-step/1024/bf16           20    54.45ms compute    10864  1.16      1.5%  65.59x   0.578  yes
+  vae-decode/1024/bf16          1    43.00ms compute    99505  1.32      0.8% 126.37x   0.259  yes
+  dit-step/1024/fp8            20    31.70ms compute    21715  1.28        --      --      --   --
+  dit-step/1024/nvfp4          20    15.85ms compute    38565  1.58        --      --      --   --
 ```
 
 `ceiling` is arithmetic: `max(flops / peak, unavoidable_bytes / bandwidth)`. `unavoidable_bytes` is
@@ -183,9 +183,9 @@ intermediate is removable by fusion, and **a ceiling that moved when you fused w
 ceiling**. `fuse` is the sum of per-op bounds over the whole-stage bound, which is what fusion is
 worth before anybody writes a kernel.
 
-`achieved`, `left` and `floor` are **measurements**, and they print `--` because nobody has taken
-them. A cell at 95% of its ceiling looks identical here to one at 8%. That is stated on the table
-itself, not buried.
+`achieved`, `left` and `floor` are **measurements**, from calibrating BG-1 on the pinned part. The
+fp8 and NVFP4 cells print `--` because they have no implementation to measure: the size of the box
+is known and how full it is is not. That is stated on the table itself, not buried.
 
 The peaks behind those ceilings *are* measured: `burnish probe` has run on the pinned 5090 and
 found **1506.7 GB/s** sustained and **236.9 TFLOPS** on a well-tuned bf16 GEMM. That corrects a
@@ -286,9 +286,10 @@ Every one was learned by somebody getting it wrong.
   `eval/tests/test_schemas.py` fails if a modelled figure reaches a measured field.
 - **The evaluator is where the bugs are.** A broken evaluator prints a confident number. Never
   remove a guard without knowing which incident it encodes — they are all named where they live.
-  (Eight real defects so far — four in the harness, four in the runtime. The runtime four are the
-  instructive set: attention read `[batch, heads, seq, dim]` over buffers laid out
-  `[batch, seq, heads, dim]`; padding was never masked; the output patch ordering was transposed;
+  (Five correctness defects in the runtime so far, plus the harness defects `docs/STATUS.md`
+  records. The runtime five are the instructive set: attention read `[batch, heads, seq, dim]`
+  over buffers laid out `[batch, seq, heads, dim]`; the CUDA gather read fp32 token ids as bf16;
+  padding was never masked; the output patch ordering was transposed;
   and the sampler used the Karras sigma ratio where the reference uses the variance-preserving
   one — 157 against 0.99998 at t=999. Every one is a *deterministic* wrong answer, so a
   determinism test passes it and two implementations wrong the same way agree with each other.

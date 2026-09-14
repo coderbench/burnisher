@@ -5,9 +5,10 @@ about which bucket a result fell into, and no maintainer discretion over the sco
 
 ## Before you pick something
 
-1. Read `docs/STATUS.md`. It says what has been measured (nothing, yet) and what has not.
+1. Read `docs/STATUS.md`. It says what has been measured and what has not.
 2. Run `burnish roofline`. It prints every cell's arithmetic ceiling and how full it is. Cells
-   with `achieved: --` are cells where nobody knows how much room there is.
+   with `achieved: --` have not been measured -- today the fp8 and NVFP4 cells, which have no
+   implementation yet -- so nobody knows how much room they have.
 3. Read `issues/README.md`. Every item carries its own arithmetic, computed from `configs/`.
 4. Check the `res` column. A cell whose remaining room does not clear 20× its own noise floor
    **cannot be shown to have improved**, however good your kernel is. Do not start there.

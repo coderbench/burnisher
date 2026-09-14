@@ -37,7 +37,7 @@ own resolution -- which is the honest case; a floor decided by resolution would 
 cannot see its own noise.
 
 **That headroom is real and it is the point.** The kernels are deliberately naive: attention is
-one block per query row with no tiling and no tensor cores, convolution is one thread per output
+one block per query row with no tensor cores, convolution is one thread per output
 element, and every GEMM epilogue is a separate pass. v0 ships a correct, complete, SLOW pipeline
 and contributors make it fast.
 
