@@ -5,9 +5,13 @@ discretion over the score.
 
 ## What you need
 
-- **To build, test and submit:** no GPU. The validator builds, gates and measures every submission,
-  running the kernel you register under a new name against `cuda`.
-- **To know if your kernel is faster before a round tells you:** an RTX 5090 and the checkpoint.
+- **To build, run `scripts/check.sh` and submit:** no GPU. The validator builds, gates and measures
+  every submission: it finds the kernel name your pull request newly registers and measures it
+  against `cuda` (the stock CUDA kernels) in the same binary. `check.sh` builds the CPU runtime
+  only, so it never compiles a CUDA kernel; compiling one yourself needs the CUDA toolkit, not a
+  GPU.
+- **To run your CUDA kernel, or to know if it is faster before a round tells you:** an RTX 5090,
+  the checkpoint and the generation's pinned noise file. Any RTX 5090 will do.
 
 ## 1. Pick something
 
