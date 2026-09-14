@@ -1,7 +1,6 @@
 """Each cell's own measured noise floor, and the bar a submission has to clear in that cell.
 
-The thing this replaces is a constant. SparkInfer discards anything under 2%; that number is a
-guess at the noise, and it is wrong in both directions at once. On a quiet cell a 0.5% gain is
+The thing this replaces is a constant. "Discard anything under 2%" is a guess at the noise, and it is wrong in both directions at once. On a quiet cell a 0.5% gain is
 real and gets thrown away. On a noisy one a 3% gain is nothing and gets paid. The quantity being
 guessed at is measurable, so measure it.
 

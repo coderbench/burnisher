@@ -28,10 +28,7 @@ What is measured, what is not, and every defect found so far: `docs/STATUS.md`.
 ## What it is for
 
 Gittensor SN74 pays merged pull requests that carry a bot-verified speedup. Burnisher is being built
-to become a scored target there.
-[`gittensor-ai-lab/sparkinfer`](https://github.com/gittensor-ai-lab/sparkinfer) is the existing
-target, for LLMs; its own `docs/image_input.md` says it does not generate images. Burnisher is the
-generation counterpart: same hardware and workflow, different workload and scoring.
+to become a scored target there, for image generation.
 
 ## How a change is scored
 

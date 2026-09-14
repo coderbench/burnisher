@@ -57,6 +57,13 @@ ROOT = Path(__file__).resolve().parent.parent
 # A label the bot applies to say "seen, and deliberately not measured". Distinct from every
 # outcome label because it is not an outcome -- nothing was measured.
 SKIPPED = f"{V.PREFIX}:skipped-instrument"
+COPYCAT = f"{V.PREFIX}:copycat"
+COPYCAT_REVIEW = f"{V.PREFIX}:copycat-review"
+# A maintainer's override, deliberately outside the burnish: namespace so it never reads as an outcome.
+CLEARED = "copycat-cleared"
+BLOCKED = f"{V.PREFIX}:blocked"
+REREGISTERED = f"{V.PREFIX}:reregistered"
+REREGISTRATION_CLEARED = "reregistration-cleared"
 
 
 def gh(args, *, check=True, timeout=120):
@@ -67,7 +74,7 @@ def gh(args, *, check=True, timeout=120):
 
 
 def open_prs(repo):
-    r = gh(["pr", "list", "-R", repo, "--state", "open", "--limit", "50",
+    r = gh(["pr", "list", "-R", repo, "--state", "open", "--limit", "200",
             "--json", "number,headRefOid,headRefName,labels,title,author"])
     return json.loads(r.stdout)
 
@@ -146,6 +153,124 @@ def guard(worktree: Path, base: str) -> dict:
     return json.loads(out.read_text()) if out.exists() else {"ok": True, "outcome": "CONTRIBUTOR"}
 
 
+def maintainers() -> set:
+    """Who the copycat guard exempts: the owners .github/CODEOWNERS names, plus BURNISH_MAINTAINERS.
+
+    Read from the evaluator's own checkout, never the submission's, so a pull request cannot add
+    its author to the list in the same commit that needs the exemption.
+    """
+    names = {n.strip().lower() for n in os.environ.get("BURNISH_MAINTAINERS", "").split(",")
+             if n.strip()}
+    owners = ROOT / ".github" / "CODEOWNERS"
+    if owners.exists():
+        for line in owners.read_text().splitlines():
+            names |= {w[1:].lower() for w in line.split("#")[0].split()
+                      if w.startswith("@") and "/" not in w}
+    return names
+
+
+def _run_guard(cmd, out) -> dict:
+    """A guard that crashes is the evaluator's fault, so it comes back as ERROR, never as a pass."""
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0 or not out.exists():
+        return {"outcome": "ERROR", "detail": (r.stdout + r.stderr)[-1500:]}
+    return json.loads(out.read_text())
+
+
+def copycat(repo, worktree: Path, pr: dict, args) -> dict:
+    """The copycat guard -- the base copy, like the instrument guard -- against the PRs open now."""
+    out = Path(tempfile.mkdtemp()) / "copycat.json"
+    corpus = args.copycat_corpus or (str(Path(args.ledger) / "copycat") if args.ledger
+                                     else str(out.parent / "corpus"))
+    open_now = getattr(args, "open_prs", None)
+    if open_now is None:
+        open_now = [p["number"] for p in open_prs(repo)]
+    labels = {l["name"] for l in pr.get("labels", [])}
+    cmd = [sys.executable, str(ROOT / "scripts" / "copycat_guard.py"), "--repo", str(worktree),
+           "--base", args.base, "--pr", str(pr["number"]),
+           "--author", (pr.get("author") or {}).get("login", ""),
+           "--open-prs", ",".join(str(n) for n in open_now),
+           "--maintainers", ",".join(sorted(maintainers())),
+           "--corpus", corpus, "--json", str(out)]
+    if CLEARED in labels:
+        cmd.append("--cleared")
+    if args.dry_run:
+        cmd.append("--no-record")
+    return _run_guard(cmd, out)
+
+
+def reregistration(worktree: Path, pr: dict, args) -> dict:
+    """The re-registration guard: does this register a kernel already on main under a new name?"""
+    out = Path(tempfile.mkdtemp()) / "reregistration.json"
+    cmd = [sys.executable, str(ROOT / "scripts" / "reregistration_guard.py"),
+           "--repo", str(worktree), "--base", args.base, "--json", str(out)]
+    if REREGISTRATION_CLEARED in {l["name"] for l in pr.get("labels", [])}:
+        cmd.append("--cleared")
+    return _run_guard(cmd, out)
+
+
+def close_pr(repo, num, *, dry_run=False) -> bool:
+    if dry_run:
+        print(f"   [dry-run] would close #{num}")
+        return True
+    return gh(["pr", "close", str(num), "-R", repo], check=False).returncode == 0
+
+
+def _blocked_note(cc: dict) -> str:
+    blk = cc.get("block") or {}
+    return "\n".join([
+        "### `burnish:blocked`", "",
+        f"This account is blocked for submitting someone else's work (#{blk.get('pr')}: "
+        f"{blk.get('reason')}). This pull request is closed without being evaluated.", "",
+        "A maintainer who finds the block wrong lifts it with a recorded reason: "
+        "`scripts/copycat_guard.py --corpus <ledger>/copycat --unblock <login> --reason ...`."])
+
+
+def _reregistration_note(rr: dict) -> str:
+    lines = ["### `burnish:reregistered`", "",
+             "**This registers a kernel that is already on main under a new name.**", ""]
+    for f in rr["findings"]:
+        r, m = f["registration"], f["matches"]
+        how = ("the same callable" if f["kind"] == "same-callable"
+               else f"the same kernel after renaming and reformatting ({f['similarity']:.0%})")
+        lines.append(f"- `{r['op']}/{r['name']}` (`{r['callable']}`) is {how} as "
+                     f"`{m['op']}/{m['name']}` (`{m['callable']}`)")
+    lines += ["", "It was not evaluated. Submissions are measured against `cuda`, which never runs "
+                  "the kernel already registered, so it would be measured as a gain it did not make.",
+              "", f"If the new registration is genuinely different work, a maintainer adds "
+                  f"`{REREGISTRATION_CLEARED}` and removes this label; it is then evaluated normally."]
+    return "\n".join(lines)
+
+
+def _copycat_note(cc: dict, *, measured=None) -> str:
+    orig = cc.get("original")
+    head = ("### `burnish:copycat`" if cc["outcome"] == "COPY" else "### `burnish:copycat-review`")
+    lines = [head, "", f"**{cc['reason']}.**"]
+    if orig:
+        lines += ["", f"The earlier work is #{orig['pr']} by @{orig['author']}, first observed "
+                      f"by the evaluator at {orig['first_seen']}."]
+    if measured is not None:
+        lines += ["", f"It was measured: `{measured}`. It is not paid until a maintainer clears it."]
+    else:
+        lines += ["", "It was not evaluated, and no GPU time was spent on it. The account is blocked: "
+                      "this pull request is closed, and later pull requests from it are closed "
+                      "without being evaluated."]
+    if cc.get("evidence"):
+        lines += ["", "The new lines that match, after renaming, reformatting and shared boilerplate "
+                      "are set aside:", "", "```"]
+        lines += [f"{e['path']}: {e['line']}" for e in cc["evidence"]]
+        lines += ["```"]
+    if cc["outcome"] == "COPY":
+        lines += ["", "If this is independent work, a maintainer lifts the block with a recorded "
+                      "reason, reopens the pull request and adds `" + CLEARED + "`; it is then "
+                      "evaluated like any other submission."]
+    else:
+        lines += ["", f"If this is independent work, a maintainer adds `{CLEARED}` and removes this "
+                      "label; the result then stands."]
+    lines += ["", "Iterating on your own earlier pull request is never flagged."]
+    return "\n".join(lines)
+
+
 def report(verdict: dict, receipt: dict, *, raw_name, receipt_name) -> str:
     """What the bot writes on the PR. Says what was measured and how to check it."""
     v = verdict
@@ -217,12 +342,54 @@ def evaluate(repo, pr, args) -> dict:
                        capture_output=True, text=True)
         wt = work / "src"
 
+        # A blocked account and a copy of an open pull request are answered first, before even the
+        # instrument guard: a copy is closed whatever it touches, and neither costs GPU time.
+        cc = copycat(repo, wt, pr, args)
+        if cc["outcome"] == "ERROR":
+            print(f"   !! the copycat guard failed: {cc['detail'][-300:]}")
+            if not args.dry_run:
+                set_label(repo, num, f"{V.PREFIX}:eval-error")
+                comment(repo, num, "### `burnish:eval-error`\n\nThe copycat guard failed. This is "
+                                   "not the submission's fault and it will be re-run.")
+            return {"pr": num, "outcome": "EVAL_ERROR", "copycat": cc}
+        if cc["outcome"] == "BLOCKED":
+            print(f"   BLOCKED: {cc['reason']}")
+            set_label(repo, num, BLOCKED, color=V.COLORS[V.BLOCKED],
+                      description=V.ALL_OUTCOMES[V.BLOCKED][0], dry_run=args.dry_run)
+            comment(repo, num, _blocked_note(cc), dry_run=args.dry_run)
+            close_pr(repo, num, dry_run=args.dry_run)
+            return {"pr": num, "outcome": "BLOCKED", "copycat": cc}
+        if cc["outcome"] == "COPY":
+            print(f"   COPYCAT: {cc['reason']} -- account blocked, pull request closed")
+            set_label(repo, num, COPYCAT, color=V.COLORS[V.COPYCAT],
+                      description=V.ALL_OUTCOMES[V.COPYCAT][0], dry_run=args.dry_run)
+            comment(repo, num, _copycat_note(cc), dry_run=args.dry_run)
+            close_pr(repo, num, dry_run=args.dry_run)
+            return {"pr": num, "outcome": "COPYCAT", "copycat": cc}
+
         g = guard(wt, args.base)
         if not g["ok"]:
             print(f"   SKIPPED: changes the instrument ({len(g['blocked'])} path(s))")
             set_label(repo, num, SKIPPED, dry_run=args.dry_run)
             comment(repo, num, _skip_note(g), dry_run=args.dry_run)
             return {"pr": num, "outcome": "SKIPPED", "guard": g}
+
+        # A kernel already on main registered again under a new name is measured against `cuda`,
+        # which never runs it, so it would be credited with a gain that already landed.
+        rr = reregistration(wt, pr, args)
+        if rr["outcome"] == "ERROR":
+            print(f"   !! the reregistration guard failed: {rr['detail'][-300:]}")
+            if not args.dry_run:
+                set_label(repo, num, f"{V.PREFIX}:eval-error")
+                comment(repo, num, "### `burnish:eval-error`\n\nThe re-registration guard failed. "
+                                   "This is not the submission's fault and it will be re-run.")
+            return {"pr": num, "outcome": "EVAL_ERROR", "reregistration": rr}
+        if rr["outcome"] == "REREGISTERED":
+            print(f"   REREGISTERED: {len(rr['findings'])} registration(s) already on main")
+            set_label(repo, num, REREGISTERED, color=V.COLORS[V.REREGISTERED],
+                      description=V.ALL_OUTCOMES[V.REREGISTERED][0], dry_run=args.dry_run)
+            comment(repo, num, _reregistration_note(rr), dry_run=args.dry_run)
+            return {"pr": num, "outcome": "REREGISTERED", "reregistration": rr}
 
         if args.dry_run:
             print(f"   [dry-run] would evaluate: {g['outcome']}")
@@ -284,6 +451,15 @@ def evaluate(repo, pr, args) -> dict:
         pub.mkdir(parents=True, exist_ok=True)
         shutil.copy(out_dir / "raw.json", pub / f"{rid}-raw.json")
 
+        if cc["outcome"] == "REVIEW" and v["pays"]:
+            print(f"   COPYCAT REVIEW: {cc['reason']} -- measured {v['label']}, held")
+            set_label(repo, num, COPYCAT_REVIEW, color=V.COLORS[V.COPYCAT_REVIEW],
+                      description=V.ALL_OUTCOMES[V.COPYCAT_REVIEW][0])
+            comment(repo, num, report(v, receipt, raw_name=f"{rid}-raw.json",
+                                      receipt_name=f"{rid}.json")
+                    + "\n\n" + _copycat_note(cc, measured=v["label"]))
+            return {"pr": num, "outcome": "COPYCAT_REVIEW", "label": COPYCAT_REVIEW,
+                    "payout_fraction": 0.0, "withheld_payout_fraction": v["payout_fraction"]}
         set_label(repo, num, v["label"], color=V.color_for(receipt),
                   description=v["headline"])
         comment(repo, num, report(v, receipt,
@@ -392,6 +568,8 @@ def main():
     ap.add_argument("--calibration", default=os.environ.get("BURNISH_CALIBRATION", ""),
                     help="an anchor other than the generation's committed one. Normally empty: "
                          "every card of the pinned class scores against the committed anchor.")
+    ap.add_argument("--copycat-corpus", default=os.environ.get("BURNISH_COPYCAT_CORPUS", ""),
+                    help="append-only copycat observation record; defaults to <ledger>/copycat")
     ap.add_argument("--impl-base", default="cuda")
     ap.add_argument("--impl-candidate", required=False, default="cuda")
     ap.add_argument("--timeout", type=int, default=7200)
@@ -402,8 +580,10 @@ def main():
     a = ap.parse_args()
 
 
-    prs = ([p for p in open_prs(a.repo) if p["number"] == a.pr] if a.pr
-           else [p for p in open_prs(a.repo) if not already_labelled(p)])
+    everything = open_prs(a.repo)
+    a.open_prs = [p["number"] for p in everything]      # the copycat guard's references
+    prs = ([p for p in everything if p["number"] == a.pr] if a.pr
+           else [p for p in everything if not already_labelled(p)])
     if not prs:
         print("nothing to evaluate")
         return 0

@@ -91,6 +91,11 @@ All labels, disputes and the evaluation loop: `docs/EVAL.md`.
   and never remove a guard without reading the incident named in its comment.
 - **Anything under `eval/cells/` that already exists is frozen.** Change means a new generation.
 - **Docs, tooling, refactors:** welcome, score zero.
+- **Someone else's work is not paid.** New code that copies another author's open pull request is
+  labelled `burnish:copycat`, the pull request is closed and the account is blocked. Registering a
+  kernel already on main under a new name is labelled `burnish:reregistered` and not evaluated.
+  Starting from a kernel on main, changing it, and iterating on your own pull requests are fine.
+  Details: `docs/EVAL.md`.
 
 ## Commit messages
 

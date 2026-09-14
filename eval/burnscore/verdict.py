@@ -110,8 +110,35 @@ CELL_OPENED = "CELL_OPENED"
 
 NEEDS_REBASE = "NEEDS_REBASE"
 MERGE_FIRST = "MERGE_FIRST"
+COPYCAT = "COPYCAT"
+COPYCAT_REVIEW = "COPYCAT_REVIEW"
+BLOCKED = "BLOCKED"
+REREGISTERED = "REREGISTERED"
 
 EXTRA_OUTCOMES = {
+    COPYCAT: (
+        "the new code matches an open pull request by someone else",
+        "Not evaluated, not paid, and the account is blocked. Most of this submission's new code "
+        "matches a pull request that is open, by a different author and observed earlier, after "
+        "renaming, reformatting and shared boilerplate are set aside. The pull request is closed; "
+        "the comment quotes the matching lines and names the original. A maintainer who finds it "
+        "wrong lifts the block with a recorded reason."),
+    BLOCKED: (
+        "the account is blocked for submitting someone else's work",
+        "Not evaluated. An earlier submission from this account was a copy, so this pull request "
+        "is closed. A block is lifted only by a maintainer, with a recorded reason."),
+    REREGISTERED: (
+        "it registers a kernel already on main under a new name",
+        "Not evaluated and not paid. A new registration is the same callable as one on main, or "
+        "the same kernel after renaming and reformatting. Submissions are measured against the "
+        "baseline, which never runs the kernel already registered, so it would be credited with a "
+        "gain that already landed. Different constants are a variant, not a re-registration."),
+    COPYCAT_REVIEW: (
+        "measured, but part of it matches earlier work by someone else",
+        "Measured and not yet paid. Part of this submission matches an open pull request by a "
+        "different author, or it contains most of one -- which a branch stacked on somebody "
+        "else's unmerged work also does. Only a person can tell those apart, so a maintainer "
+        "decides; clearing it lets the result stand."),
     NEEDS_REBASE: (
         "measured against a baseline that has since moved",
         "Not a rejection and not a judgement of the work. It was measured in the same round as "
@@ -173,6 +200,10 @@ COLORS = {
     "CORRECTNESS_FAIL": RED,
     "DETERMINISM_FAIL": RED,
     "HELD": PURPLE,
+    "COPYCAT": AMBER,
+    "BLOCKED": AMBER,
+    "REREGISTERED": AMBER,
+    "COPYCAT_REVIEW": PURPLE,
     "BUILD_FAIL": ORANGE,
     "EVAL_ERROR": ORANGE,
 }

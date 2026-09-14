@@ -29,14 +29,11 @@ DOCS = sorted(
 BACKTICK = re.compile(r"`([^`\s]+)`")
 MDLINK = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
 
-# Paths that belong to somebody else's repository. A checker cannot tell "our docs/X.md" from
-# "SparkInfer's docs/X.md" and the prose is clearer naming the file the way that project names
-# it, so the exceptions are listed here with the reason rather than the sentence being bent to
-# suit the tool. Keep this list short; an entry is a promise that the path is genuinely external.
-EXTERNAL = {
-    ("README.md", "docs/image_input.md"):
-        "SparkInfer's own document, cited for what it says about image input",
-}
+# Paths that belong to somebody else's repository, as {(document, path): reason}. A checker cannot
+# tell "our docs/X.md" from another project's, so an exception is listed here with its reason
+# rather than the sentence being bent to suit the tool. An entry is a promise that the path is
+# genuinely external.
+EXTERNAL = {}
 
 KNOWN_EXT = {".md", ".py", ".sh", ".json", ".cpp", ".cu", ".h", ".txt", ".yml", ".npy"}
 SCHEMES = ("http://", "https://", "mailto:", "#")

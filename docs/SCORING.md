@@ -48,6 +48,7 @@ Latency, peak VRAM and fidelity to the reference form a **frontier**.
 - **Held-out shape.** Every cell is also run at a shape the evaluator draws after your code is
   frozen (list in `configs/axes.json`). A gain only on the published shape: `SHAPE_OVERFIT`.
 - **Partial runs.** Skipping a cell your change hurts credits nothing.
+- **Copies.** New code that is someone else's earlier submission is not paid (`docs/EVAL.md`).
 - **The ruler.** The measuring code comes from the base commit, and generations are frozen. See
   `docs/EVAL.md`.
 - **Grades.** A schema test fails if a receipt or generation contains `XS`, `XL`, `tier`, `grade`

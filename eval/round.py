@@ -193,6 +193,7 @@ def run(args) -> dict:
               f"--slots.")
 
     prs = open_prs_fifo(args.repo)
+    args.open_prs = [p["number"] for p in prs]          # the copycat guard's references
     taken, waiting = select(prs, args.slots)
     print(f"   {len(prs)} open, {len(taken)} taken this round, {len(waiting)} waiting")
     for p in taken:
@@ -266,6 +267,8 @@ def main():
                     help="the frozen generation this round scores; --noise must be that "
                          "generation's pinned noise")
     ap.add_argument("--calibration", default=os.environ.get("BURNISH_CALIBRATION", ""))
+    ap.add_argument("--copycat-corpus", default=os.environ.get("BURNISH_COPYCAT_CORPUS", ""),
+                    help="append-only copycat observation record; defaults to <ledger>/copycat")
     ap.add_argument("--impl-base", default="cuda")
     ap.add_argument("--impl-candidate", default="cuda")
     ap.add_argument("--timeout", type=int, default=7200)

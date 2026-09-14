@@ -2,18 +2,22 @@
 
 ## What happens to a pull request
 
-1. **Guard.** If it changes the measuring instrument it is labelled `burnish:skipped-instrument`,
+1. **Copies.** If its author is blocked, or its new code copies another open pull request, it is
+   closed and no GPU time is spent (see *Copies* below).
+2. **Guard.** If it changes the measuring instrument it is labelled `burnish:skipped-instrument`,
    and no GPU time is spent.
-2. **Build** from source on the evaluation box.
-3. **Gate** correctness (in fp32) and determinism for both base and candidate
+3. **Re-registration.** If it registers a kernel already on main under a new name it is labelled
+   `burnish:reregistered`, and no GPU time is spent (see *Re-registered kernels* below).
+4. **Build** from source on the evaluation box.
+5. **Gate** correctness (in fp32) and determinism for both base and candidate
    (`docs/CORRECTNESS.md`).
-4. **Bench.** Base and candidate runs alternate, plus a held-out shape drawn after the code is
+6. **Bench.** Base and candidate runs alternate, plus a held-out shape drawn after the code is
    frozen.
-5. **Score** into an append-only ledger outside the repository.
-6. **Publish** the raw measurements and the receipt.
-7. **Label** the pull request from the receipt.
+7. **Score** into an append-only ledger outside the repository.
+8. **Publish** the raw measurements and the receipt, and **label** the pull request from the
+   receipt.
 
-Steps 2–5 are `eval/score_submission.sh`, the same command anyone can run.
+Steps 4–7 are `eval/score_submission.sh`, the same command anyone can run.
 
 ## Rounds
 
@@ -46,13 +50,73 @@ Steps 2–5 are `eval/score_submission.sh`, the same command anyone can run.
 | `burnish:determinism-fail` | Did not reproduce itself. Rejected. |
 | `burnish:held` | An independent re-measurement disagrees. Waiting for a third. |
 | `burnish:skipped-instrument` | Changes the instrument. Not evaluated. |
+| `burnish:copycat` | Most of its new code copies another open pull request. Closed, author blocked. |
+| `burnish:blocked` | The author was blocked for an earlier copy. Closed, not evaluated. |
+| `burnish:copycat-review` | Part of it matches another pull request. Measured, not paid until cleared. |
+| `burnish:reregistered` | Registers a kernel already on main under a new name. Not evaluated. |
 | `burnish:build-fail` | Did not build. Not evaluated. |
 | `burnish:eval-error` | The evaluator's fault, not yours. Re-run. |
 
 Colours: green = paid or merge-first (darker is bigger), blue = measured but not paid, pale blue =
-could not tell, red = correctness or determinism failure, amber = shape overfit or needs rebase,
-purple = disputed, orange = build or evaluator failure, grey = not evaluated. They are defined in
-`eval/burnscore/verdict.py`.
+could not tell, red = correctness or determinism failure, amber = shape overfit, needs rebase,
+copycat, blocked or re-registered, purple = disputed or copycat review, orange = build or evaluator failure, grey = not
+evaluated. They are defined in `eval/burnscore/verdict.py`.
+
+## Copies
+
+Before anything is built, the new code is compared with the pull requests **open now** by other
+authors.
+
+- **Compared as structure, not text.** Identifiers, numbers, strings and comments are normalized
+  away, so renaming and reformatting do not hide a copy.
+- **Only new code counts.** Code already in the change's context, boilerplate that several
+  submissions share, and the baseline on main are never evidence. Copying the old kernel and
+  registering the new one beside it is the intended workflow.
+- **The original is whoever the evaluator observed first,** from an append-only record under the
+  ledger. A pull request force-pushed with copied code gets the time its copied head was first seen.
+- **Iterating on your own pull request is never flagged.** Maintainers named in
+  `.github/CODEOWNERS` are exempt.
+
+| verdict | when | result |
+|:--|:--|:--|
+| `burnish:copycat` | 70% or more of a change's new code is in one open pull request | closed, not paid, author blocked |
+| `burnish:blocked` | the author was blocked before | closed, not evaluated |
+| `burnish:copycat-review` | part of it matches, it contains most of another pull request, or it is a small identical change | measured, not paid until cleared |
+
+**A copy blocks the account automatically.** The block is appended to `<ledger>/copycat/blocked.jsonl`,
+and every later pull request from that account is closed unevaluated. A branch stacked on somebody
+else's unmerged work also contains most of it, so that is review, not a block. The comment quotes the
+matching lines and names the original.
+
+A maintainer who finds a block wrong lifts it with a recorded reason, then reopens the pull request
+and adds `copycat-cleared`:
+
+```bash
+scripts/copycat_guard.py --corpus <ledger>/copycat --unblock <login> --reason "independent work"
+```
+
+A review is cleared by adding `copycat-cleared` and removing the label.
+
+## Re-registered kernels
+
+Submissions are measured against `cuda`, which never runs any other registered kernel. So a kernel
+already on main -- a merged contributor's or a baseline one -- registered again under a new name
+would be measured as a gain that already landed. Before anything is built,
+`scripts/reregistration_guard.py` reads the registry on main and in the submission:
+
+- **The same callable under a new name** (`attention_cuda_tiled<256>` again as `fast`) is
+  re-registered.
+- **A renamed, reformatted copy** of a registered kernel -- its wrapper and the device kernels it
+  launches -- is re-registered at 95% or more token similarity. Identifiers and comments are
+  normalized; helpers most kernels call are left out.
+- **Different constants are a variant, not a copy.** Numbers are kept, so a new tile width like
+  `cuda-tile64` is clear.
+- **A changed copy is clear.** Copying a kernel, changing it and registering it beside the old one
+  is the intended workflow.
+
+It is labelled `burnish:reregistered`, not evaluated and not paid. The account is not blocked: the
+kernel on main is public. A maintainer who finds it wrong adds `reregistration-cleared` and removes
+the label.
 
 ## Checking a verdict
 

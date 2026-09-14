@@ -28,6 +28,8 @@ second moved one by 24×, so each cell's floor is the worst of the two (`docs/EV
 - Checkpoint loading, verified against the real checkpoint's tensor names and shapes.
 - Correctness gate, paired bench, calibration, scorer, receipts, ledger, audit, challenge.
 - Evaluation in rounds, with the instrument taken from the base commit.
+- A copycat guard against open pull requests that blocks copying accounts.
+- A re-registration guard for kernels already on main, tested on the real registry.
 
 `scripts/check.sh` checks all of it without a GPU.
 
@@ -78,6 +80,11 @@ one layer) until they separate.
   with steps -- 0.019% at 1 step, 0.093% at 4, 1.36% at 20 -- so the
   trajectory amplifies rounding rather than hiding a defect. The 5x tolerance that follows
   (6.8% relative L2) catches gross defects, not subtle ones.
+- **How the copycat guard does on real submissions.** It is tested on constructed cases only. A
+  pull request force-pushed with copied code before the evaluator first observed it can still look
+  original, and a block is automatic, so a wrong one waits for a maintainer.
+- **How the re-registration guard does on real submissions.** It is tested on this repository's
+  registry only. A copy that changes a kernel just enough to fall under 95% similarity is clear.
 - **Launch overhead vs raw compute.** The ceiling treats both kinds of win the same. That is a
   choice.
 

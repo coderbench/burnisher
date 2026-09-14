@@ -172,9 +172,7 @@ class TestTheDeclaredModelMatchesTheCode(unittest.TestCase):
 
     A declaration that drifts from the implementation is worse than none: it is the document a
     contributor reads before deciding whether to spend a week, and whoever reads it has no way
-    to know it went stale. SparkInfer's own `.gittensor/weights.json` advertises scoring against
-    remaining roofline headroom while its `label.py` scores against a fixed llama.cpp anchor and
-    marks the ceiling argument "display only" -- an honest file that stopped being true.
+    to know it went stale.
     """
 
     def setUp(self):

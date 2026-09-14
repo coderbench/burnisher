@@ -25,7 +25,11 @@
   "burnish:build-fail": "Not evaluated.",
   "burnish:eval-error": "Not the submission's fault. Re-run.",
   "burnish:merge-first": "The best verified gain of its round. At most one submission per round can be merged, because everything else in that round was measured against the baseline this one is about to move.",
-  "burnish:needs-rebase": "Not a rejection and not a judgement of the work. It was measured in the same round as a submission that closed more of the gap and was merged, so its baseline no longer exists. Rebase and it is re-measured in a later round."
+  "burnish:needs-rebase": "Not a rejection and not a judgement of the work. It was measured in the same round as a submission that closed more of the gap and was merged, so its baseline no longer exists. Rebase and it is re-measured in a later round.",
+  "burnish:copycat": "Not evaluated, not paid, account blocked. Most of the new code matches an open pull request by a different author, observed earlier, once renaming, reformatting and shared boilerplate are set aside. The pull request is closed.",
+  "burnish:copycat-review": "Measured, not yet paid. Part of the new code matches an open pull request by someone else, or the submission contains most of an earlier one, as a stacked branch would. A maintainer decides.",
+  "burnish:blocked": "Not evaluated. The account was blocked for an earlier copy, so this pull request is closed. A maintainer lifts a block only with a recorded reason.",
+  "burnish:reregistered": "Not evaluated, not paid. It registers a kernel already on main under a new name; the baseline never runs that kernel, so it would be credited with a gain that already landed. Different constants are a variant."
  },
  "cartography": "Opening a cell is scored in its own right. A benchmark whose surface only a maintainer may extend stops growing, and a subnet's health depends on axis supply. The instrument guard distinguishes ADDING a new frozen generation (allowed, paid) from MODIFYING one that exists (blocked) -- an added generation cannot change what any existing receipt meant.",
  "verification": {
@@ -41,7 +45,9 @@
   "A partial matrix credits nothing.",
   "The ledger is append-only and written outside the submission's reach; a finalized receipt is never rewritten, and a correction is a new receipt naming what it supersedes.",
   "A frozen generation cannot be edited. If the meaning of the evaluation should change, the answer is a new generation.",
-  "Correctness and self-determinism are gated BEFORE anything is timed, against reference latents produced by a pinned reference implementation this runtime cannot influence."
+  "Correctness and self-determinism are gated BEFORE anything is timed, against reference latents produced by a pinned reference implementation this runtime cannot influence.",
+  "A submission whose new code matches an open pull request by a different author is not paid, the pull request is closed and the account is blocked; the original is whoever the evaluator observed first, from an append-only record outside any submission's reach.",
+  "A submission that registers a kernel already on main under a new name is not evaluated: the baseline never runs that kernel, so it would be credited with a gain that already landed."
  ],
  "non_scoring_contributions": "Welcome, and they score zero: documentation, tooling, refactors, and correct-but-not-faster changes. That is not a judgement of their worth -- the subnet pays for measured movement toward the roofline, and saying so plainly is better than implying otherwise.",
  "areas": {
