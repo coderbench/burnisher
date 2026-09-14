@@ -624,7 +624,7 @@ def _evaluate(repo, pr, args) -> dict:
         # new generation, the submission changed nothing measurable in BG-1, and it came back
         # `unresolved`. Declared payable, no path to payment.
         if g["outcome"] == "CARTOGRAPHY":
-            return _evaluate_cartography(repo, num, wt, g, args)
+            return _evaluate_cartography(repo, pr, wt, g, args, scratch)
 
         # Checked HERE rather than at startup. The guard runs first and costs nothing, so a pass
         # over a queue of instrument-only pull requests needs no checkpoint, no noise file and
@@ -706,9 +706,10 @@ def _evaluate(repo, pr, args) -> dict:
         shutil.rmtree(work, ignore_errors=True)
 
 
-def _evaluate_cartography(repo, num, wt, g, args) -> dict:
+def _evaluate_cartography(repo, pr, wt, g, args, scratch) -> dict:
     """Ask whether the cell is real and measurable, not whether it got faster."""
     import re as _re
+    num = pr["number"]
     names = sorted({m.group(1) for m in
                     (_re.match(r"eval/cells/([^/]+)/", p) for p in g["cartography"]) if m})
     out = Path(tempfile.mkdtemp()) / "cartography.json"
@@ -717,9 +718,23 @@ def _evaluate_cartography(repo, num, wt, g, args) -> dict:
            "--cells-root", str(wt / "eval" / "cells"), "--json", str(out)]
     env = None
     if args.weights and args.noise:
-        cmd += ["--measure", "--binary", str(wt / "build-cuda" / "burnisher"),
+        # Measuring gates and calibrates the cell on the submission's own runtime, so it has to be
+        # built first -- as the sandbox account, exactly as a speedup is. Nothing built it before,
+        # and `--measure` pointed at a binary that did not exist.
+        jail = sandbox(args)
+        build_dir = wt if jail is None else jail.writable_dir(f"burnish-pr{num}-")
+        if jail is not None:
+            scratch.append(build_dir)
+        build = build_submission(pr["headRefOid"], build_dir, jail, ["./scripts/build_cuda.sh"])
+        if build.returncode != 0:
+            set_label(repo, num, f"{V.PREFIX}:build-fail", dry_run=args.dry_run)
+            comment(repo, num, "### `burnish:build-fail`\n\nThe submission did not build on the "
+                               "eval box, so its cell could not be measured.\n\n```\n"
+                    + build.stdout[-2500:] + "\n```", dry_run=args.dry_run)
+            return {"pr": num, "outcome": "BUILD_FAIL"}
+        cmd += ["--measure", "--binary", str(build_dir / "build-cuda" / "burnisher"),
                 "--weights", args.weights, "--noise", args.noise]
-        env = child_env(sandbox(args))          # the gate and calibration launch the runtime
+        env = child_env(jail)                   # the gate and calibration launch the runtime
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=args.timeout, env=env)
     print(r.stdout[-2000:])
     result = json.loads(out.read_text()) if out.exists() else {"pass": False, "checks": []}

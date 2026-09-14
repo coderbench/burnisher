@@ -224,6 +224,15 @@ class TestTheOverlayKeepsAnAddedGeneration(unittest.TestCase):
                       "the overlay does not restrict what it keeps to generations that are "
                       "genuinely new, so a submission could smuggle an edit through it")
 
+    def test_the_bot_builds_the_submission_before_measuring_a_cell(self):
+        """`--measure` runs the submission's runtime; nothing built it, so it had no binary."""
+        bot = (ROOT / "eval" / "pr_bot.py").read_text()
+        body = bot[bot.index("def _evaluate_cartography("):bot.index("def _cartography_note(")]
+        self.assertIn("build_submission(", body)
+        self.assertLess(body.index("build_submission("), body.index('"--measure"'))
+        self.assertIn('str(build_dir / "build-cuda" / "burnisher")', body)
+        self.assertNotIn('wt / "build-cuda"', body)
+
     def test_the_bot_routes_cartography_away_from_the_speedup_path(self):
         bot = (ROOT / "eval" / "pr_bot.py").read_text()
         self.assertIn('if g["outcome"] == "CARTOGRAPHY":', bot)
