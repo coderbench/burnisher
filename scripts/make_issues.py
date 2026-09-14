@@ -201,6 +201,23 @@ def issue(slug, title, labels, closed_by=None):
     return wrap
 
 
+def _attention_calibration_note(f):
+    """How full the attention cells are, from the calibration artifact when it exists.
+
+    This paragraph once said no Blackwell device had run this code, and it stayed true in the
+    issue long after BG-1 was calibrated, because it was prose rather than a figure. Reading the
+    artifact means the sentence follows the calibration instead of outliving it.
+    """
+    a = f.get("dit_achieved")
+    if a is None:
+        return ("\nEvery achieved fraction is currently `null`, because `burnish calibrate` has "
+                "not been run\non the pinned part.")
+    return MEASURED_MARK + (
+        f"\nOnly `dit-step/1024/bf16` is calibrated, and it sits at {100 * a:.1f}% of its ceiling\n"
+        f"(`eval/cells/BG-1/reference.json`). The fp8 and NVFP4 cells have no implementation to\n"
+        f"measure, and the 512 and 2048 rows are ceilings with no calibrated cell behind them.")
+
+
 @issue("dit-attention", "DiT self-attention at 4k-16k tokens", ["kernel", "dit", "cuda"])
 def _(f):
     r = f["resolutions"]
@@ -220,21 +237,22 @@ At 2048px the self-attention alone is {r[2048]['dit_attention_share']:.0%} of th
 {r[2048]['tokens']} tokens is a {r[2048]['tokens'] // r[512]['tokens']}x token count over 512px
 and attention costs the square of it.
 
-**What is here now.** `attention` has two registered implementations: `stock`, an online-softmax
-streaming reference, and `materialized`, which writes the whole score matrix. Both are CPU only.
-There is no CUDA implementation of either, so this cell currently cannot run on a device at all.
+**What is here now.** On the host, `stock` is an online-softmax streaming reference and
+`materialized` writes the whole score matrix. On the device, `cuda` is a tiled online softmax,
+deterministic, one block per query row, with no tensor cores -- the baseline a submission is
+measured against. `cuda-tile64` and `cuda-tile1024` are the same kernel at other tile widths, kept
+as measurable neighbours; `examples/` holds the receipt that scored `cuda-tile1024` as a
+regression.
 
-**What would count.** A CUDA attention kernel registered under a new name, A/B'd against `stock`
+**What would count.** A CUDA attention kernel registered under a new name, A/B'd against `cuda`
 in one process. The fp8 and NVFP4 paths are separate cells with their own published ceilings --
 `dit-step/1024/fp8` at {f['dit_ceiling_fp8_ms']:.1f} ms and `dit-step/1024/nvfp4` at
 {f['dit_ceiling_nvfp4_ms']:.1f} ms against bf16's {f['dit_ceiling_bf16_ms']:.1f} ms -- and
 neither has a reference implementation, so landing one is also a cartography contribution
 (docs/CARTOGRAPHY.md).
 
-**Read this before starting.** The ceilings above are ARITHMETIC and the achieved fraction of
-every one of them is currently `null`, because no Blackwell device has run this code. A ceiling
-tells you how big the box is and says nothing about how full it is. `burnish calibrate` fills
-that in and it has not been run.
+**Read this before starting.** The ceilings above are ARITHMETIC. A ceiling tells you how big
+the box is and says nothing about how full it is.{_attention_calibration_note(f)}
 """
 
 

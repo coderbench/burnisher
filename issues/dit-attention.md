@@ -2,7 +2,8 @@
 
 **Status:** open  
 **Labels:** kernel, dit, cuda  
-**Basis:** model (arithmetic). No measurement appears below.  
+**Basis:** model (arithmetic) for every ceiling, and clearly marked where a MEASURED
+figure from the pinned hardware is quoted alongside one. A ceiling is not a gain.  
 **Device:** NVIDIA GeForce RTX 5090
 
 Self-attention is the largest single block of arithmetic in the denoise step, and its share
@@ -18,21 +19,25 @@ At 2048px the self-attention alone is 67% of the step, because
 16384 tokens is a 16x token count over 512px
 and attention costs the square of it.
 
-**What is here now.** `attention` has two registered implementations: `stock`, an online-softmax
-streaming reference, and `materialized`, which writes the whole score matrix. Both are CPU only.
-There is no CUDA implementation of either, so this cell currently cannot run on a device at all.
+**What is here now.** On the host, `stock` is an online-softmax streaming reference and
+`materialized` writes the whole score matrix. On the device, `cuda` is a tiled online softmax,
+deterministic, one block per query row, with no tensor cores -- the baseline a submission is
+measured against. `cuda-tile64` and `cuda-tile1024` are the same kernel at other tile widths, kept
+as measurable neighbours; `examples/` holds the receipt that scored `cuda-tile1024` as a
+regression.
 
-**What would count.** A CUDA attention kernel registered under a new name, A/B'd against `stock`
+**What would count.** A CUDA attention kernel registered under a new name, A/B'd against `cuda`
 in one process. The fp8 and NVFP4 paths are separate cells with their own published ceilings --
 `dit-step/1024/fp8` at 31.7 ms and `dit-step/1024/nvfp4` at
 15.8 ms against bf16's 54.4 ms -- and
 neither has a reference implementation, so landing one is also a cartography contribution
 (docs/CARTOGRAPHY.md).
 
-**Read this before starting.** The ceilings above are ARITHMETIC and the achieved fraction of
-every one of them is currently `null`, because no Blackwell device has run this code. A ceiling
-tells you how big the box is and says nothing about how full it is. `burnish calibrate` fills
-that in and it has not been run.
+**Read this before starting.** The ceilings above are ARITHMETIC. A ceiling tells you how big
+the box is and says nothing about how full it is.
+Only `dit-step/1024/bf16` is calibrated, and it sits at 1.5% of its ceiling
+(`eval/cells/BG-1/reference.json`). The fp8 and NVFP4 cells have no implementation to
+measure, and the 512 and 2048 rows are ceilings with no calibrated cell behind them.
 
 ---
 
