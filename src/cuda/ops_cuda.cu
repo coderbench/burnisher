@@ -26,6 +26,7 @@
 
 #include <map>
 #include <mutex>
+#include <vector>
 #include <stdexcept>
 #include <string>
 
@@ -724,7 +725,7 @@ void dnn_ok(cudnnStatus_t st, const char* what);
 // A device buffer kept across calls. The score matrix is a gigabyte at the VAE mid-block, and a
 // forward pass that allocated and zeroed it per call would spend its time in the allocator.
 Tensor& scratch(int slot, int64_t numel, DType dtype) {
-    static Tensor slots[8];
+    static Tensor slots[10];
     Tensor& t = slots[slot];
     if (!t.defined() || t.dtype() != dtype || t.numel() < numel) {
         t = Tensor();
@@ -877,6 +878,191 @@ void attention_cuda_blas(const AttentionArgs& a) {
         throw std::runtime_error("cuda attention: dimension over cuBLAS's int range");
     }
     DISPATCH(*a.q, T, attention_blas<T>(a));
+}
+
+// --- attention through cuDNN's fused SDPA, bf16 ------------------------------------------
+// The score matrix is never written. cuDNN's fused scaled-dot-product attention walks it in tiles
+// that fit the device's fast memory, which is what removes the last big cost in a denoising step:
+// the float path above reads and writes two gigabytes of scores per layer.
+//
+// bf16 ONLY, and that is a numerical choice made on purpose. The fused engines compute in bf16:
+// cuDNN 9.26 offers none for fp32. So a bf16 run's attention no longer computes in float, which is
+// what PyTorch's own bf16 attention does. Nothing that is gated changes: the correctness gate and
+// the fidelity objective are fp32 runs, and fp32 keeps the exact float path.
+//
+// Only what it can express exactly. A key mask becomes per-row key lengths, which is the same
+// mask only when every row keeps a prefix of its keys; T5's additive bias has no place in the
+// fused op at all. Anything else -- and any shape cuDNN has no engine for -- takes the float path.
+// DETERMINISTIC: an engine cuDNN marks non-deterministic is never chosen.
+
+struct SdpaPlan {
+    cudnnBackendDescriptor_t plan = nullptr;
+    int64_t workspace = 0;
+    std::vector<cudnnBackendDescriptor_t> keep;   // descriptors the plan was built from
+};
+
+cudnnBackendDescriptor_t be_create(cudnnBackendDescriptorType_t type, std::vector<cudnnBackendDescriptor_t>* keep) {
+    cudnnBackendDescriptor_t d = nullptr;
+    dnn_ok(cudnnBackendCreateDescriptor(type, &d), "backend descriptor");
+    keep->push_back(d);
+    return d;
+}
+
+cudnnBackendDescriptor_t be_tensor(int64_t uid, cudnnDataType_t dt, std::vector<int64_t> dims,
+                                   std::vector<int64_t> strides, bool by_value,
+                                   std::vector<cudnnBackendDescriptor_t>* keep) {
+    cudnnBackendDescriptor_t t = be_create(CUDNN_BACKEND_TENSOR_DESCRIPTOR, keep);
+    const int64_t align = 16;   // cuDNN refuses 1; every device allocation here is 16-aligned
+    dnn_ok(cudnnBackendSetAttribute(t, CUDNN_ATTR_TENSOR_UNIQUE_ID, CUDNN_TYPE_INT64, 1, &uid), "tensor id");
+    dnn_ok(cudnnBackendSetAttribute(t, CUDNN_ATTR_TENSOR_DATA_TYPE, CUDNN_TYPE_DATA_TYPE, 1, &dt), "tensor dtype");
+    dnn_ok(cudnnBackendSetAttribute(t, CUDNN_ATTR_TENSOR_BYTE_ALIGNMENT, CUDNN_TYPE_INT64, 1, &align), "tensor alignment");
+    dnn_ok(cudnnBackendSetAttribute(t, CUDNN_ATTR_TENSOR_DIMENSIONS, CUDNN_TYPE_INT64, (int64_t)dims.size(), dims.data()), "tensor dims");
+    dnn_ok(cudnnBackendSetAttribute(t, CUDNN_ATTR_TENSOR_STRIDES, CUDNN_TYPE_INT64, (int64_t)strides.size(), strides.data()), "tensor strides");
+    if (by_value) {
+        const bool yes = true;
+        dnn_ok(cudnnBackendSetAttribute(t, CUDNN_ATTR_TENSOR_IS_BY_VALUE, CUDNN_TYPE_BOOLEAN, 1, &yes), "tensor by value");
+    }
+    dnn_ok(cudnnBackendFinalize(t), "tensor");
+    return t;
+}
+
+// The plan for one shape, or nullptr when cuDNN has no deterministic engine for it. Both answers
+// are cached: asking the heuristics again every layer would cost more than the attention.
+const SdpaPlan* sdpa_plan(int64_t B, int64_t H, int64_t S, int64_t K, int64_t D, bool lengths) {
+    static std::map<std::vector<int64_t>, SdpaPlan*> plans;
+    static std::mutex m;
+    const std::vector<int64_t> key{B, H, S, K, D, lengths};
+    std::lock_guard<std::mutex> lock(m);
+    auto it = plans.find(key);
+    if (it != plans.end()) return it->second;
+
+    auto* p = new SdpaPlan();   // kept for the process, like the plans themselves
+    const cudnnDataType_t dt = CUDNN_DATA_BFLOAT16;
+    // Logical [B, H, seq, D] strided over the head-last storage [B, seq, H, D].
+    auto q = be_tensor(1, dt, {B, H, S, D}, {S * H * D, D, H * D, 1}, false, &p->keep);
+    auto k = be_tensor(2, dt, {B, H, K, D}, {K * H * D, D, H * D, 1}, false, &p->keep);
+    auto v = be_tensor(3, dt, {B, H, K, D}, {K * H * D, D, H * D, 1}, false, &p->keep);
+    auto o = be_tensor(4, dt, {B, H, S, D}, {S * H * D, D, H * D, 1}, false, &p->keep);
+    auto scale = be_tensor(5, CUDNN_DATA_FLOAT, {1, 1, 1, 1}, {1, 1, 1, 1}, true, &p->keep);
+    auto op = be_create(CUDNN_BACKEND_OPERATION_SDPA_FWD_DESCRIPTOR, &p->keep);
+    dnn_ok(cudnnBackendSetAttribute(op, CUDNN_ATTR_OPERATION_SDPA_FWD_QDESC, CUDNN_TYPE_BACKEND_DESCRIPTOR, 1, &q), "sdpa q");
+    dnn_ok(cudnnBackendSetAttribute(op, CUDNN_ATTR_OPERATION_SDPA_FWD_KDESC, CUDNN_TYPE_BACKEND_DESCRIPTOR, 1, &k), "sdpa k");
+    dnn_ok(cudnnBackendSetAttribute(op, CUDNN_ATTR_OPERATION_SDPA_FWD_VDESC, CUDNN_TYPE_BACKEND_DESCRIPTOR, 1, &v), "sdpa v");
+    dnn_ok(cudnnBackendSetAttribute(op, CUDNN_ATTR_OPERATION_SDPA_FWD_ODESC, CUDNN_TYPE_BACKEND_DESCRIPTOR, 1, &o), "sdpa out");
+    dnn_ok(cudnnBackendSetAttribute(op, CUDNN_ATTR_OPERATION_SDPA_FWD_SCALEDESC, CUDNN_TYPE_BACKEND_DESCRIPTOR, 1, &scale), "sdpa scale");
+    if (lengths) {
+        auto lq = be_tensor(6, CUDNN_DATA_INT32, {B, 1, 1, 1}, {1, 1, 1, 1}, false, &p->keep);
+        auto lkv = be_tensor(7, CUDNN_DATA_INT32, {B, 1, 1, 1}, {1, 1, 1, 1}, false, &p->keep);
+        dnn_ok(cudnnBackendSetAttribute(op, CUDNN_ATTR_OPERATION_SDPA_FWD_SEQ_LEN_QDESC, CUDNN_TYPE_BACKEND_DESCRIPTOR, 1, &lq), "sdpa q lengths");
+        dnn_ok(cudnnBackendSetAttribute(op, CUDNN_ATTR_OPERATION_SDPA_FWD_SEQ_LEN_KVDESC, CUDNN_TYPE_BACKEND_DESCRIPTOR, 1, &lkv), "sdpa kv lengths");
+    }
+    if (cudnnBackendFinalize(op) != CUDNN_STATUS_SUCCESS) return plans[key] = nullptr;
+
+    cudnnHandle_t h = dnn();
+    auto graph = be_create(CUDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &p->keep);
+    dnn_ok(cudnnBackendSetAttribute(graph, CUDNN_ATTR_OPERATIONGRAPH_HANDLE, CUDNN_TYPE_HANDLE, 1, &h), "graph handle");
+    dnn_ok(cudnnBackendSetAttribute(graph, CUDNN_ATTR_OPERATIONGRAPH_OPS, CUDNN_TYPE_BACKEND_DESCRIPTOR, 1, &op), "graph ops");
+    if (cudnnBackendFinalize(graph) != CUDNN_STATUS_SUCCESS) return plans[key] = nullptr;
+
+    auto heur = be_create(CUDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, &p->keep);
+    const cudnnBackendHeurMode_t mode = CUDNN_HEUR_MODE_A;
+    dnn_ok(cudnnBackendSetAttribute(heur, CUDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH, CUDNN_TYPE_BACKEND_DESCRIPTOR, 1, &graph), "heuristics graph");
+    dnn_ok(cudnnBackendSetAttribute(heur, CUDNN_ATTR_ENGINEHEUR_MODE, CUDNN_TYPE_HEUR_MODE, 1, &mode), "heuristics mode");
+    if (cudnnBackendFinalize(heur) != CUDNN_STATUS_SUCCESS) return plans[key] = nullptr;
+    int64_t offered = 0;
+    dnn_ok(cudnnBackendGetAttribute(heur, CUDNN_ATTR_ENGINEHEUR_RESULTS, CUDNN_TYPE_BACKEND_DESCRIPTOR, 0, &offered, nullptr), "heuristics count");
+    std::vector<cudnnBackendDescriptor_t> cfgs;
+    for (int64_t i = 0; i < offered; ++i) cfgs.push_back(be_create(CUDNN_BACKEND_ENGINECFG_DESCRIPTOR, &p->keep));
+    int64_t returned = 0;
+    if (offered > 0) {
+        dnn_ok(cudnnBackendGetAttribute(heur, CUDNN_ATTR_ENGINEHEUR_RESULTS, CUDNN_TYPE_BACKEND_DESCRIPTOR, offered, &returned, cfgs.data()), "heuristics results");
+    }
+    for (int64_t i = 0; i < returned; ++i) {
+        auto engine = be_create(CUDNN_BACKEND_ENGINE_DESCRIPTOR, &p->keep);
+        int64_t n = 0;
+        dnn_ok(cudnnBackendGetAttribute(cfgs[i], CUDNN_ATTR_ENGINECFG_ENGINE, CUDNN_TYPE_BACKEND_DESCRIPTOR, 1, &n, &engine), "engine");
+        cudnnBackendNumericalNote_t notes[CUDNN_NUMERICAL_NOTE_TYPE_COUNT];
+        int64_t nn = 0;
+        dnn_ok(cudnnBackendGetAttribute(engine, CUDNN_ATTR_ENGINE_NUMERICAL_NOTE, CUDNN_TYPE_NUMERICAL_NOTE, CUDNN_NUMERICAL_NOTE_TYPE_COUNT, &nn, notes), "engine notes");
+        bool deterministic = true;
+        for (int64_t j = 0; j < nn; ++j) deterministic &= (notes[j] != CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC);
+        if (!deterministic) continue;
+        auto plan = be_create(CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR, &p->keep);
+        dnn_ok(cudnnBackendSetAttribute(plan, CUDNN_ATTR_EXECUTION_PLAN_HANDLE, CUDNN_TYPE_HANDLE, 1, &h), "plan handle");
+        dnn_ok(cudnnBackendSetAttribute(plan, CUDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG, CUDNN_TYPE_BACKEND_DESCRIPTOR, 1, &cfgs[i]), "plan config");
+        if (cudnnBackendFinalize(plan) != CUDNN_STATUS_SUCCESS) continue;
+        dnn_ok(cudnnBackendGetAttribute(plan, CUDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE, CUDNN_TYPE_INT64, 1, &n, &p->workspace), "plan workspace");
+        p->plan = plan;
+        return plans[key] = p;
+    }
+    return plans[key] = nullptr;
+}
+
+// Runs the call through the fused op and returns true, or returns false having touched nothing.
+bool attention_sdpa(const AttentionArgs& a) {
+    if (is_f32(*a.q) || a.bias || a.q->dtype() != DType::BF16) return false;
+    const int64_t B = a.batch, H = a.heads, S = a.q_len, K = a.kv_len, D = a.head_dim;
+    std::vector<int32_t> kv_lengths;
+    if (a.key_mask) {
+        // One small copy per call: the mask is batch x kv_len, and reading it is the only way to
+        // know it is a prefix mask, which is the only mask lengths can express.
+        const Tensor mask = a.key_mask->to_host();
+        for (int64_t b = 0; b < B; ++b) {
+            int64_t n = 0;
+            while (n < K && mask.get(b * K + n) != 0.0f) ++n;
+            for (int64_t j = n; j < K; ++j) {
+                if (mask.get(b * K + j) != 0.0f) return false;
+            }
+            if (n == 0) return false;
+            kv_lengths.push_back((int32_t)n);
+        }
+    }
+    const SdpaPlan* p = sdpa_plan(B, H, S, K, D, a.key_mask != nullptr);
+    if (!p) return false;
+
+    const float scale = a.scale > 0.0f ? a.scale : rsqrtf((float)D);
+    std::vector<int64_t> uids{1, 2, 3, 4, 5};
+    std::vector<void*> ptrs{(void*)a.q->data(), (void*)a.k->data(), (void*)a.v->data(),
+                            a.out->data(), (void*)&scale};
+    if (a.key_mask) {
+        const std::vector<int32_t> q_lengths((size_t)B, (int32_t)S);
+        Tensor& lq = scratch(8, B, DType::F32);    // int32 lengths in float-sized storage
+        Tensor& lkv = scratch(9, B, DType::F32);
+        device::copy_to_device(lq.data(), q_lengths.data(), (size_t)B * sizeof(int32_t));
+        device::copy_to_device(lkv.data(), kv_lengths.data(), (size_t)B * sizeof(int32_t));
+        uids.push_back(6); ptrs.push_back(lq.data());
+        uids.push_back(7); ptrs.push_back(lkv.data());
+    }
+    Tensor& workspace = scratch(2, p->workspace / 4 + 1, DType::F32);
+    void* ws = workspace.data();
+
+    cudnnBackendDescriptor_t pack = nullptr;
+    dnn_ok(cudnnBackendCreateDescriptor(CUDNN_BACKEND_VARIANT_PACK_DESCRIPTOR, &pack), "variant pack");
+    struct Release {
+        cudnnBackendDescriptor_t d;
+        ~Release() { cudnnBackendDestroyDescriptor(d); }
+    } release{pack};
+    dnn_ok(cudnnBackendSetAttribute(pack, CUDNN_ATTR_VARIANT_PACK_UNIQUE_IDS, CUDNN_TYPE_INT64, (int64_t)uids.size(), uids.data()), "pack ids");
+    dnn_ok(cudnnBackendSetAttribute(pack, CUDNN_ATTR_VARIANT_PACK_DATA_POINTERS, CUDNN_TYPE_VOID_PTR, (int64_t)ptrs.size(), ptrs.data()), "pack pointers");
+    dnn_ok(cudnnBackendSetAttribute(pack, CUDNN_ATTR_VARIANT_PACK_WORKSPACE, CUDNN_TYPE_VOID_PTR, 1, &ws), "pack workspace");
+    dnn_ok(cudnnBackendFinalize(pack), "variant pack");
+    dnn_ok(cudnnBackendExecute(dnn(), p->plan, pack), "sdpa");
+    return true;
+}
+
+// The fused op where it can run the call exactly, the float path everywhere else.
+void attention_cuda_vendor(const AttentionArgs& a) {
+    require_device(*a.q, "attention", "q");
+    if (!attention_sdpa(a)) attention_cuda_blas(a);
+}
+
+// The fused op or nothing: for measuring it, and for tests that must know which path ran.
+void attention_cuda_sdpa(const AttentionArgs& a) {
+    require_device(*a.q, "attention", "q");
+    if (!attention_sdpa(a)) {
+        throw std::runtime_error("cuda-sdpa: the fused op cannot run this call (fp32, a bias, a "
+                                 "mask that is not a prefix, or no deterministic engine)");
+    }
 }
 
 // --- conv2d through cuDNN ---------------------------------------------------------------
@@ -1212,8 +1398,11 @@ void register_cuda_ops() {
     register_impl<AttentionArgs>("attention", "cuda", attention_cuda_tiled<256>,
                                  "tiled online softmax, 256 keys per tile, deterministic; "
                                  "no tensor cores -- issues/dit-attention.md");
-    register_impl<AttentionArgs>("attention", "cuda-vendor", attention_cuda_blas,
-                                 "cuBLAS batched scores and values, one masked softmax per row");
+    register_impl<AttentionArgs>("attention", "cuda-vendor", attention_cuda_vendor,
+                                 "cuDNN fused SDPA for bf16 without bias; cuBLAS scores and "
+                                 "cuDNN softmax in float otherwise");
+    register_impl<AttentionArgs>("attention", "cuda-sdpa", attention_cuda_sdpa,
+                                 "cuDNN fused SDPA only; refuses a call it cannot run");
     register_impl<NormArgs>("norm", "cuda-vendor", norm_cuda_vendor,
                             "GroupNorm in fixed chunks, double sums; LayerNorm as cuda");
     register_impl<Conv2dArgs>("conv2d", "cuda-vendor", conv2d_cuda_dnn,

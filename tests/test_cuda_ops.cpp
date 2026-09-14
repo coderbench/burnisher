@@ -101,6 +101,43 @@ void attention_matches_the_oracle(const std::string& impl, DType dt) {
     }
 }
 
+// At the shapes the fused bf16 op has engines for: a DiT-sized head, self-attention, and
+// cross-attention whose rows keep a prefix of their keys (one row keeps a single key). The fused
+// op computes in bf16 rather than in float, so it is held to a looser bound than the kernels that
+// only round their output -- still far inside any difference a layout or masking slip makes.
+void fused_attention_matches_the_oracle(const std::string& impl) {
+    const DType dt = DType::BF16;
+    const double fused_tolerance = 1e-2;
+    const int64_t B = 2, S = 64, H = 2, D = 72;
+    for (const int64_t K : {S, int64_t{20}}) {
+        const bool cross = K != S;
+        const std::string where = impl + (cross ? " fused cross-attention" : " fused self-attention");
+        Tensor q = ramp({B, S, H, D}, 0.029, dt), k = ramp({B, K, H, D}, 0.043, dt),
+               v = ramp({B, K, H, D}, 0.061, dt);
+        Tensor mask({B, K}, DType::F32);
+        for (int64_t j = 0; j < K; ++j) {
+            mask.set(j, j < 12 ? 1.0f : 0.0f);
+            mask.set(K + j, j == 0 ? 1.0f : 0.0f);
+        }
+        mask = mask.to(dt);
+        Tensor expect({B, S, H, D}, dt);
+        AttentionRegistry::instance().get("stock")(
+            AttentionArgs{&q, &k, &v, &expect, B, H, S, K, D, 0.0f, nullptr, cross ? &mask : nullptr});
+
+        Tensor dq = q.to_device(), dk = k.to_device(), dv = v.to_device(), dmask = mask.to_device();
+        Tensor got({B, S, H, D}, dt, Device::CUDA), again({B, S, H, D}, dt, Device::CUDA);
+        AttentionArgs args{&dq, &dk, &dv, &got, B, H, S, K, D, 0.0f, nullptr, cross ? &dmask : nullptr};
+        AttentionRegistry::instance().get(impl)(args);
+        args.out = &again;
+        AttentionRegistry::instance().get(impl)(args);
+        device::synchronize();
+
+        const double w = worst(expect, got);
+        CHECK_MSG(w < fused_tolerance, where + " differs from the oracle by " + std::to_string(w));
+        CHECK_MSG(identical(got, again), where + " is not byte-identical across two calls");
+    }
+}
+
 void conv2d_matches_the_oracle(const std::string& impl, DType dt) {
     const std::string where = impl + " conv2d, " + dtype_name(dt);
     // A 3x3 with padding and a 1x1 shortcut, the two shapes the VAE uses, on an odd input.
@@ -168,10 +205,16 @@ int main(int argc, char** argv) {
     register_builtin_cpu_ops();
     register_cuda_ops();
     std::vector<std::string> impls(argv + 1, argv + argc);
-    if (impls.empty()) impls = {"cuda-vendor"};
+    if (impls.empty()) impls = {"cuda-vendor", "cuda-sdpa"};
     for (const auto& impl : impls) {
+        if (impl != "cuda" && AttentionRegistry::instance().has(impl)) {
+            fused_attention_matches_the_oracle(impl);
+        }
         for (DType dt : {DType::F32, DType::BF16}) {
-            if (AttentionRegistry::instance().has(impl)) attention_matches_the_oracle(impl, dt);
+            // cuda-sdpa refuses what the fused op cannot run, which is most of these shapes.
+            if (impl != "cuda-sdpa" && AttentionRegistry::instance().has(impl)) {
+                attention_matches_the_oracle(impl, dt);
+            }
             if (Conv2dRegistry::instance().has(impl)) conv2d_matches_the_oracle(impl, dt);
             if (NormRegistry::instance().has(impl)) groupnorm_matches_the_oracle(impl, dt);
         }
