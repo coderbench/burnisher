@@ -3,6 +3,7 @@
 
     scripts/pytorch_baseline.py --weights /workspace/ckpt            # print
     scripts/pytorch_baseline.py --weights /workspace/ckpt --write    # and commit it
+    scripts/pytorch_baseline.py --recompare                          # no GPU: after a re-anchor
 
 **Why this exists.** The roofline says how far each cell is from an arithmetic limit nobody can
 reach. It does not say whether anybody would choose this runtime over what they already have. That
@@ -24,6 +25,10 @@ plus the whole image, encoder to pixels, with the pinned scheduler.
 **Eager, as installed.** No `torch.compile`, no TensorRT: the default path, which already uses
 PyTorch's fused scaled-dot-product attention. A faster PyTorch configuration is a higher bar and a
 fair one to add; it is a second row, not a replacement for this one.
+
+**Re-anchoring moves one side of the comparison.** The PyTorch times are a measurement of PyTorch and
+stay valid; the runtime's side is read from the anchor. `--recompare` rebuilds only the comparison
+from the committed PyTorch stages and the current `reference.json`, with no GPU.
 
 **This is not scored.** Nothing reads it to pay anybody. It is published beside the anchor so the
 roofline's "how far from the limit" has a "how far from being useful" next to it.
@@ -56,6 +61,25 @@ def median_and_spread(fn, warmup, repeats, sync):
             "spread_pct": 100.0 * (max(times) - min(times)) / med, "repeats": repeats}
 
 
+def comparison_against(anchor_cells, stages):
+    """The runtime's anchored time over PyTorch's, per cell both of them measured."""
+    out = {}
+    for cid, st in stages.items():
+        if cid in anchor_cells and anchor_cells[cid].get("measured_seconds"):
+            burnisher = anchor_cells[cid]["measured_seconds"]
+            out[cid] = {"burnisher_s": burnisher, "pytorch_s": st["median_s"],
+                        "burnisher_over_pytorch": burnisher / st["median_s"]}
+    return out
+
+
+def print_comparison(comparison, whole_image_s):
+    print(f"  {'cell':22s} {'burnisher':>11s} {'pytorch':>11s} {'burnisher/pytorch':>18s}")
+    for cid, c in comparison.items():
+        print(f"  {cid:22s} {c['burnisher_s'] * 1e3:9.1f}ms {c['pytorch_s'] * 1e3:9.1f}ms "
+              f"{c['burnisher_over_pytorch']:17.2f}x")
+    print(f"  whole image in PyTorch: {whole_image_s:.2f} s")
+
+
 def device_identity():
     out = subprocess.run(["nvidia-smi", "--query-gpu=name,uuid,driver_version",
                           "--format=csv,noheader"], capture_output=True, text=True)
@@ -66,14 +90,30 @@ def device_identity():
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--weights", required=True, help="checkpoint directory")
+    ap.add_argument("--weights", help="checkpoint directory (required unless --recompare)")
     ap.add_argument("--generation", default="BG-1")
     ap.add_argument("--prompt", default="long-caption", help="which frozen prompt to encode")
     ap.add_argument("--warmup", type=int, default=2)
     ap.add_argument("--repeats", type=int, default=9)
     ap.add_argument("--write", action="store_true",
                     help="save eval/cells/<generation>/pytorch-baseline.json")
+    ap.add_argument("--recompare", action="store_true",
+                    help="no GPU: rebuild the comparison from the committed PyTorch stages and "
+                         "the current anchor, and write it back")
     args = ap.parse_args()
+
+    cell_dir = ROOT / "eval" / "cells" / args.generation
+    if args.recompare:
+        dest = cell_dir / "pytorch-baseline.json"
+        doc = json.loads(dest.read_text())
+        anchor = json.loads((cell_dir / "reference.json").read_text())["cells"]
+        doc["comparison"] = comparison_against(anchor, doc["stages"])
+        print_comparison(doc["comparison"], doc["whole_image"]["median_s"])
+        dest.write_text(json.dumps(doc, indent=1, sort_keys=True) + "\n")
+        print(f"\n>> rewrote the comparison in {dest}")
+        return 0
+    if not args.weights:
+        ap.error("--weights is required to measure")
 
     import torch
     import diffusers
@@ -81,7 +121,6 @@ def main():
     from diffusers import AutoencoderKL, DPMSolverMultistepScheduler, PixArtTransformer2DModel
     from transformers import T5EncoderModel
 
-    cell_dir = ROOT / "eval" / "cells" / args.generation
     gen = json.loads((cell_dir / "generation.json").read_text())
     model_cfg = gen["model"]
     ids_doc = json.loads((cell_dir / "token-ids.json").read_text())
@@ -157,12 +196,7 @@ def main():
         print(f"   {'image':10s} {whole['median_s']:9.2f} s", flush=True)
 
     anchor = json.loads((cell_dir / "reference.json").read_text())["cells"]
-    comparison = {}
-    for cid, st in stages.items():
-        if cid in anchor and anchor[cid].get("measured_seconds"):
-            comparison[cid] = {"burnisher_s": anchor[cid]["measured_seconds"],
-                               "pytorch_s": st["median_s"],
-                               "burnisher_over_pytorch": anchor[cid]["measured_seconds"] / st["median_s"]}
+    comparison = comparison_against(anchor, stages)
 
     doc = {
         "_what_this_is": "The same stages, at the same shapes and dtype, run by the reference "
@@ -186,11 +220,7 @@ def main():
     }
 
     print()
-    print(f"  {'cell':22s} {'burnisher':>11s} {'pytorch':>11s} {'burnisher/pytorch':>18s}")
-    for cid, c in comparison.items():
-        print(f"  {cid:22s} {c['burnisher_s'] * 1e3:9.1f}ms {c['pytorch_s'] * 1e3:9.1f}ms "
-              f"{c['burnisher_over_pytorch']:17.1f}x")
-    print(f"  whole image in PyTorch: {whole['median_s']:.2f} s")
+    print_comparison(comparison, whole["median_s"])
 
     if args.write:
         dest = cell_dir / "pytorch-baseline.json"
