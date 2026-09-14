@@ -85,7 +85,7 @@ def main() -> int:
         print("!! documentation points at paths that do not exist:")
         for doc, tok in sorted(bad):
             print(f"   {doc}: {tok}")
-        print("\n   If the document is generated (anything under issues/, docs/SCREEN.md,")
+        print("\n   If the document is generated (anything under issues/, or")
         print("   docs/ROOFLINE.md), fix the generator rather than the file it wrote -- a")
         print("   generator repeats a wrong path everywhere at once. A placeholder path is")
         print("   spelled with angle brackets and is skipped.")

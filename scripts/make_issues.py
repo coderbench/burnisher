@@ -1,13 +1,8 @@
 #!/usr/bin/env python3
-"""Generate the opportunity backlog as issue files, with each item's arithmetic attached.
+"""Generate the backlog in issues/, with each item's arithmetic attached.
 
-Every figure in every issue is computed here from `configs/` and the same geometry the scorer
-uses. None of them is typed. That matters more for the backlog than anywhere else: an issue is
-a pitch for a week of somebody's time, and a pitch built on a remembered number is how a
-contributor ends up chasing a surface that is not there.
-
-Every figure is also `basis: model`. An issue says how big a box COULD be; it cannot say how
-full it is, because nothing here has been measured on the pinned hardware.
+Every figure is computed from `configs/` by the scorer's own geometry, or read from the measured
+artifact it names. None is typed, because an issue is a pitch for a week of somebody's time.
 
     scripts/make_issues.py --write
 """
@@ -115,71 +110,42 @@ def facts(cand, devices, axes):
     for dt in ("fp8", "nvfp4"):
         t = G.t5_encoder(cand["text_encoder"], seq=300, batch=2, wdtype=dt, adtype="bf16")
         f[f"t5_params_{dt}_gb"] = t.param_bytes / 1e9
+    tol = json.loads((ROOT / "configs" / "tolerance.json").read_text())["BG-1"]["measured"]
+    f["step_divergence"] = {k: v for k, v in tol["step_divergence_bf16"].items()
+                            if not k.startswith("_")}
+    f["reference_self_dtype_l2"] = tol["reference_fp32_vs_reference_bf16"]["worst_relative_l2"]
+    f["dit_measured_ms"] = 1e3 * ((cal.get("dit-step/1024/bf16") or {}).get("measured_seconds")
+                                  or 0.0)
     return f
 
 
-# Emitted by any paragraph that cites a MEASURED artifact rather than an arithmetic ceiling.
-# The per-issue header says which basis the issue is written on, and that line has to follow the
-# body rather than be asserted over it: "No measurement appears below" is true of most of these
-# issues and false of the one that quotes a real run, and a header that cannot tell the
-# difference is the exact confusion between model and measurement this repository forbids.
+# Marks a body that quotes a MEASURED artifact, so its Basis line says so. Most issues quote only
+# arithmetic ceilings, and the header must not claim otherwise for the ones that don't.
 MEASURED_MARK = "<!--cites-measurement-->"
 
 
 def _narrowing_note(f):
-    """The measured reason these ceilings are worth less than they look, if it has been measured.
-
-    A narrower dtype only pays where the wide path is limited by the width. The ceilings in the
-    table above say what the ARITHMETIC permits; they do not say what this runtime would collect,
-    because this runtime is nowhere near either bound yet.
-
-    The prose adapts to the sign of the measurement rather than assuming it. The first draft of
-    this function read "halving the bytes bought nothing", written before the measurement existed
-    -- and the measurement came back on the other side of 1.0, so the sentence would have been
-    wrong in direction while quoting a correct number. A generator that can only narrate the
-    result its author expected is a way of typing a figure by hand with extra steps.
-    """
+    """What narrower weights are worth today, if measured. The wording follows the sign."""
     d = f.get("dtype_latency")
     if not d:
         return ""
     fp32, bf16 = d["dit_step_fp32_s"], d["dit_step_bf16_s"]
     ratio = fp32 / bf16
     if ratio > 1.05:
-        verdict = (f"so the narrower dtype does pay here, but at {ratio:.3f}x rather than the "
-                   f"2.00x the byte count allows -- most of the width is already being left on "
-                   f"the floor")
+        verdict = f"narrower weights pay, but {ratio:.2f}x rather than the 2x the bytes allow"
     elif ratio >= 0.98:
-        verdict = ("so halving the weight traffic bought nothing at all, which means this path "
-                   "is not limited by the traffic")
+        verdict = "halving the bytes changed nothing"
     else:
-        verdict = (f"so halving the weight traffic made the step {100 * (1 / ratio - 1):.0f}% "
-                   f"SLOWER. The narrower dtype is not merely failing to pay, it is costing")
+        verdict = f"halving the bytes made the step {100 * (1 / ratio - 1):.0f}% slower"
     return MEASURED_MARK + f"""
-**Measured first, and it changes what these cells are worth today.** One DiT step on the pinned
-box costs {fp32:.3f} s at fp32 and {bf16:.3f} s at bf16 -- a ratio of {ratio:.3f}x, measured over
-{d['repeats']} paired interleaved repeats on {d['device']['name']} (driver
-{d['device']['driver_version']}), recorded in `eval/cells/BG-1/dtype-latency.json`.
+**Measured: narrower weights do not pay yet.**
 
-fp32 reads twice the weight bytes of bf16, so a bandwidth-bound step would show about 2.00x --
-{verdict}.
-
-The bf16 arm is the calibrated one, and it sits at {100 * f['dit_achieved']:.1f}% of this cell's
-arithmetic ceiling. That is the explanation: at a ninetieth of its bound the step is limited by
-neither the bytes nor the flops, so changing the number of bytes changes nothing that matters.
-What it is limited by is how the kernels are written -- launch count, unfused elementwise work, and a bf16 path that is
-converting more than it is saving. Narrowing the weights of a kernel in that state moves the
-published ceiling DOWN and the measurement not at all.
-
-**The order this implies.** The fp8 and NVFP4 cells stay open and stay worth taking, but the
-gain arrives after -- or together with -- the work that makes this path bound by something a
-narrower weight can relieve: fused AdaLN, CUDA-graph capture, and the attention kernel. Take
-those first and these cells become worth something near their ceilings. Take these first and
-they are worth what the ratio above says, which is nothing.
-
-**And it is a live example of the rule.** The ceiling in the table is `"basis": "model"`. The
-ratio in this paragraph is `"basis": "measured"`. A submission that reported the first as a gain
-would be reporting {f['dit_ceiling_nvfp4_ms']:.1f} ms for a step that measurement says would not
-move.
+- One DiT step costs {fp32:.3f} s at fp32 and {bf16:.3f} s at bf16
+  ({d['repeats']} paired repeats, `eval/cells/BG-1/dtype-latency.json`).
+- So {verdict}.
+- At {100 * f['dit_achieved']:.1f}% of its ceiling, the step is limited by how the kernels are
+  written, not by bytes.
+- Do fused AdaLN, CUDA graphs and attention first.
 """
 
 
@@ -187,14 +153,7 @@ ISSUES = []
 
 
 def issue(slug, title, labels, closed_by=None):
-    """Register one backlog issue. `closed_by` names what closed it, and closing is not deleting.
-
-    A backlog is read by somebody choosing what to work on, so an item describing finished work
-    is worse than no item at all -- it costs whoever picks it a day before they find out. But
-    deleting it loses the record of what the problem was and what settled it, and this repository
-    is built on the premise that knowing why a guard exists is the point. So a closed issue stays,
-    with its own section in the index, saying plainly that it is done and what did it.
-    """
+    """Register one issue. A closed issue stays, saying what settled it."""
     def wrap(fn):
         ISSUES.append((slug, title, labels, fn, closed_by))
         return fn
@@ -202,301 +161,176 @@ def issue(slug, title, labels, closed_by=None):
 
 
 def _attention_calibration_note(f):
-    """How full the attention cells are, from the calibration artifact when it exists.
-
-    This paragraph once said no Blackwell device had run this code, and it stayed true in the
-    issue long after BG-1 was calibrated, because it was prose rather than a figure. Reading the
-    artifact means the sentence follows the calibration instead of outliving it.
-    """
+    """How full the attention cell is, from the calibration when it exists."""
     a = f.get("dit_achieved")
     if a is None:
-        return ("\nEvery achieved fraction is currently `null`, because `burnish calibrate` has "
-                "not been run\non the pinned part.")
+        return "\nNo cell is calibrated yet."
     return MEASURED_MARK + (
-        f"\nOnly `dit-step/1024/bf16` is calibrated, and it sits at {100 * a:.1f}% of its ceiling\n"
-        f"(`eval/cells/BG-1/reference.json`). The fp8 and NVFP4 cells have no implementation to\n"
-        f"measure, and the 512 and 2048 rows are ceilings with no calibrated cell behind them.")
+        f"\nOnly `dit-step/1024/bf16` is calibrated: {100 * a:.1f}% of its ceiling\n"
+        f"(`eval/cells/BG-1/reference.json`).")
 
 
 @issue("dit-attention", "DiT self-attention at 4k-16k tokens", ["kernel", "dit", "cuda"])
 def _(f):
     r = f["resolutions"]
     rows = "\n".join(
-        f"| {res} | {v['tokens']} | {v['dit_attention_share']:.1%} | "
-        f"{v['dit_ceiling_ms']:.1f} ms | {v['dit_flops_t']:.2f} T |"
+        f"| {res} | {v['tokens']} | {v['dit_attention_share']:.1%} | {v['dit_ceiling_ms']:.1f} ms |"
         for res, v in sorted(r.items()))
     return f"""
-Self-attention is the largest single block of arithmetic in the denoise step, and its share
-grows quadratically with resolution while everything around it grows linearly.
+Self-attention is the biggest block of arithmetic in a DiT step, and its share grows with the
+square of the resolution.
 
-| resolution | image tokens | share of DiT-step FLOPs | DiT-step ceiling | DiT-step FLOPs |
-|--:|--:|--:|--:|--:|
+| resolution | image tokens | attention share of the step | step ceiling |
+|--:|--:|--:|--:|
 {rows}
 
-At 2048px the self-attention alone is {r[2048]['dit_attention_share']:.0%} of the step, because
-{r[2048]['tokens']} tokens is a {r[2048]['tokens'] // r[512]['tokens']}x token count over 512px
-and attention costs the square of it.
+**Now:** `cuda` is a tiled online softmax with no tensor cores. It is the baseline you are measured
+against. `cuda-tile64` and `cuda-tile1024` are the same kernel at other tile widths.
 
-**What is here now.** On the host, `stock` is an online-softmax streaming reference and
-`materialized` writes the whole score matrix. On the device, `cuda` is a tiled online softmax,
-deterministic, one block per query row, with no tensor cores -- the baseline a submission is
-measured against. `cuda-tile64` and `cuda-tile1024` are the same kernel at other tile widths, kept
-as measurable neighbours; `examples/` holds the receipt that scored `cuda-tile1024` as a
-regression.
+**What counts:** a faster CUDA attention kernel under a new name. fp8
+({f['dit_ceiling_fp8_ms']:.1f} ms) and NVFP4 ({f['dit_ceiling_nvfp4_ms']:.1f} ms) are separate
+cells with no implementation yet, against bf16's {f['dit_ceiling_bf16_ms']:.1f} ms. Landing one is
+also cartography (`docs/CARTOGRAPHY.md`).
 
-**What would count.** A CUDA attention kernel registered under a new name, A/B'd against `cuda`
-in one process. The fp8 and NVFP4 paths are separate cells with their own published ceilings --
-`dit-step/1024/fp8` at {f['dit_ceiling_fp8_ms']:.1f} ms and `dit-step/1024/nvfp4` at
-{f['dit_ceiling_nvfp4_ms']:.1f} ms against bf16's {f['dit_ceiling_bf16_ms']:.1f} ms -- and
-neither has a reference implementation, so landing one is also a cartography contribution
-(docs/CARTOGRAPHY.md).
-
-**Read this before starting.** The ceilings above are ARITHMETIC. A ceiling tells you how big
-the box is and says nothing about how full it is.{_attention_calibration_note(f)}
+Ceilings are arithmetic: how big the box is, not how full.{_attention_calibration_note(f)}
 """
 
 
-@issue("vae-decode", "VAE decode: tiling, fusion, and the mid-block attention",
-       ["kernel", "vae", "cuda"])
+@issue("vae-decode", "VAE decode: fusion and the mid-block attention", ["kernel", "vae", "cuda"])
 def _(f):
     r = f["resolutions"]
     rows = "\n".join(
-        f"| {res} | {v['vae_ceiling_ms']:.1f} ms | {v['vae_flops_t']:.2f} T | "
-        f"{v['vae_bound_by']} | {v['vae_fusion_headroom']:.2f}x | "
-        f"{v['vae_attn_score_bytes_gb']:.2f} GB |"
+        f"| {res} | {v['vae_ceiling_ms']:.1f} ms | {v['vae_bound_by']} | "
+        f"{v['vae_fusion_headroom']:.2f}x |"
         for res, v in sorted(r.items()))
     return f"""
-| resolution | ceiling | FLOPs | bound by | fusion headroom | score matrix if materialized |
-|--:|--:|--:|:--|--:|--:|
+| resolution | ceiling | bound by | fusion headroom |
+|--:|--:|:--|--:|
 {rows}
 
-**A correction worth making before anyone starts.** VAE decode is widely described as
-memory-bound. On this part, at its arithmetic ceiling, it is not: the convolutions have
-arithmetic intensities in the thousands against a ridge point near 117, and the stage is
-compute-bound at every resolution in the table. What is true is narrower and more useful --
-*as implemented*, it moves a great deal of intermediate traffic, and a direct convolution at
-128 and 256 channels reaches a small fraction of tensor peak. Both of those are statements about
-the ACHIEVED FRACTION, which is exactly the room this cell has, and neither is a statement about
-the bound.
+VAE decode is compute-bound on this card, not memory-bound. The room is in how it is written:
+convolution is one thread per output element, and it moves a lot of intermediate data.
 
-Two concrete surfaces the arithmetic does point at:
-
-- **Fusion.** The `fusion headroom` column is the sum of per-op bounds over the whole-stage
-  bound. At 2048px it is {r[2048]['vae_fusion_headroom']:.2f}x, and that entire gap is
-  intermediate traffic a fused implementation would not move. One 1024x1024x128 activation is
-  268 MB in bf16 and a ResNet block touches several.
-- **The mid-block attention.** It is spatial self-attention over every latent position --
-  {r[1024]['tokens'] * 4} positions at 1024px. Materialized, its score matrix alone is
-  {r[1024]['vae_attn_score_bytes_gb']:.2f} GB of round trip at 1024px and
-  {r[2048]['vae_attn_score_bytes_gb']:.2f} GB at 2048px. `attention=materialized` is registered
-  precisely so a contributor can measure the naive path and show that removing it helped.
-
-Tiling is the other half and it changes the op list rather than scaling it, so a tiled decode is
-a new cell with its own ceiling rather than a faster version of this one.
+- **Fusion.** The headroom column is what removing intermediate traffic is worth.
+- **Mid-block attention** covers {r[1024]['tokens'] * 4} positions at 1024px. Materialized, its
+  score matrix is {r[1024]['vae_attn_score_bytes_gb']:.2f} GB. The host kernel `materialized` is
+  kept as the naive baseline to measure that against.
+- **Tiling** changes the op list, so a tiled decode is a new cell, not a faster version of this one.
 """
 
 
-@issue("text-encoder", "T5-XXL: 89% of the checkpoint, 2% of the clock",
+@issue("text-encoder", "T5-XXL: most of the checkpoint, little of the clock",
        ["memory", "quantization", "text-encoder"])
 def _(f):
-    s20 = f["shares_20steps"]
-    s4 = f["shares_4steps"]
+    s20, s4 = f["shares_20steps"], f["shares_4steps"]
     return f"""
-**The finding that should decide how you spend time here.** The text encoder holds
-{f['t5_params_gb']:.2f} GB of the {f['resident_all_gb']:.2f} GB this pipeline keeps resident --
-{f['t5_params_gb'] / f['resident_all_gb']:.0%} of it -- and at twenty steps it is
-{s20['t5-encode']:.1%} of the predicted wall clock. It runs once; the DiT runs twenty times.
+The text encoder is {f['t5_params_gb']:.2f} GB of the {f['resident_all_gb']:.2f} GB kept on the
+card, but only {s20['t5-encode']:.1%} of the time at 20 steps. It runs once; the DiT runs twenty
+times.
 
-Ranking stages by parameter count would send somebody to the biggest weights, which are these,
-and they would be working on a fiftieth of the clock.
+| steps | t5-encode | dit-step | vae-decode |
+|--:|--:|--:|--:|
+| 20 | {s20['t5-encode']:.1%} | {s20['dit-step']:.1%} | {s20['vae-decode']:.1%} |
+| 4 | {s4['t5-encode']:.1%} | {s4['dit-step']:.1%} | {s4['vae-decode']:.1%} |
 
-| steps | t5-encode | dit-step | vae-decode | total ceiling |
-|--:|--:|--:|--:|--:|
-| 20 | {s20['t5-encode']:.1%} | {s20['dit-step']:.1%} | {s20['vae-decode']:.1%} | {f['total_ms_20steps']:.0f} ms |
-| 4 | {s4['t5-encode']:.1%} | {s4['dit-step']:.1%} | {s4['vae-decode']:.1%} | {f['total_ms_4steps']:.0f} ms |
+So the work here is **memory**, which the frontier scores:
 
-So this is a **memory-axis** cell, not a latency one, and the frontier scores memory. Two things
-are worth real money here and neither is a faster kernel:
-
-- **Quantization.** fp8 takes the encoder to {f['t5_params_fp8_gb']:.2f} GB and NVFP4 to
-  {f['t5_params_nvfp4_gb']:.2f} GB, against {f['t5_params_gb']:.2f} GB at bf16. That is
-  {f['t5_params_gb'] - f['t5_params_nvfp4_gb']:.1f} GB of a {f['vram_gib']:.0f} GiB card returned
-  to the denoise loop, and it is scored on the `peak_vram_bytes` objective directly.
-- **Caching.** The encoder output depends only on the prompt. A pipeline that re-encodes an
-  unchanged prompt is doing {f['t5_ceiling_ms']:.0f} ms of arithmetic for nothing. This is worth
-  the most exactly where the latency share is worst -- at four steps it is
-  {s4['t5-encode']:.1%} of the clock.
-
-Note also that the share rises as step counts fall, so a distilled model reopens this cell.
+- **Quantization.** fp8 takes it to {f['t5_params_fp8_gb']:.2f} GB and NVFP4 to
+  {f['t5_params_nvfp4_gb']:.2f} GB, freeing up to {f['t5_params_gb'] - f['t5_params_nvfp4_gb']:.1f}
+  GB of a {f['vram_gib']:.0f} GiB card.
+- **Caching.** The output depends only on the prompt, so an unchanged prompt need not be encoded
+  again. That matters most at few steps.
 """
 
 
-@issue("fused-adaln", "Fuse AdaLN modulation into its neighbours",
-       ["kernel", "fusion", "dit"])
+@issue("fused-adaln", "Fuse AdaLN modulation into its neighbours", ["kernel", "fusion", "dit"])
 def _(f):
     r = f["resolutions"][1024]
     return f"""
-`modulate` is `x * (1 + scale) + shift`: two flops per element against a full activation round
-trip. It is the canonical fusion target in this pipeline and it is already its own registered op
-so that a fused version can be registered beside the unfused one and the two compared directly.
+`modulate` computes `x * (1 + scale) + shift`: almost no arithmetic, but a full pass over the
+activation.
 
-At 1024px, one DiT step's elementwise and norm ops move
-**{r['dit_elementwise_bytes_gb']:.2f} GB** of the step's {r['dit_traffic_gb']:.2f} GB of total
-traffic -- {r['dit_elementwise_bytes_gb'] / r['dit_traffic_gb']:.0%} of it -- to do a negligible
-share of its {r['dit_flops_t']:.2f} TFLOPs. Every byte of that is removable in principle by
-folding the modulation into the epilogue of the GEMM before it or the prologue of the one after.
+At 1024px the elementwise and norm ops move {r['dit_elementwise_bytes_gb']:.2f} GB of the step's
+{r['dit_traffic_gb']:.2f} GB of data traffic
+({r['dit_elementwise_bytes_gb'] / r['dit_traffic_gb']:.0%}) for a negligible share of its
+arithmetic. The whole step's fusion headroom is {r['dit_fusion_headroom']:.2f}x, mostly here.
 
-The whole-step fusion headroom at 1024px is **{r['dit_fusion_headroom']:.2f}x** (the sum of
-per-op bounds over the whole-stage bound), and this op family is most of it.
-
-**Why the ceiling does not move when you win.** The published ceiling counts only *unavoidable*
-bytes -- weights read once, stage input, stage output -- and excludes every intermediate
-precisely so that fusing does not move the target you are scored against. Removing this traffic
-raises the achieved fraction; it does not lower the ceiling.
-
-**Where to start.** `ModulateArgs` already carries `residual` and `gate`, so the gated residual
-`x + gate * modulated` is one op rather than two loops. The DiT calls it that way in
-`src/models/pixart_dit.cpp`. A fused GEMM epilogue would subsume it entirely.
+- **Fusing raises your achieved fraction without moving the ceiling**, because the ceiling already
+  ignores intermediate data.
+- **Start with** `ModulateArgs`: it carries `residual` and `gate`, so the gated residual can be one
+  op. The DiT calls it that way in `src/models/pixart_dit.cpp`.
 """
 
 
-@issue("weight-formats", "NVFP4 and MXFP4 on silicon with no reference tuning",
-       ["quantization", "cuda", "cartography"])
+@issue("weight-formats", "NVFP4 and MXFP4 on Blackwell", ["quantization", "cuda", "cartography"])
 def _(f):
     return f"""
-Blackwell's FP4 path is new and there is no established tuning for it in any open diffusion
-runtime. That is unusual and it is the reason this is worth more than it looks: the cells are
-published, their ceilings are computable today, and nobody has a reference to beat.
+Blackwell's FP4 path is new, and no open diffusion runtime has tuned it.
 
-| dtype | DiT-step ceiling @1024px | DiT resident | T5 resident |
+| dtype | DiT step ceiling @1024px | DiT weights | T5 weights |
 |:--|--:|--:|--:|
 | bf16 | {f['dit_ceiling_bf16_ms']:.2f} ms | {f['dit_params_bf16_gb']:.2f} GB | {f['t5_params_gb']:.2f} GB |
 | fp8 | {f['dit_ceiling_fp8_ms']:.2f} ms | {f['dit_params_fp8_gb']:.2f} GB | {f['t5_params_fp8_gb']:.2f} GB |
 | nvfp4 | {f['dit_ceiling_nvfp4_ms']:.2f} ms | {f['dit_params_nvfp4_gb']:.2f} GB | {f['t5_params_nvfp4_gb']:.2f} GB |
 
-Both cells are declared in BG-1 with `implemented: false` and weight 0 -- the ceiling is
-published so the room is visible, and the cell cannot drag an aggregate it is not part of.
-
-**This is a cartography contribution as much as a kernel one.** Landing the reference
-implementation and the calibration for one of these cells is scored in its own right
-(docs/CARTOGRAPHY.md), because the subnet's health depends on axis supply and making that an
-admin chore rather than a paid contribution is how a benchmark stops growing.
-
-**The width is not 0.5 bytes.** `dtype_bytes(NVFP4)` is 0.5625 -- four bits of payload plus one
-fp8 scale per sixteen elements. A roofline that priced it at half a byte would be wrong by 12%
-in the optimistic direction, which is the direction that costs somebody a week.
-
-**Correctness comes first and it will be the hard part.** The tolerance in BG-1 admits bf16
-rounding accumulated over twenty DPM-Solver++ steps and nothing else. A 4-bit weight path will
-need its own tolerance, argued in writing, in its own generation -- not a widened version of
-this one.
+- The fp8 and NVFP4 cells are declared with no implementation. Landing one with its calibration is
+  **cartography** (`docs/CARTOGRAPHY.md`).
+- NVFP4 costs 0.5625 bytes per element (4 bits plus a scale per 16), not 0.5.
+- A 4-bit path needs its own tolerance in its own generation.
 {_narrowing_note(f)}"""
 
 
-@issue("step-caching", "Step and feature caching: algorithmic, and it must pass the gate",
-       ["algorithm", "scheduler"])
+@issue("step-caching", "Step and feature caching", ["algorithm", "scheduler"])
 def _(f):
+    share = f["shares_20steps"]["dit-step"]
     return f"""
-The denoise loop runs the same graph twenty times on inputs that change slowly. Caching a block's
-output across adjacent steps, or skipping a step's computation entirely and reusing the previous
-residual, is worth a multiple rather than a percentage -- reported elsewhere at 1.5-2x.
+Reusing work across denoise steps can be worth a multiple. The DiT is {share:.0%} of the time at
+20 steps, so skipping 4 steps saves about {4 / 20 * share:.0%} of a generation.
 
-The arithmetic is trivial and that is the point: at twenty steps the DiT is
-{f['shares_20steps']['dit-step']:.1%} of the predicted clock, so skipping k steps of twenty
-removes k/20 of {f['shares_20steps']['dit-step']:.0%} of it. Skipping four is worth about
-{4 / 20 * f['shares_20steps']['dit-step']:.0%} of the whole generation.
+**But caching computes different numbers on purpose**, so the gate is the whole problem:
 
-**And this is the one backlog item where the correctness gate is the whole problem.** Every other
-item on this list is a faster way to compute the same numbers, and passes the gate by
-construction. This one computes DIFFERENT numbers on purpose. That makes it:
+- It won't fit BG-1's tolerance, and the fix is **not** a wider tolerance. It is a new generation
+  with its own measured tolerance (`docs/CORRECTNESS.md`).
+- Faster but further from the reference is `MOVED_ALONG_FRONTIER` and credits nothing.
 
-- **a tolerance question first.** BG-1's tolerance is 2% relative L2 on the latents, justified as
-  roughly four times the bf16 rounding drift over twenty steps. A caching scheme will not fit
-  inside that, and the answer is NOT to widen it -- it is a new generation with its own
-  tolerance, argued in writing, calibrated with `burnish gate --calibrate-tolerance`.
-- **a frontier question second.** The generation scores `latent_l2_vs_reference` as an objective.
-  A change that is faster and measurably further from the reference has moved along the frontier
-  rather than expanded it, and the receipt will say `MOVED_ALONG_FRONTIER` and credit nothing.
-  That is the correct answer for a quality/speed trade and it is not a bug to be worked around.
-
-If you want this scored as a win, the work is to show the cache is *free* within a stated
-tolerance -- not to show it is fast.
+To be paid, show the cache is free within a stated tolerance, not just that it is fast.
 """
 
 
-@issue("weight-upload", "A single generation is dominated by uploading the weights",
-       ["cuda", "measured", "startup"])
+@issue("weight-upload", "Every generation re-uploads the weights", ["cuda", "startup"])
 def _(f):
     return f"""
-**Measured on the pinned RTX 5090, and it is the largest single cost in a one-shot generation.**
+`burnisher generate` uploads {f['resident_all_gb']:.1f} GB of weights every run. The whole 20-step
+denoise has a ceiling of {f['shares_20steps']['dit-step'] * f['total_ms_20steps']:.0f} ms, and the
+upload takes tens of seconds.
 
-`burnisher generate` maps {f['resident_all_gb']:.1f} GB of checkpoint and uploads it to the
-device on every invocation. At 1024px and 20 steps the whole denoise loop has an arithmetic
-ceiling of {f['shares_20steps']['dit-step'] * f['total_ms_20steps']:.0f} ms, and the upload takes
-tens of seconds. The correctness gate runs seven generations and spends the overwhelming majority
-of its wall time moving weights it already moved six times.
+It isn't a scored cell (the bench loads once), but it dominates the gate's run time and anyone
+actually using the runtime.
 
-This does NOT affect any scored cell. `burnish bench` loads once and times the stage afterwards,
-and the generation's cells are per-invocation; the arithmetic in `docs/ROOFLINE.md` counts a
-weight read per invocation, not per process. It affects the COST of producing a receipt, which is
-screen question six, and it affects anybody actually using the runtime.
+- **Keep the process alive**, with an explicit reset between runs.
+- **Map the checkpoint straight to the device** instead of copying it twice.
+- **Keep less on the card:** the {f['t5_params_gb']:.2f} GB text encoder sits idle during
+  denoising (`issues/offload.md`).
 
-Three directions, in increasing order of effort:
-
-- **Keep the process alive.** The gate and the bench both spawn one process per run so that no
-  state leaks between arms — a deliberate choice — but a resident server with an explicit reset
-  would keep the guarantee and pay the upload once.
-- **Map the checkpoint to the device directly.** The weights are already mmapped on the host and
-  then copied; `cudaHostRegister` on the mapping, or a direct read into device memory, removes
-  one full copy.
-- **Keep less resident.** The text encoder is {f['t5_params_gb']:.2f} GB of the
-  {f['resident_all_gb']:.2f} GB and is idle for the entire denoise loop -- see
-  `issues/offload.md` and `issues/text-encoder.md`.
-
-**The measurement to take first** is the split between map, convert and upload. All three are in
-`DeviceWeights::get`, none of them is separately timed, and guessing which dominates is exactly
-the habit this repository is built against.
+**Measure first:** time map, convert and upload separately in `DeviceWeights::get`.
 """
 
 
-@issue("sampler-precision", "The sampler quantises a 300-magnitude intermediate to bf16",
+@issue("sampler-precision", "The sampler rounds a large intermediate to bf16",
        ["numerics", "measured", "scheduler"])
 def _(f):
-    return """
-**Measured, and it is a precision cliff rather than a rounding cost.**
+    sd = f["step_divergence"]
+    return MEASURED_MARK + f"""
+At the first step sigma is about 157, so the sampler's x0 estimate is about 300 while the latent is
+about 1. Stored in bf16, values near 300 are spaced about 2 apart. That is a precision cliff.
 
-DPM-Solver++ converts the model's epsilon prediction into an x0 prediction:
+It shows at one step and fades after (bf16 vs the bf16 reference, relative L2, from
+`configs/tolerance.json`): {sd['1']:.3f} at 1 step, {sd['2']:.3f} at 2, {sd['20']:.3f} at 20.
 
-    x0 = (sample - sigma_vp * eps) / alpha
-
-At the first step sigma is about **157**, so alpha is about **0.0064** and x0 comes out around
-**300** while the latent it will become has a standard deviation near **1**. The sampler stores
-that intermediate in the model's compute dtype. In bf16 the spacing between representable values
-at 300 is about **2** -- so a quantity that has to resolve to a latent of unit scale is being
-rounded to twice that scale.
-
-The consequence is visible at one step and only at one step, because later steps run at small
-sigma where x0 and the latent are the same size:
-
-    steps        1        2        4        8       20
-    rel L2   0.987    ~1.06    ~1.17    ~1.12    0.349
-
-A one-step bf16 generation from this runtime and a one-step bf16 generation from the reference
-implementation are BOTH dominated by this, which is why they disagree at ~1.0 while every
-individual stage agrees to 0.01-0.14.
-
-**The fix is cheap and strictly better numerics.** The sampler's state and its x0 history are one
-latent each -- 4 x 128 x 128, 256 kB in fp32 -- against a denoise step with an arithmetic ceiling
-of 54 ms. Keeping them fp32 regardless of the model's dtype costs nothing measurable and removes
-the cliff entirely.
-
-**It is not done here, deliberately.** It would make this runtime MORE accurate than the
-reference implementation at bf16, and the reference is the oracle: the pinned latents would have
-to be reproduced, and a change that alters every reference is a new generation rather than a
-patch. It belongs in BG-2, with the reference regenerated alongside.
-
-**The measurement to take first** is the same sweep with the sampler forced to fp32 while the
-model stays bf16. If the one-step divergence collapses, the diagnosis is confirmed outright.
+- **The fix is cheap:** keep the sampler's state in fp32. It is one latent, 256 kB.
+- **It is not done on purpose.** It would make the runtime more accurate than the reference, so the
+  gate would reject it. It belongs in a new generation with regenerated reference latents.
+- **Measure first:** the same sweep with an fp32 sampler and a bf16 model.
 """
 
 
@@ -504,69 +338,46 @@ model stays bf16. If the one-step divergence collapses, the diagnosis is confirm
 def _(f):
     r = f["resolutions"]
     rows = "\n".join(
-        f"| {res} | {v['dit_launches_per_step']} | {v['dit_launches_per_step'] * 20} | "
-        f"{v['dit_ceiling_ms']:.1f} ms |"
+        f"| {res} | {v['dit_launches_per_step']} | {v['dit_launches_per_step'] * 20} |"
         for res, v in sorted(r.items()))
     return f"""
-The denoise loop is perfectly static: the same graph, the same shapes, the same twenty times.
-Nothing about it needs to be re-recorded per step, which makes it the textbook case for
-`cudaGraphLaunch`.
+The denoise loop is the same graph with the same shapes twenty times, the textbook case for a
+CUDA graph.
 
-| resolution | kernel launches per DiT step | per 20-step generation | step ceiling |
-|--:|--:|--:|--:|
+| resolution | kernel launches per step | per 20-step generation |
+|--:|--:|--:|
 {rows}
 
-Those counts come from the op enumeration in `eval/burnscore/geometry.py`, which is the same
-enumeration the roofline is computed from, so they are the launches the runtime actually issues
-rather than an estimate.
+The launch count is exact (from `eval/burnscore/geometry.py`). What a launch costs on this card
+has not been measured.
 
-**What the arithmetic can and cannot tell you.** It can tell you the launch COUNT. It cannot tell
-you what a launch costs on this part, because that is a measurement and nobody has taken it here.
-At a few microseconds each, {r[1024]['dit_launches_per_step'] * 20} launches is single-digit
-milliseconds against a {f['total_ms_20steps']:.0f} ms ceiling -- worth having and not
-transformative. The honest framing is that this is a *small, certain* win rather than a large
-speculative one, and it becomes more interesting at low resolution where the step is short and
-the launch count is unchanged.
-
-**It also interacts with everything else on this list**, which is the real argument for doing it
-early: a captured graph makes every subsequent kernel change measurable without launch noise
-underneath it, and the calibration in `burnish calibrate` measures a quieter cell as a result.
+- **A small, certain win**, bigger at low resolution where steps are short.
+- **Do it early:** it removes launch noise from every later measurement.
 """
 
 
-@issue("offload", "Offload and streaming: video models do not fit",
+@issue("offload", "Offload and streaming: bigger models do not fit",
        ["memory", "streaming", "frontier"])
 def _(f):
     per = f["resident_per_stage_gb"]
     rows = "\n".join(f"| `{k}` | {v:.2f} GB |" for k, v in sorted(per.items()))
     return f"""
-| stage | resident parameters (bf16) |
+| stage | weights on the card (bf16) |
 |:--|--:|
 {rows}
-| **all resident** | **{f['resident_all_gb']:.2f} GB** |
-| **streamed (largest stage only)** | **{f['resident_streamed_gb']:.2f} GB** |
+| **all at once** | **{f['resident_all_gb']:.2f} GB** |
+| **one stage at a time** | **{f['resident_streamed_gb']:.2f} GB** |
 
-The card is {f['vram_gib']:.0f} GiB. The difference between those last two rows --
-{f['resident_all_gb'] - f['resident_streamed_gb']:.2f} GB -- is what a streaming arrangement
-returns, and almost all of it is the text encoder sitting idle through the entire denoise loop.
+On a {f['vram_gib']:.0f} GiB card PixArt-Sigma fits either way. Streaming matters for the next,
+bigger models, which were ruled out of v0 because they don't fit (`configs/candidates.json`).
 
-For PixArt-Sigma at 1024px this is comfortable either way, and that is worth saying plainly
-rather than overselling it: {f['resident_all_gb']:.2f} GB of {f['vram_gib']:.0f} GiB is not a
-crisis. **It stops being comfortable immediately outside this generation.** Qwen-Image's DiT
-alone is 20B parameters -- 40 GB at bf16 against 32 -- and was ruled out of v0 on FIT, not on
-arithmetic (`configs/candidates.json`). Video models are worse again.
-
-So this item is best understood as the prerequisite for BG-2 rather than as a win in BG-1. It is
-scored on the frontier's `peak_vram_bytes` objective, which means a streaming scheme that costs
-latency is a move ALONG the frontier, and one that costs nothing is an expansion.
-
-**The measurement trap here is specific.** On a CPU build `peak_vram_bytes` reports host peak RSS.
-On a CUDA build it must report the device allocator's high-water mark. Scoring the wrong resource
-would make every result in this cell meaningless, and it would look completely reasonable.
+- Scored on peak VRAM. Streaming that costs latency is a move along the frontier; streaming that
+  costs nothing is a gain.
+- **Trap:** a CPU build reports host memory, not device memory.
 """
 
 
-@issue("shape-specialization", "Per-resolution shape specialization and the held-out guard",
+@issue("shape-specialization", "Per-resolution kernels and the held-out guard",
        ["kernel", "anti-gaming"])
 def _(f):
     r = f["resolutions"]
@@ -578,114 +389,52 @@ def _(f):
 |--:|--:|--:|
 {rows}
 
-A kernel tuned at one token count is untuned at the next, and the counts here span
-{min(v['tokens'] for v in r.values())} to {max(v['tokens'] for v in r.values())}. This is the
-REGENERATION property that makes generation worth having as a second scored target: the surface
-reopens with every resolution, every dtype and every model, where a text decode runtime's shapes
-are fixed by its checkpoint.
+A kernel tuned for one token count is untuned for the next.
 
-**And it is the item the anti-gaming guard is aimed at.** Specializing for exactly the benchmarked
-shape is the cheapest possible way to produce a number, so every cell is scored on its published
-shape AND on a held-out shape the evaluator picks at run time, from the base commit, after the
-candidate is frozen. The held-out resolutions are {held['resolutions']} and the held-out caption
-lengths are {held['caption_lengths']}; they are listed in the open because hiding them would not
-help. What makes the guard work is that the candidate cannot know which one will be drawn.
+Every cell is also scored at a **held-out shape** drawn after your code is frozen: resolutions
+{held['resolutions']}, caption lengths {held['caption_lengths']} (`configs/axes.json`). Faster only
+on the published shape is `SHAPE_OVERFIT` and credits nothing.
 
-A candidate faster on the published shape and slower on a held-out one is reported as
-`SHAPE_OVERFIT` and credits nothing. A general kernel that happens to be tuned well is a
-contribution; a lookup table keyed on 4096 tokens is not.
+A well-tuned general kernel counts. A lookup table keyed on one token count does not.
 """
 
 
 @issue("cuda-op-backend", "The CUDA op backend", ["cuda", "v0"],
-       closed_by="every op has a `cuda` implementation, gated and calibrated on an RTX 5090")
+       closed_by="all 15 ops have a `cuda` implementation, gated and calibrated")
 def _(f):
     return MEASURED_MARK + f"""
-**What this was.** For most of v0 `src/cuda/` held `device.cu` -- the probe -- and nothing else.
-There was no toolkit and no Blackwell part, and shipping kernels that had never been compiled,
-let alone run, as though they worked is the exact failure this repository exists to avoid. Every
-cell's `achieved` and `floor_pct` was null, every ceiling stood on a vendor peak rather than a
-probed one, and the scorer was complete, tested against synthetic records, and had never scored
-a real measurement.
+**What it was.** `src/cuda/` held only the device probe. Nothing had been measured.
 
-**What closed it.** All fifteen ops now register a `cuda` implementation beside the CPU
-reference rather than replacing it, so the oracle stays runnable and any device kernel can be
-diffed against it under the correctness gate. The three cells are calibrated on the pinned box
-and `eval/cells/BG-1/reference.json` records the probe that identifies it. `examples/` holds the
-first real receipt and the raw measurements behind it.
+**What closed it.** All fifteen ops register a `cuda` implementation beside the CPU reference, the
+cells are calibrated, and the first real receipt is in `examples/`.
 
-**What it cost, which is the part worth keeping.** Getting from "the kernels compile" to "the
-kernels are right" took six defects, and five of them were invisible to a passing test suite:
+**What it cost:** six defects. Five are the correctness defects in `docs/STATUS.md`; the sixth was
+a non-deterministic reduction in attention, which the gate caught first.
 
-- attention indexed `[batch, heads, seq, dim]` over head-LAST buffers;
-- padding was never masked, so the caption's tail voted;
-- the output patch ordering was transposed -- relative L2 of 1.37 with *identical* mean and
-  standard deviation, which is the signature of a permutation rather than an arithmetic error;
-- the sampler used a Karras sigma ratio where the reference uses VP;
-- `atomicAdd` in the attention reduction made the run non-deterministic, which the gate caught
-  before any of the above could be measured;
-- `gather` cast fp32 token ids through the weight table's dtype, so at bf16 the ids themselves
-  were rounded. Every fp32 test passed. The pipeline diverged by 1.20 at bf16 and by nothing at
-  fp32, which is why the gate now checks assembly in fp32 AND every stage at the scored dtype.
-
-The last one is the argument for the whole apparatus: it was found by a step sweep (0.993 at one
-step, so a defect and not accumulated chaos), then a stage bisect, then a layer bisect, then CPU
-versus CUDA at bf16. No amount of reading the kernel would have found it.
-
-**What remains, and it is not this issue.** The kernels are correct and slow -- deliberately, per
-CONTRIBUTING.md. `dit-step/1024/bf16` sits at {100 * f['dit_achieved']:.1f}% of its
-arithmetic ceiling, which is {f['dit_ceiling_bf16_ms']:.1f} ms against a measured
-{1e3 * json.loads((ROOT / 'eval' / 'cells' / 'BG-1' / 'reference.json').read_text())['cells']['dit-step/1024/bf16']['measured_seconds']:.0f} ms.
-That gap is what every other issue in this backlog is for.
+**What remains:** `dit-step/1024/bf16` is at {100 * f['dit_achieved']:.1f}% of its ceiling,
+{f['dit_ceiling_bf16_ms']:.1f} ms against a measured {f['dit_measured_ms']:.0f} ms. Every open issue
+is about that gap.
 """
 
 
 @issue("checkpoint-load", "Load the pinned checkpoint and pin the reference latents",
        ["correctness", "v0"],
-       closed_by="962 tensors verified, ids committed with digests, reference latents pinned")
+       closed_by="tensors verified, token ids and reference latents committed")
 def _(f):
-    n_tensors = f["checkpoint_tensors_verified"]
-    return f"""
-**What this was.** Three things stood between this repository and its first real number: a
-checkpoint layout mapping nobody had checked against a real checkpoint, prompt ids that did not
-exist, and reference latents that could not be produced by this runtime without making the
-candidate its own oracle.
+    return MEASURED_MARK + f"""
+**1. Tensor layout, verified.** {f['checkpoint_tensors_verified']} tensors checked against the
+real checkpoint: {f['checkpoint_missing']} missing, {f['checkpoint_wrong_shape']} wrong shape.
+Only the safetensors headers are read, over HTTP (about 1.8 MB, not 22 GB). CI re-checks
+`configs/checkpoint-layout.json`. The first run found a wrongly declared shape.
 
-**1. The layout mapping -- verified.** `declare_pixart_shapes()` enumerates every tensor the
-three models ask for. All **{n_tensors}** have been checked against the real checkpoint at the
-pinned revisions: **{f['checkpoint_missing']} missing, {f['checkpoint_wrong_shape']} wrong
-shape**.
+**2. Token ids, committed** with the tokenizer's digest in `eval/cells/BG-1/token-ids.json`.
 
-The check costs about 1.8 MB rather than 22 GB. A safetensors file begins with an 8-byte header
-length and then that many bytes of JSON naming every tensor and its shape, so two HTTP range
-requests per shard fetch the whole layout. `scripts/verify_checkpoint_layout.py` does it,
-`configs/checkpoint-layout.json` is the committed record, and CI re-checks the runtime against
-it offline on every push -- which is why this stays useful after being closed.
+**3. Reference latents, committed** in fp32 and bf16, with the starting noise as an input.
 
-It found a real defect on its first run: `pos_embed.proj.weight` was declared flattened as
-`[1152, 16]` where the checkpoint stores the conv layout `[1152, 4, 2, 2]`. Same bytes in the
-same order, so the runtime would have worked; the declaration was still wrong, and a shape that
-file gets wrong is a shape nothing else can catch.
-
-**2. Pre-tokenized ids -- committed.** The T5 tokenizer is a SentencePiece model, and vendoring
-one would put a second oracle in the repository, so `--token-ids FILE` takes ids directly. The
-four frozen prompts' ids are committed with the tokenizer digest beside them in
-`eval/cells/BG-1/token-ids.json`, and the gate refuses a run whose ids do not match it.
-
-**3. The reference latents -- pinned, in two dtypes.** `eval/cells/BG-1/reference-latents/` and
-`eval/cells/BG-1/reference-latents-bfloat16/` hold four latents each with a manifest, produced by the pinned
-reference implementation at the pinned revision. The starting noise is committed with them and
-passed to the runtime as an INPUT: two RNGs agreeing bit for bit is not a thing to depend on,
-and regenerating noise at the compute dtype starts a bf16 run and an fp32 reference from
-different points -- which for a while meant the gate was measuring RNG rounding.
-
-**What this taught, and it changed the gate.** `eval/cells/BG-1/dtype-cost.json` records the
-reference compared against *itself* across dtypes: worst relative L2 **0.3713**. So an
-end-to-end latent comparison at bf16 cannot gate correctness -- the oracle disagrees with itself
-by more than a real defect would. The gate therefore checks assembly in fp32, where the same
-comparison lands at 0.0005, and checks the reduced-precision path stage by stage at the scored
-dtype. A tolerance argued from one forward pass would have been wrong in both directions;
-`configs/tolerance.json` carries the measurements and the reasoning instead.
+**What it taught.** The reference differs from itself across dtypes by
+{f['reference_self_dtype_l2']:.4f} relative L2, so a bf16 end-to-end comparison can't gate
+correctness. The gate checks assembly in fp32 and each stage at bf16 instead
+(`docs/CORRECTNESS.md`).
 """
 
 
@@ -693,23 +442,12 @@ dtype. A tolerance argued from one forward pass would have been wrong in both di
 def _(f):
     r = f["resolutions"]
     return f"""
-Burnisher is named for image *and video* generation and BG-1 is images only. This issue records
-what the arithmetic already says about the video case so it is not rediscovered later.
+BG-1 is images only. Video multiplies tokens by frames: sixteen 1024px frames with full attention is
+{r[1024]['tokens'] * 16} tokens and 256x the attention arithmetic. That is why video models
+factorise or sparsify attention, and that is the cell worth building.
 
-Attention cost is quadratic in the token count, and a video model's token count is the image
-count times the frames. At 1024px one frame is {r[1024]['tokens']} tokens and self-attention is
-already {r[1024]['dit_attention_share']:.0%} of the step. Sixteen frames of full 3D attention is
-{r[1024]['tokens'] * 16} tokens and {16 * 16}x the attention arithmetic -- which is why every
-video model in practice factorises it, and why temporal and sparse attention patterns are the
-cell that matters there rather than a faster dense kernel.
-
-**This is deliberately not in BG-1** and the reason is the screen rather than ambition. A video
-generation is minutes of GPU time, the SCORE_COST question asks for a receipt in minutes rather
-than hours, and a matrix nobody can afford to calibrate is a matrix with guessed noise floors in
-it. `eval/screen.py` is the tool that settles this: run it against a video candidate's config
-before proposing BG-N, not after.
-
-The Apache-2.0 ungated video checkpoints are the obvious place to start when that happens.
+Not in BG-1 because a video receipt would take hours. Run `eval/screen.py` on a video model before
+proposing a generation.
 """
 
 
@@ -723,15 +461,10 @@ def main():
     cand, devices, axes = load()
     f = facts(cand, devices, axes)
     out_dir = ROOT / args.out
-    index = ["# Opportunity backlog", "",
-             "Generated by `scripts/make_issues.py`. Every figure below is computed from",
-             "`configs/` by the same geometry the scorer uses; none is typed. Re-generate after",
-             "any change to a config, or the backlog and the roofline table will disagree.", "",
-             "**Ceilings here are `basis: model`** -- arithmetic, from a config file and a device",
-             "peak. A ceiling says how big a box could be, never how full it is. Where an issue",
-             "quotes a MEASURED figure from the pinned hardware it says so in its Basis line and",
-             "names the artifact the figure came from; everywhere else, the number is a bound and",
-             "publishing it as a gain is the one thing a submission must never do.",
+    index = ["# Backlog", "",
+             "Generated by `scripts/make_issues.py` from `configs/`. Do not edit by hand.", "",
+             "Ceilings are arithmetic: how big a box could be, never a measured gain. An issue",
+             "that quotes a measurement says so in its Basis line.",
              "", "## Open", "",
              "| issue | title | labels |", "|:--|:--|:--|"]
     closed_rows = []
@@ -740,9 +473,8 @@ def main():
         body = fn(f).strip()
         measured = MEASURED_MARK in body
         body = body.replace(MEASURED_MARK, "").strip()
-        basis = ("model (arithmetic) for every ceiling, and clearly marked where a MEASURED\n"
-                 "figure from the pinned hardware is quoted alongside one. A ceiling is not a gain."
-                 if measured else "model (arithmetic). No measurement appears below.")
+        basis = ("arithmetic ceilings, plus measured figures from the artifacts named"
+                 if measured else "arithmetic ceilings only")
         status = (f"**Status:** CLOSED -- {closed_by}  \n" if closed_by
                   else "**Status:** open  \n")
         text = (f"# {title}\n\n"
@@ -752,10 +484,7 @@ def main():
                 f"**Device:** {f['device']}\n\n"
                 f"{body}\n\n"
                 f"---\n\n"
-                f"*Generated by `scripts/make_issues.py`. Do not edit by hand: every ceiling is\n"
-                f"computed from `configs/` by the geometry the scorer uses, every measured figure\n"
-                f"is read from the artifact it names, and a number typed here would disagree with\n"
-                f"`docs/ROOFLINE.md` and with the scorer.*\n")
+                f"*Generated by `scripts/make_issues.py`. Do not edit by hand.*\n")
         if args.write:
             out_dir.mkdir(parents=True, exist_ok=True)
             (out_dir / f"{slug}.md").write_text(text)
@@ -764,8 +493,7 @@ def main():
 
     if closed_rows:
         index += ["", "## Closed", "",
-                  "Kept rather than deleted. Each says what the problem was and what settled it;",
-                  "between them they are most of what this repository learned building v0.", "",
+                  "Kept as a record of what was settled and how.", "",
                   "| issue | title | labels |", "|:--|:--|:--|"] + closed_rows
     index_text = "\n".join(index) + "\n"
     if args.write:

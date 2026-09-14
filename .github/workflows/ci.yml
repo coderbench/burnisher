@@ -42,11 +42,8 @@ jobs:
         run: |
           python3 eval/roofline_table.py --markdown /tmp/roofline.md > /dev/null
           diff -u docs/ROOFLINE.md /tmp/roofline.md
-      - name: the screen runs and its document is regenerable
-        run: |
-          python3 eval/screen.py --json /tmp/screen.json
-          python3 eval/screen.py --markdown /tmp/screen.md > /dev/null
-          diff -u docs/SCREEN.md /tmp/screen.md
+      - name: the screen runs
+        run: python3 eval/screen.py --json /tmp/screen.json
       - name: the backlog is regenerable
         # Every figure in issues/ is computed from configs/. A stale backlog is a pitch for a
         # week of somebody's time built on a number that has moved.

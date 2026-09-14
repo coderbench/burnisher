@@ -70,7 +70,7 @@ def _require_device(what):
         print("\n   This command produces a MEASUREMENT. There is no fallback and there is not\n"
               "   supposed to be one: an estimate printed where a measurement belongs is how an\n"
               "   evaluator comes to publish a confident number for a run that never happened.\n"
-              "\n   Run it on the pinned hardware (see docs/HARDWARE.md), or use the commands\n"
+              "\n   Run it on the pinned hardware (see docs/EVAL.md), or use the commands\n"
               "   that need no device: screen, roofline, generation, score, receipt, ledger.",
               file=sys.stderr)
         return None

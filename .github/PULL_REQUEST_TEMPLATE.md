@@ -1,57 +1,33 @@
 ## What this changes
 
-<!-- One or two sentences. The commit message is one line with no body, so this is where the
-     explanation goes. -->
+<!-- One or two sentences. Commit messages are one line, so the explanation goes here. -->
 
-## Kind of contribution
+## Kind
 
-- [ ] **Kernel / optimization** — registered as a new named implementation beside the existing one
-- [ ] **Cartography** — a new cell, with its geometry, reference implementation, roofline and calibration (`docs/CARTOGRAPHY.md`)
-- [ ] **Instrument** — a change to `eval/`, `configs/`, `schemas/` or `tools/burnish`
+- [ ] **Kernel** — registered under a new name beside the existing one
+- [ ] **New cell** — see `docs/CARTOGRAPHY.md`
+- [ ] **Instrument** — touches `eval/`, `configs/`, `schemas/` or `tools/burnish` (not scored)
 - [ ] **Docs / build / other**
 
-## For a kernel change
+## For a kernel
 
-**Implementation name:** `<the name you registered>`
+**Implementation name:** `<name>`
 
-- [ ] Registered a new name; did **not** replace an existing implementation
 - [ ] `burnisher info` lists it
-- [ ] `burnish gate --impl <name> --repeats 10` passed — determinism **and** correctness
-The validator measures every submission, so the rest of this section is optional. If you
-measured it yourself on an RTX 5090:
+- [ ] `scripts/check.sh` passes
 
-- [ ] `burnish bench --impl-candidate <name> --gate-result gate.json --gate-base-result gate-base.json` run on the pinned hardware
-- [ ] Held-out shapes were run (no `--skip-held-out`)
-
-Paste the receipt summary from `burnish score`:
+Optional — the validator measures every submission. If you measured it on an RTX 5090, paste the
+`burnish score` summary. Never type a number by hand.
 
 ```
-  status
-  gap closed
-  99% interval
-  resolved
-  frontier
-
-  per cell:
 ```
-
-**Do not type any number into this PR by hand.** Every figure comes from the receipt, and the
-receipt from raw measurements that are themselves in the receipt.
 
 ## For an instrument change
 
-Instrument changes are not scored as speedups; `docs/EVAL.md` says how they are handled.
-
-- [ ] I did not remove or relax a guard
-- [ ] …or, if I did: which incident does it encode, and why does it no longer apply?
-
-<!-- Guards are named in comments where they live. That comment is the first thing to read. -->
-
-- [ ] I did not edit anything under `eval/cells/` (a frozen generation cannot change; the answer
-      is a new generation)
+- [ ] I did not remove or relax a guard, or I explain which incident it encodes and why it no
+      longer applies
+- [ ] I did not edit an existing generation under `eval/cells/`
 
 ## Checks
 
-- [ ] `scripts/check.sh` passes (no GPU needed)
-- [ ] Commit messages are a single line, `<type>: <description>`, 72 chars or fewer, no body, no
-      trailers
+- [ ] Commit messages are one line, `<type>: <description>`, 72 characters or fewer
