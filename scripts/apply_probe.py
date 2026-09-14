@@ -78,7 +78,8 @@ def main():
         "vram_bytes", d["vram_bytes"],
         "Usable device memory as the driver reports it, which is less than the marketed "
         "capacity.")))
-    rows.append(("clock_boost_ghz", *put("clock_boost_ghz", d["clock_khz"] / 1e6)))
+    if d.get("clock_khz") is not None:           # not reported by CUDA 13 and later
+        rows.append(("clock_boost_ghz", *put("clock_boost_ghz", d["clock_khz"] / 1e6)))
     rows.append(("persisting_l2_bytes", *put(
         "persisting_l2_bytes", d["persisting_l2_bytes"],
         "cudaDeviceProp::accessPolicyMaxWindowSize on this part. Not used by any ceiling here; "

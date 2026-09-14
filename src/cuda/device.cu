@@ -28,6 +28,29 @@
 
 #include <cstdio>
 #include <map>
+#include <type_traits>
+#include <utility>
+
+namespace {
+
+// Whether this toolkit's cudaDeviceProp still has `clockRate` (CUDA 13 removed it). Detected by
+// the compiler rather than a version macro, so the probe builds against any toolkit.
+template <typename P, typename = void>
+struct HasClockRate : std::false_type {};
+template <typename P>
+struct HasClockRate<P, std::void_t<decltype(std::declval<const P&>().clockRate)>>
+    : std::true_type {};
+
+template <typename P>
+void clock_json(char* out, size_t n, const P& p, std::true_type) {
+    std::snprintf(out, n, "%d", static_cast<int>(p.clockRate));
+}
+template <typename P>
+void clock_json(char* out, size_t n, const P&, std::false_type) {
+    std::snprintf(out, n, "null");
+}
+
+}  // namespace
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -241,12 +264,19 @@ int probe_device_main() {
     cudaEventDestroy(ga);
     cudaEventDestroy(gb);
 
+    // The part's clock rate is recorded, never scored. CUDA 13 removed it from cudaDeviceProp, and
+    // reading it there broke the whole CUDA build on every box with the newer toolkit, so it is
+    // reported as null where the toolkit no longer has it.
+    char clock_khz[24];
+    clock_json(clock_khz, sizeof clock_khz, prop,
+               HasClockRate<std::decay_t<decltype(prop)>>{});
+
     // One BURNISH_JSON line, like every other measurement command. `basis` is "measured"
     // because a run produced it -- which is the one thing that entitles a number to that word.
     std::printf(
         "BURNISH_JSON: {\"basis\":\"measured\",\"device\":{\"name\":\"%s\",\"sm\":%d,"
         "\"cc\":\"%d.%d\",\"vram_bytes\":%zu,\"l2_bytes\":%d,"
-        "\"persisting_l2_bytes\":%zu,\"clock_khz\":%d},"
+        "\"persisting_l2_bytes\":%zu,\"clock_khz\":%s},"
         "\"measured\":{\"memory_bandwidth_gbs\":%.3f,\"bf16_tensor_tflops\":%.3f,"
         "\"gemm_shape\":%d,\"bandwidth_working_set_bytes\":%zu},"
         "\"_note\":\"bandwidth is a grid-stride read+write over a working set far larger than "
@@ -255,7 +285,7 @@ int probe_device_main() {
         "if a contributor could in principle reach it.\"}\n",
         prop.name, prop.multiProcessorCount, prop.major, prop.minor,
         prop.totalGlobalMem, prop.l2CacheSize,
-        static_cast<size_t>(prop.accessPolicyMaxWindowSize), prop.clockRate,
+        static_cast<size_t>(prop.accessPolicyMaxWindowSize), clock_khz,
         bandwidth / 1e9, flops / 1e12, N, bytes);
 
     std::fprintf(stderr,
