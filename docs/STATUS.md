@@ -11,6 +11,7 @@ What is real here and what is not. Read this before spending a week on anything.
 | replays of the bf16 CUDA pipeline | byte-identical |
 | CUDA stages vs the reference (VAE vs the CPU oracle) | agree to between 1.7e-07 and 5.2e-05 |
 | reference latents, 4 prompts, fp32 and bf16 | committed |
+| BG-1 fp32 gate drift on a second card | reproduces the anchor card's |
 
 | cell | achieved | room left | noise floor |
 |:--|--:|--:|--:|
@@ -64,8 +65,11 @@ one layer) until they separate.
 - **Many submissions at once.** One submission costs ~24 min (gate candidate 7.2, bench 17.1; the
   base gate is cached per commit). `burnish screen` reports SCORE_COST as FAIL, at
   31 modelled-from-measurement minutes against a 30-minute budget. Queueing is unmeasured.
-- **BG-2 (512px)** is declared but has no calibration, reference latents or measured tolerance.
-  Nothing is scored against it.
+- **BG-2 (512px) is anchored, but its gate is loose.** Its anchor (two sessions), reference
+  latents and a measured tolerance are committed. Its fp32 drift against the reference grows
+  with steps -- 0.019% at 1 step, 0.093% at 4, 1.36% at 20 -- so the
+  trajectory amplifies rounding rather than hiding a defect. The 5x tolerance that follows
+  (6.8% relative L2) catches gross defects, not subtle ones.
 - **Launch overhead vs raw compute.** The ceiling treats both kinds of win the same. That is a
   choice.
 

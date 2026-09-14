@@ -46,18 +46,55 @@
    "vae-decode": 0.1
   }
  },
- "_the_rule_that_was_learned_here": "The gate must compare at the dtype the cell is SCORED in. BG-1 first compared a bf16 pipeline against an fp32 oracle and asked for 2% relative L2. That is unsatisfiable, and not by a little: the reference implementation compared against ITSELF at the two dtypes -- same weights, same pinned noise, same token ids, zero implementation difference -- comes out at 0.371 relative L2 (eval/cells/BG-1/dtype-cost.json). Comparing across dtypes measures the dtype, not the implementation.",
- "_what_this_is": "The correctness gate's thresholds, and where they came from. Kept in configs/ rather than hardcoded in the generation builder for the same reason the device peaks are: they should be set from a MEASUREMENT and regenerated, not typed and defended.",
  "BG-2": {
-  "_status": "PROVISIONAL -- these thresholds have not been measured for this generation. `burnish gate --generation BG-2 --calibrate-tolerance` measures the drift of a correct build against the oracle; the thresholds are then set from it, with the reasoning, and the basis becomes `measured`. Until then this generation must not be used to reject anything.",
-  "basis": "provisional",
-  "gate_dtype": "fp32",
+  "_basis_note": "MEASURED. 5x the worst same-dtype drift between this runtime and the reference implementation at fp32, over the frozen prompt set. The multiple is a stated judgement: the measurement is a handful of prompts on one box and the quantity is amplified by a chaotic trajectory, so a threshold at the observed worst case would reject a correct implementation on the next prompt. Both the measurement and the multiple are recorded so the multiple can be disputed without re-running anything.",
   "_gate_dtype_why": "",
-  "latent_l2_relative": 0.0025,
-  "latent_max_abs": 0.33,
-  "_thresholds_why": "Carried over from BG-1 as a STARTING POINT for the calibration run only. At 512px the DiT sees 1024 tokens instead of 4096, so the accumulated reduction-order disagreement is a different number and there is no reason these should be the right ones.",
+  "_looseness": "Five times a drift that the 512px trajectory has already amplified. The relative L2 bound catches gross defects (past ones measured 1.20 and 1.37) and admits subtler ones, and the max-abs bound sits above the latents' own magnitude. A tighter gate for this generation would compare at fewer steps.",
+  "basis": "measured",
   "determinism_replays": 10,
   "determinism_rule": "byte-identical latents across replays of the same build",
+  "gate_dtype": "fp32",
+  "latent_l2_relative": 0.068232,
+  "latent_max_abs": 6.674261,
+  "measured": {
+   "fp32_step_divergence": {
+    "1": {
+     "max_abs": 0.0012416839599609375,
+     "relative_l2": 0.00018647074880455032
+    },
+    "20": {
+     "max_abs": 1.334852147847414,
+     "relative_l2": 0.013646405321298035
+    },
+    "4": {
+     "max_abs": 0.08682918548583984,
+     "relative_l2": 0.0009308235613473111
+    },
+    "_what": "This runtime in fp32 against fp32 reference latents made at the same step count, same pinned noise. It grows smoothly with steps, and the same prompts are worst at 4 and 20 steps: the denoise trajectory amplifies reduction-order rounding at 512px. A defect would already show at one step."
+   },
+   "fp32_vs_fp32_oracle": {
+    "_what": "This runtime against the reference at the SAME dtype. The only comparison that isolates implementation error from the cost of the dtype.",
+    "device": {
+     "_clocks_note": "Clocks are not pinned and cannot be in a container. Only paired interleaved same-box deltas mean anything; absolute times from two different sessions are not comparable.",
+     "driver_version": "595.71.05",
+     "memory.total": "32607 MiB",
+     "name": "NVIDIA GeForce RTX 5090",
+     "pci.bus_id": "00000000:05:00.0",
+     "uuid": "GPU-96bb53a0-233c-705e-bb11-fbbaf4e2727d"
+    },
+    "margin": 5.0,
+    "noise_sha256": "e3a0022a249bd0e56277a2ee60290bf0c13cb90a87359d94065710e3d9ad8203",
+    "prompt_set_digest": "873bd4c6d2a0b851c0d00cfbd7d778ef75c049a27ff657538bde7f7bc12bddce",
+    "worst_max_abs": 1.334852147847414,
+    "worst_relative_l2": 0.013646405321298035
+   }
+  },
+  "previous": {
+   "basis": "provisional",
+   "latent_l2_relative": 0.0025,
+   "latent_max_abs": 0.33
+  },
+  "scored_dtype": "fp32",
   "stage_tolerances_at_scored_dtype": {
    "_margin": "About 4x each measurement. The DiT's is looser because its disagreement grows with depth -- 0.005 at one block, 0.009 at four, 0.137 at twenty-eight -- so the threshold has to admit the full stack.",
    "_measured_bf16": {
@@ -72,5 +109,7 @@
    "t5-encode": 0.06,
    "vae-decode": 0.1
   }
- }
+ },
+ "_the_rule_that_was_learned_here": "The gate must compare at the dtype the cell is SCORED in. BG-1 first compared a bf16 pipeline against an fp32 oracle and asked for 2% relative L2. That is unsatisfiable, and not by a little: the reference implementation compared against ITSELF at the two dtypes -- same weights, same pinned noise, same token ids, zero implementation difference -- comes out at 0.371 relative L2 (eval/cells/BG-1/dtype-cost.json). Comparing across dtypes measures the dtype, not the implementation.",
+ "_what_this_is": "The correctness gate's thresholds, and where they came from. Kept in configs/ rather than hardcoded in the generation builder for the same reason the device peaks are: they should be set from a MEASUREMENT and regenerated, not typed and defended."
 }

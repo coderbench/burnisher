@@ -1,45 +1,77 @@
 {
- "_device_probe_note": "Null until `burnish probe --device` runs. Until then the ceilings behind these cells stand on VENDOR peaks, which no kernel reaches -- so every achieved fraction computed against them is a LOWER bound on how done a cell really is.",
- "_how_to_fill_this_in": "burnish calibrate --generation BG-2 --repeats 9 --write",
- "_status": "UNCALIBRATED. No cell has been measured on the pinned hardware, so every `achieved` and `floor_pct` below is null and the scorer will refuse to produce a receipt. This is the honest state of the repository and not an oversight: publishing a plausible achieved fraction would make every gap-closed score a fiction with a checksum on it.",
- "_what_this_is": "Per-cell CALIBRATION: the fraction of the arithmetic ceiling currently achieved, and the measured run-to-run noise floor. Both are measurements and neither can be computed from a config file.",
+ "_floor_method": "Two arms, both the unmodified base, interleaved with every guard a scored comparison uses. The floor is the larger of the paired control-vs-control spread and the instrument's own resolution.",
+ "_floor_stability": "A floor is a spread statistic and is not stable between sessions: measured twice on one RTX 5090, hours apart, the per-cell floors here moved by up to 24x while the achieved fractions held to three significant figures. That is expected -- a median is robust and a spread over nine repeats is not -- but it means whether a submission RESOLVES can depend on which session the box was calibrated in. `--merge` folds sessions together keeping the worst floor per cell, which can only refuse a gain too small to see rather than credit noise as a contribution.",
+ "_what_this_is": "Per-cell calibration: the fraction of the arithmetic ceiling currently achieved, and the measured run-to-run noise floor. Both are measurements.",
+ "calibrated_with": {
+  "impl": "cuda",
+  "iters": 5,
+  "repeats": 9,
+  "timer_digits": 6,
+  "warmup": 2
+ },
+ "calibration_sessions": 2,
  "cells": {
   "dit-step/512/bf16": {
-   "achieved": null,
-   "floor_pct": null,
-   "floor_repeats": null,
-   "measured_seconds": null,
-   "peak_vram_bytes": null
-  },
-  "dit-step/512/fp8": {
-   "achieved": null,
-   "floor_pct": null,
-   "floor_repeats": null,
-   "measured_seconds": null,
-   "peak_vram_bytes": null
-  },
-  "dit-step/512/nvfp4": {
-   "achieved": null,
-   "floor_pct": null,
-   "floor_repeats": null,
-   "measured_seconds": null,
-   "peak_vram_bytes": null
+   "achieved": 0.035266681734935516,
+   "basis": "measured",
+   "ceiling_bound_by": "compute",
+   "ceiling_peak_basis": "measured",
+   "ceiling_seconds": 0.010702978610923355,
+   "floor_decided_by": "spread",
+   "floor_median_ratio": 1.000233466704189,
+   "floor_pct": 1.7880875266113447,
+   "floor_repeats": 9,
+   "floor_resolution_pct": 0.0005,
+   "floor_spread_pct": 1.7880875266113447,
+   "floors_of_room": 1502.5124303453786,
+   "measured_seconds": 0.3034869765,
+   "peak_vram_bytes": 2989182976,
+   "resolvable": true
   },
   "t5-encode/512/bf16": {
-   "achieved": null,
-   "floor_pct": null,
-   "floor_repeats": null,
-   "measured_seconds": null,
-   "peak_vram_bytes": null
+   "achieved": 0.16829332615480674,
+   "basis": "measured",
+   "ceiling_bound_by": "compute",
+   "ceiling_peak_basis": "measured",
+   "ceiling_seconds": 0.023342911482751614,
+   "floor_decided_by": "spread",
+   "floor_median_ratio": 0.998286382724761,
+   "floor_pct": 2.6521574087600936,
+   "floor_repeats": 9,
+   "floor_resolution_pct": 0.0005,
+   "floor_spread_pct": 2.6521574087600936,
+   "floors_of_room": 181.3970948044814,
+   "measured_seconds": 0.1387037265,
+   "peak_vram_bytes": 19629408256,
+   "resolvable": true
   },
   "vae-decode/512/bf16": {
-   "achieved": null,
-   "floor_pct": null,
-   "floor_repeats": null,
-   "measured_seconds": null,
-   "peak_vram_bytes": null
+   "achieved": 0.008951428854492946,
+   "basis": "measured",
+   "ceiling_bound_by": "compute",
+   "ceiling_peak_basis": "measured",
+   "ceiling_seconds": 0.010445400761839994,
+   "floor_decided_by": "spread",
+   "floor_median_ratio": 1.0003466242879566,
+   "floor_pct": 0.5829970913769619,
+   "floor_repeats": 9,
+   "floor_resolution_pct": 0.0005,
+   "floor_spread_pct": 0.5829970913769619,
+   "floors_of_room": 18879.776721779494,
+   "measured_seconds": 1.1668975905,
+   "peak_vram_bytes": 692056064,
+   "resolvable": true
   }
  },
- "device_probe": null,
- "generation": "BG-2"
+ "device": "cuda",
+ "device_probe": {
+  "_clocks_note": "Clocks are not pinned and cannot be in a container. Only paired interleaved same-box deltas mean anything; absolute times from two different sessions are not comparable.",
+  "driver_version": "595.71.05",
+  "memory.total": "32607 MiB",
+  "name": "NVIDIA GeForce RTX 5090",
+  "pci.bus_id": "00000000:05:00.0",
+  "uuid": "GPU-96bb53a0-233c-705e-bb11-fbbaf4e2727d"
+ },
+ "generation": "BG-2",
+ "weights": "/workspace/ckpt"
 }

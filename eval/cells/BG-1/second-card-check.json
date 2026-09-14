@@ -77,6 +77,13 @@
   "pci.bus_id": "00000000:05:00.0",
   "uuid": "GPU-96bb53a0-233c-705e-bb11-fbbaf4e2727d"
  },
+ "fp32_gate_drift_20_steps": {
+  "_what": "BG-1's full fp32 correctness gate on this second card, against the committed fp32 reference latents. It reproduces the anchor card's drift, so the tolerance set there holds on another card of the class.",
+  "anchor_card_max_abs": 0.06539362668991089,
+  "anchor_card_relative_l2": 0.0005004137624701084,
+  "max_abs": 0.06539362668991089,
+  "relative_l2": 0.0005004137624701084
+ },
  "generation": "BG-1",
  "same_card_as_reference": false,
  "weights": "/workspace/ckpt"
