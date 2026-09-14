@@ -44,6 +44,14 @@ class TestProvisioningABox(unittest.TestCase):
         self.assertIn('line="0 */2 * * * $R/eval/run_round_cron.sh >> /var/log/burnish-round.log 2>&1"',
                       self.SRC)
 
+    def test_a_toolkit_the_image_ships_is_kept(self):
+        self.assertIn("[ -x /usr/local/cuda/bin/nvcc ] && { TOOLKIT=;", self.SRC)
+        self.assertIn("apt-get install -y -q --no-install-recommends $TOOLKIT ", self.SRC)
+
+    def test_the_tokenizer_scripts_generate_py_needs_is_downloaded(self):
+        self.assertIn('allow_patterns=["text_encoder/*", "tokenizer/*"]', self.SRC)
+        self.assertIn("import numpy, huggingface_hub, sentencepiece", self.SRC)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

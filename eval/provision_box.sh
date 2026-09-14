@@ -59,7 +59,11 @@ for pid in $(ss -ltnpH | grep -o 'pid=[0-9]*' | cut -d= -f2 | sort -u); do
 done
 
 say "packages"
-if ! dpkg -s cuda-toolkit-12-8 cmake build-essential cron python3-pip gh >/dev/null 2>&1; then
+# A toolkit the image already ships is kept: 12.8 and 13.x both build the runtime, and a second one
+# beside it is gigabytes for nothing.
+TOOLKIT=cuda-toolkit-12-8
+[ -x /usr/local/cuda/bin/nvcc ] && { TOOLKIT=; /usr/local/cuda/bin/nvcc --version | grep release; }
+if ! dpkg -s $TOOLKIT cmake build-essential cron python3-pip gh >/dev/null 2>&1; then
     apt-get update -q
     apt-get install -y -q --no-install-recommends ca-certificates curl
     if [ ! -f /usr/share/keyrings/cuda-archive-keyring.gpg ]; then
@@ -72,10 +76,10 @@ if ! dpkg -s cuda-toolkit-12-8 cmake build-essential cron python3-pip gh >/dev/n
     echo "deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
         > /etc/apt/sources.list.d/github-cli.list
     apt-get update -q
-    apt-get install -y -q --no-install-recommends cuda-toolkit-12-8 cmake build-essential cron python3-pip gh
+    apt-get install -y -q --no-install-recommends $TOOLKIT cmake build-essential cron python3-pip gh
 fi
-python3 -c "import numpy, huggingface_hub" 2>/dev/null || \
-    python3 -m pip install -q --break-system-packages numpy huggingface_hub
+python3 -c "import numpy, huggingface_hub, sentencepiece" 2>/dev/null || \
+    python3 -m pip install -q --break-system-packages numpy huggingface_hub sentencepiece
 
 say "code"
 [ -d "$R/.git" ] || git clone -q "$REPO" "$R"
@@ -92,7 +96,7 @@ m = json.load(open("/workspace/burnisher/eval/cells/BG-1/generation.json"))["mod
 snapshot_download(m["repo"], revision=m["revision"],
                   allow_patterns=["transformer/*", "vae/*"], local_dir="/workspace/ckpt")
 snapshot_download(m["text_encoder_repo"], revision=m["text_encoder_revision"],
-                  allow_patterns=["text_encoder/*"], local_dir="/workspace/ckpt")
+                  allow_patterns=["text_encoder/*", "tokenizer/*"], local_dir="/workspace/ckpt")
 PY
 chmod -R a+rX /workspace/ckpt
 
