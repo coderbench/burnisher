@@ -7,6 +7,8 @@ __pycache__/
 weights/
 scratch/
 receipts-local/
+# The evaluator's tokens and box paths (eval/run_round_cron.sh).
+.env.eval
 *.safetensors
 *.npy
 *.png
