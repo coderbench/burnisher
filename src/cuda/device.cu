@@ -70,6 +70,31 @@ std::mutex g_mutex;
 size_t g_live = 0;
 size_t g_peak = 0;
 
+// Freed blocks, kept by exact size and handed back to the next allocation of that size.
+//
+// A forward pass allocates the same shapes in the same order every time, and the VAE allocates a
+// full-resolution activation for nearly every op. Returning each one to the driver cost more than
+// the decode's convolutions: `cudaFree` of a large block blocks, and four decodes spent over a
+// second in it. Reuse is safe because every kernel runs on the one default stream, so work queued
+// against a block's previous owner finishes before anything queued against its next one.
+//
+// Only while memory is plentiful. Kernel launches and the vendor libraries allocate device memory
+// that never passes through here, so a cache that held every freed size ran an fp32 generation --
+// 22 GB of weights -- out of memory in a launch, where no retry could reach it. A block is kept
+// only while this much stays free, and a new allocation that leaves less returns the whole cache.
+constexpr size_t kCacheHeadroom = 4ull << 30;
+
+size_t device_free_bytes() {
+    size_t free_b = 0, total_b = 0;
+    return cudaMemGetInfo(&free_b, &total_b) == cudaSuccess ? free_b : 0;
+}
+
+// Deliberately leaked, for the same reason as the size table below.
+std::multimap<size_t, void*>& free_blocks() {
+    static std::multimap<size_t, void*>* m = new std::multimap<size_t, void*>();
+    return *m;
+}
+
 std::map<void*, size_t>& size_table() {
     // Deliberately leaked. `release` runs from a shared_ptr deleter, and a tensor can outlive
     // static destruction -- at which point a function-local static map has already been
@@ -92,9 +117,30 @@ bool available() {
     return cudaGetDeviceCount(&n) == cudaSuccess && n > 0;
 }
 
+// Return every cached block to the driver. Called when an allocation fails with blocks cached.
+void release_cache() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    for (const auto& kv : free_blocks()) cudaFree(kv.second);
+    free_blocks().clear();
+}
+
 void* alloc(size_t bytes) {
     void* p = nullptr;
-    check(cudaMalloc(&p, bytes), "cudaMalloc");
+    {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        auto it = free_blocks().find(bytes);
+        if (it != free_blocks().end()) {
+            p = it->second;
+            free_blocks().erase(it);
+        }
+    }
+    if (!p) {
+        if (cudaMalloc(&p, bytes) != cudaSuccess) {
+            release_cache();
+            check(cudaMalloc(&p, bytes), "cudaMalloc");
+        }
+        if (device_free_bytes() < kCacheHeadroom) release_cache();
+    }
     // ZEROED, to match the host allocator.
     //
     // `cudaMalloc` does not zero and `calloc` does, so without this the same code produces zeros
@@ -106,23 +152,28 @@ void* alloc(size_t bytes) {
     std::lock_guard<std::mutex> lock(g_mutex);
     g_live += bytes;
     g_peak = std::max(g_peak, g_live);
-    // The size is recorded against the pointer so `release` can subtract it; cudaFree does not
-    // report how much it freed.
+    // The size is recorded against the pointer so `release` can subtract it and cache the block
+    // under its size. Cached blocks are not live: the memory objective is what the runtime asked
+    // for, not what the cache happens to be holding.
     size_table()[p] = bytes;
     return p;
 }
 
 void release(void* p) {
     if (!p) return;
-    {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        auto it = size_table().find(p);
-        if (it != size_table().end()) {
-            g_live -= std::min(g_live, it->second);
-            size_table().erase(it);
-        }
+    std::lock_guard<std::mutex> lock(g_mutex);
+    auto it = size_table().find(p);
+    if (it == size_table().end()) {
+        cudaFree(p);
+        return;
     }
-    cudaFree(p);
+    g_live -= std::min(g_live, it->second);
+    if (device_free_bytes() >= kCacheHeadroom) {
+        free_blocks().emplace(it->second, p);
+    } else {
+        cudaFree(p);
+    }
+    size_table().erase(it);
 }
 
 void copy_to_device(void* dst, const void* src, size_t bytes) {

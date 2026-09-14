@@ -129,6 +129,33 @@ void conv2d_matches_the_oracle(const std::string& impl, DType dt) {
     }
 }
 
+void groupnorm_matches_the_oracle(const std::string& impl, DType dt) {
+    const std::string where = impl + " groupnorm, " + dtype_name(dt);
+    // A small group, and groups of 64800 elements: several of the kernel's fixed chunks plus a
+    // remainder, on two rows, with the per-channel affine.
+    for (const auto& shape : {std::vector<int64_t>{2, 4, 3, 5, 2}, {2, 4, 180, 180, 2}}) {
+        const int64_t rows = shape[0], ch = shape[1], hh = shape[2], ww = shape[3], groups = shape[4];
+        const int64_t cols = ch * hh * ww;
+        Tensor x = ramp({rows, cols}, 0.013, dt), w = ramp({ch}, 0.7, dt), b = ramp({ch}, 1.3, dt);
+        Tensor expect({rows, cols}, dt);
+        const NormArgs host{&x, &w, &b, &expect, rows, cols, 1e-6f, false, groups, ch};
+        NormRegistry::instance().get("stock")(host);
+
+        Tensor dx = x.to_device(), dw = w.to_device(), db = b.to_device();
+        Tensor got({rows, cols}, dt, Device::CUDA), again({rows, cols}, dt, Device::CUDA);
+        NormRegistry::instance().get(impl)(
+            NormArgs{&dx, &dw, &db, &got, rows, cols, 1e-6f, false, groups, ch});
+        NormRegistry::instance().get(impl)(
+            NormArgs{&dx, &dw, &db, &again, rows, cols, 1e-6f, false, groups, ch});
+        device::synchronize();
+
+        const double d = worst(expect, got);
+        CHECK_MSG(d < tolerance(dt), where + " cols=" + std::to_string(cols) +
+                                         " differs from the oracle by " + std::to_string(d));
+        CHECK_MSG(identical(got, again), where + " is not byte-identical across two calls");
+    }
+}
+
 }  // namespace
 
 // `test_cuda_ops [impl...]` checks other registered names too; with none it checks the kernels
@@ -146,6 +173,7 @@ int main(int argc, char** argv) {
         for (DType dt : {DType::F32, DType::BF16}) {
             if (AttentionRegistry::instance().has(impl)) attention_matches_the_oracle(impl, dt);
             if (Conv2dRegistry::instance().has(impl)) conv2d_matches_the_oracle(impl, dt);
+            if (NormRegistry::instance().has(impl)) groupnorm_matches_the_oracle(impl, dt);
         }
     }
     return burnisher_test::summary("test_cuda_ops");

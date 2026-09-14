@@ -317,6 +317,110 @@ void norm_cuda(const NormArgs& a) {
     check_launch("norm");
 }
 
+// --- GroupNorm in three passes ---------------------------------------------------------
+// The shared-memory reduction above gives each group one block and syncs its threads at every
+// level of the tree. At the VAE's 1024px shapes a group is four million elements, and that kernel
+// was a third of the decode.
+//
+// Here the reduction is split into fixed chunks instead. Pass one sums each chunk on one thread,
+// in index order and in double, as the CPU oracle accumulates. Pass two combines each group's
+// chunks in chunk order. Pass three normalises every element independently. The chunk size is a
+// constant, so the reduction order does not depend on how the launch was scheduled and the result
+// reproduces byte for byte.
+
+constexpr int64_t kNormChunk = 16384;
+
+Tensor& scratch(int slot, int64_t numel, DType dtype);   // defined with attention, below
+
+template <typename T>
+__global__ void k_group_chunk_sums(const T* x, double* sums, int64_t rows, int64_t cols,
+                                   int64_t groups, int64_t chunks) {
+    const int64_t per = cols / groups;
+    const int64_t n = rows * groups * chunks;
+    for (int64_t e = blockIdx.x * (int64_t)blockDim.x + threadIdx.x; e < n;
+         e += (int64_t)gridDim.x * blockDim.x) {
+        const int64_t c = e % chunks;
+        const int64_t g = (e / chunks) % groups;
+        const int64_t r = e / (chunks * groups);
+        const int64_t base = r * cols + g * per;
+        const int64_t end = min(per, (c + 1) * kNormChunk);
+        double sum = 0.0, sumsq = 0.0;
+        for (int64_t i = c * kNormChunk; i < end; ++i) {
+            const double v = ld(x, base + i);
+            sum += v;
+            sumsq += v * v;
+        }
+        sums[2 * e] = sum;
+        sums[2 * e + 1] = sumsq;
+    }
+}
+
+__global__ void k_group_stats(const double* sums, float* stats, int64_t n_groups, int64_t chunks,
+                              int64_t per, float eps) {
+    for (int64_t g = blockIdx.x * (int64_t)blockDim.x + threadIdx.x; g < n_groups;
+         g += (int64_t)gridDim.x * blockDim.x) {
+        double sum = 0.0, sumsq = 0.0;
+        for (int64_t c = 0; c < chunks; ++c) {
+            sum += sums[2 * (g * chunks + c)];
+            sumsq += sums[2 * (g * chunks + c) + 1];
+        }
+        const double mean = sum / (double)per;
+        const double var = sumsq / (double)per - mean * mean;
+        stats[2 * g] = (float)mean;
+        stats[2 * g + 1] = 1.0f / sqrtf((float)var + eps);
+    }
+}
+
+template <typename T>
+__global__ void k_group_apply(const T* x, const T* weight, const T* bias, T* out,
+                              const float* stats, int64_t rows, int64_t cols, int64_t groups,
+                              int64_t channels) {
+    const int64_t n = rows * cols;
+    const int64_t per = cols / groups;
+    const int64_t spatial = channels ? (cols / channels) : 1;
+    for (int64_t e = blockIdx.x * (int64_t)blockDim.x + threadIdx.x; e < n;
+         e += (int64_t)gridDim.x * blockDim.x) {
+        const int64_t in_row = e % cols;
+        const int64_t g = (e / cols) * groups + in_row / per;
+        float v = (ld(x, e) - stats[2 * g]) * stats[2 * g + 1];
+        if (weight || bias) {
+            const int64_t ch = in_row / spatial;
+            if (weight) v *= ld(weight, ch);
+            if (bias) v += ld(bias, ch);
+        }
+        st(out, e, v);
+    }
+}
+
+template <typename T>
+void groupnorm_chunked(const NormArgs& a) {
+    const int64_t per = a.cols / a.groups;
+    const int64_t chunks = (per + kNormChunk - 1) / kNormChunk;
+    const int64_t n_groups = a.rows * a.groups;
+    // Doubles in float-sized scratch: two floats' bytes per double, and two doubles per chunk.
+    double* sums = (double*)scratch(3, 4 * n_groups * chunks, DType::F32).data();
+    float* stats = (float*)scratch(4, 2 * n_groups, DType::F32).data();
+    const auto grid = [](int64_t n) { return (int)std::min<int64_t>(65535, (n + kBlock - 1) / kBlock); };
+
+    k_group_chunk_sums<T><<<grid(n_groups * chunks), kBlock>>>(
+        (const T*)a.x->data(), sums, a.rows, a.cols, a.groups, chunks);
+    check_launch("groupnorm chunk sums");
+    k_group_stats<<<grid(n_groups), kBlock>>>(sums, stats, n_groups, chunks, per, a.eps);
+    check_launch("groupnorm stats");
+    k_group_apply<T><<<grid(a.rows * a.cols), kBlock>>>(
+        (const T*)a.x->data(), a.weight ? (const T*)a.weight->data() : nullptr,
+        a.bias ? (const T*)a.bias->data() : nullptr, (T*)a.out->data(), stats, a.rows, a.cols,
+        a.groups, a.channels);
+    check_launch("groupnorm apply");
+}
+
+void norm_cuda_vendor(const NormArgs& a) {
+    if (a.groups <= 0) return norm_cuda(a);   // LayerNorm and RMSNorm keep the per-row kernel
+    require_device(*a.x, "norm");
+    if (a.cols % a.groups) throw std::runtime_error("cuda groupnorm: cols not divisible by groups");
+    DISPATCH(*a.x, T, groupnorm_chunked<T>(a));
+}
+
 // --- patchify / unpatchify --------------------------------------------------------------
 
 template <typename T>
@@ -1110,6 +1214,8 @@ void register_cuda_ops() {
                                  "no tensor cores -- issues/dit-attention.md");
     register_impl<AttentionArgs>("attention", "cuda-vendor", attention_cuda_blas,
                                  "cuBLAS batched scores and values, one masked softmax per row");
+    register_impl<NormArgs>("norm", "cuda-vendor", norm_cuda_vendor,
+                            "GroupNorm in fixed chunks, double sums; LayerNorm as cuda");
     register_impl<Conv2dArgs>("conv2d", "cuda-vendor", conv2d_cuda_dnn,
                               "cuDNN, deterministic heuristic algorithm, bias via cudnnAddTensor");
     register_impl<AttentionArgs>("attention", "cuda-tile64", attention_cuda_tiled<64>,
