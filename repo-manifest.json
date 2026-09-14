@@ -34,6 +34,7 @@
   "docs/ROOFLINE.md",
   "docs/SCORING.md",
   "docs/STATUS.md",
+  "docs/images/hero.jpg",
   "eval/audit.py",
   "eval/bench.py",
   "eval/burnscore/__init__.py",

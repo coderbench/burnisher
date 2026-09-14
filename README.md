@@ -8,6 +8,8 @@ Python in the runtime. Anyone can submit a faster kernel. An evaluator measures 
 5090, checks that it is still correct, and pays for the share of the remaining gap to the hardware's
 limit that it closes.
 
+![Burnisher: a prompt goes through the runtime on an RTX 5090 and comes out as images](docs/images/hero.jpg)
+
 - [Where it stands](#where-it-stands)
 - [How it works](#how-it-works)
 - [Quick start](#quick-start)
