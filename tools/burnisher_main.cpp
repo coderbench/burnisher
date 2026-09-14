@@ -406,45 +406,46 @@ int cmd_bench(const Args& a) {
     const auto place_in = [&](Tensor t) {
         return (dev == Device::CUDA) ? t.to_device() : t;
     };
-    const auto run_stage = [&]() -> Tensor {
-        if (stage == "t5-encode") {
-            T5Encoder e(t5, *weights, dt);
-            Tensor ids({batch, caption_len}, dt);
-            for (int64_t i = 0; i < ids.numel(); ++i)
-                ids.set(i, static_cast<float>((i * 7) % (t5.vocab_size - 1)));
-            Tensor ids_f({batch, caption_len}, DType::F32);
-            for (int64_t i = 0; i < ids.numel(); ++i) ids_f.set(i, ids.get(i));
-            Tensor d_ids = place_in(ids_f);
-            return e.forward(d_ids, impls);
-        }
-        if (stage == "dit-step") {
-            PixArtDiT d(dit, *weights, dt);
-            Tensor z({batch, dit.in_channels, latent, latent}, dt);
-            for (int64_t i = 0; i < z.numel(); ++i)
-                z.set(i, static_cast<float>(std::sin(static_cast<double>(i) * 0.37)));
-            Tensor cap({batch, caption_len, dit.caption_channels}, dt);
-            for (int64_t i = 0; i < cap.numel(); ++i)
-                cap.set(i, static_cast<float>(std::cos(static_cast<double>(i) * 0.11)));
-            // Three quarters padding, which is what a short caption in a 300-token window looks
-            // like. A bench that masked nothing would time a cheaper attention than the pipeline
-            // runs and would not notice.
-            Tensor mask({batch, caption_len}, dt);
-            for (int64_t b = 0; b < batch; ++b)
-                for (int64_t i = 0; i < caption_len; ++i)
-                    mask.set(b * caption_len + i,
-                             i < std::max<int64_t>(1, caption_len / 4) ? 1.0f : 0.0f);
-            Tensor dz = place_in(z), dcap = place_in(cap), dmask = place_in(mask);
-            return d.forward(dz, 500.0, dcap, dmask, impls);
-        }
-        if (stage == "vae-decode") {
-            VaeDecoder v(vae, *weights, dt);
-            Tensor z({1, vae.latent_channels, latent, latent}, dt);
-            for (int64_t i = 0; i < z.numel(); ++i)
-                z.set(i, static_cast<float>(std::sin(static_cast<double>(i) * 0.21)));
-            Tensor dz = place_in(z);
-            return v.forward(dz, impls);
-        }
+    // Built and placed ONCE, before anything is timed. They are the same every iteration and the
+    // stages only read them; building them inside the loop timed two and a half million scalar
+    // stores and an upload that the stage never pays, and host jitter in that work was most of
+    // what a fast cell's noise floor measured.
+    Tensor in_ids, in_z, in_cap, in_mask;
+    if (stage == "t5-encode") {
+        Tensor ids_f({batch, caption_len}, DType::F32);
+        for (int64_t i = 0; i < ids_f.numel(); ++i)
+            ids_f.set(i, static_cast<float>((i * 7) % (t5.vocab_size - 1)));
+        in_ids = place_in(ids_f);
+    } else if (stage == "dit-step") {
+        Tensor z({batch, dit.in_channels, latent, latent}, dt);
+        for (int64_t i = 0; i < z.numel(); ++i)
+            z.set(i, static_cast<float>(std::sin(static_cast<double>(i) * 0.37)));
+        Tensor cap({batch, caption_len, dit.caption_channels}, dt);
+        for (int64_t i = 0; i < cap.numel(); ++i)
+            cap.set(i, static_cast<float>(std::cos(static_cast<double>(i) * 0.11)));
+        // Three quarters padding, which is what a short caption in a 300-token window looks
+        // like. A bench that masked nothing would time a cheaper attention than the pipeline
+        // runs and would not notice.
+        Tensor mask({batch, caption_len}, dt);
+        for (int64_t b = 0; b < batch; ++b)
+            for (int64_t i = 0; i < caption_len; ++i)
+                mask.set(b * caption_len + i,
+                         i < std::max<int64_t>(1, caption_len / 4) ? 1.0f : 0.0f);
+        in_z = place_in(z); in_cap = place_in(cap); in_mask = place_in(mask);
+    } else if (stage == "vae-decode") {
+        Tensor z({1, vae.latent_channels, latent, latent}, dt);
+        for (int64_t i = 0; i < z.numel(); ++i)
+            z.set(i, static_cast<float>(std::sin(static_cast<double>(i) * 0.21)));
+        in_z = place_in(z);
+    } else {
         throw std::runtime_error("unknown stage '" + stage + "'");
+    }
+    const auto run_stage = [&]() -> Tensor {
+        if (stage == "t5-encode") return T5Encoder(t5, *weights, dt).forward(in_ids, impls);
+        if (stage == "dit-step") {
+            return PixArtDiT(dit, *weights, dt).forward(in_z, 500.0, in_cap, in_mask, impls);
+        }
+        return VaeDecoder(vae, *weights, dt).forward(in_z, impls);
     };
 
     for (int i = 0; i < warmup; ++i) run_stage();

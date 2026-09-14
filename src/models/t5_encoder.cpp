@@ -8,6 +8,7 @@
 #include <map>
 #include <mutex>
 #include <stdexcept>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -67,6 +68,62 @@ const std::vector<int>& relative_buckets(int64_t seq, int num_buckets) {
     return tables->emplace(Key{seq, num_buckets}, std::move(t)).first->second;
 }
 
+// The relative position bias for one sequence length, [heads, S, S], placed where the model runs.
+//
+// Built and uploaded once per process rather than per forward. Rebuilding it -- 5.8 million
+// stores and an 11.5 MB upload from pageable memory at 300 tokens -- was the jitter that made the
+// text encoder's cell unresolvable: its run-to-run spread was a fifth of its time. The key names
+// the weight tensor it was built from, and a hit is only served if the weight's bytes still match
+// the ones it was built from, so an address reused by different weights rebuilds it.
+Tensor relative_bias_table(const Tensor& rel, const void* identity, int64_t S, int64_t heads,
+                           DType dtype, Device device) {
+    struct Entry {
+        std::vector<char> rel_bytes;
+        Tensor table;
+    };
+    using Key = std::tuple<const void*, int64_t, int, int>;
+    static std::map<Key, Entry>* tables = new std::map<Key, Entry>();   // device memory outlives statics
+    static std::mutex m;
+    const Key key{identity, S, static_cast<int>(dtype), static_cast<int>(device)};
+    const char* rb = static_cast<const char*>(rel.data());
+    std::vector<char> bytes(rb, rb + rel.nbytes());
+    std::lock_guard<std::mutex> lock(m);
+    auto it = tables->find(key);
+    if (it != tables->end() && it->second.rel_bytes == bytes) return it->second.table;
+
+    Tensor bias({heads, S, S}, dtype);
+    const int buckets = static_cast<int>(rel.dim(0));
+    const std::vector<int>& bucket = relative_buckets(S, buckets);
+    if (rel.dtype() == bias.dtype() &&
+        (bias.dtype() == DType::F32 || bias.dtype() == DType::BF16)) {
+        // The stored bytes, copied. Reading a value and storing it back in the same dtype is
+        // exact, so this is the table the scalar loop below builds, without a conversion per
+        // element: 5.8 million of them at 300 tokens and 64 heads.
+        const size_t unit = bias.dtype() == DType::F32 ? 4 : 2;
+        const char* src = static_cast<const char*>(rel.data());
+        char* dst = static_cast<char*>(bias.data());
+        for (int64_t h = 0; h < heads; ++h) {
+            for (int64_t q = 0; q < S; ++q) {
+                for (int64_t k = 0; k < S; ++k) {
+                    std::memcpy(dst + ((h * S + q) * S + k) * unit,
+                                src + (bucket[q * S + k] * heads + h) * unit, unit);
+                }
+            }
+        }
+    } else {
+        for (int64_t q = 0; q < S; ++q) {
+            for (int64_t k = 0; k < S; ++k) {
+                for (int64_t h = 0; h < heads; ++h) {
+                    bias.set((h * S + q) * S + k, rel.get(bucket[q * S + k] * heads + h));
+                }
+            }
+        }
+    }
+    Entry e{std::move(bytes), device == Device::CUDA ? bias.to_device() : bias};
+    (*tables)[key] = e;
+    return e.table;
+}
+
 }  // namespace
 
 T5Encoder::T5Encoder(T5Config cfg, const WeightSource& w, DType compute)
@@ -105,45 +162,13 @@ Tensor T5Encoder::forward(const Tensor& token_ids, const ImplSelection& impls) c
     // HOST, as the name says: it is filled by a scalar loop over sequence positions and then
     // uploaded once. A blanket rewrite that placed every tensor on the device caught this one
     // too, which is how a variable came to be called `_host` and live on a GPU.
-    Tensor bias_host({static_cast<int64_t>(cfg_.num_heads), S, S}, dtype_);
-    {
-        Tensor& bias = bias_host;
-        // 32 x heads of parameters. Pulled to the host because the bucketing is a scalar
-        // computation over sequence positions and the result is uploaded once for every layer to
-        // share -- doing it per layer on the device would be a kernel for 2 kB of data.
-        Tensor rel_dev = w_.require(
-            "encoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight");
-        Tensor rel = (rel_dev.device() == Device::CUDA) ? rel_dev.to_host() : rel_dev;
-        const int buckets = static_cast<int>(rel.dim(0));
-        const std::vector<int>& bucket = relative_buckets(S, buckets);
-        const int64_t heads = cfg_.num_heads;
-        if (rel.dtype() == bias.dtype() &&
-            (bias.dtype() == DType::F32 || bias.dtype() == DType::BF16)) {
-            // The stored bytes, copied. Reading a value and storing it back in the same dtype is
-            // exact, so this is the table the scalar loop below builds, without a conversion per
-            // element: 5.8 million of them at 300 tokens and 64 heads.
-            const size_t unit = bias.dtype() == DType::F32 ? 4 : 2;
-            const char* src = static_cast<const char*>(rel.data());
-            char* dst = static_cast<char*>(bias.data());
-            for (int64_t h = 0; h < heads; ++h) {
-                for (int64_t q = 0; q < S; ++q) {
-                    for (int64_t k = 0; k < S; ++k) {
-                        std::memcpy(dst + ((h * S + q) * S + k) * unit,
-                                    src + (bucket[q * S + k] * heads + h) * unit, unit);
-                    }
-                }
-            }
-        } else {
-            for (int64_t q = 0; q < S; ++q) {
-                for (int64_t k = 0; k < S; ++k) {
-                    for (int64_t h = 0; h < heads; ++h) {
-                        bias.set((h * S + q) * S + k, rel.get(bucket[q * S + k] * heads + h));
-                    }
-                }
-            }
-        }
-    }
-    Tensor bias = (impls.device == Device::CUDA) ? bias_host.to_device() : bias_host;
+    // 32 x heads of parameters, read back to the host: 4 kB, and it is also what proves a cached
+    // table was built from these exact weights.
+    Tensor rel_dev = w_.require(
+        "encoder.block.0.layer.0.SelfAttention.relative_attention_bias.weight");
+    Tensor rel = (rel_dev.device() == Device::CUDA) ? rel_dev.to_host() : rel_dev;
+    const Tensor bias = relative_bias_table(rel, rel_dev.data(), S, cfg_.num_heads, dtype_,
+                                            impls.device);
 
     // The padding mask, PER BATCH ROW. Not optional and not a detail: a prompt is padded to a
     // fixed 300 tokens, so most of a short caption's sequence is padding, and attending to it
