@@ -47,6 +47,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import pr_bot as B
+from runner import GPU_LOCK_PATH
 from burnscore import verdict as V
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -342,9 +343,17 @@ def main():
     ap.add_argument("--timeout", type=int, default=7200)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--json")
+    ap.add_argument("--sandbox-user", default=os.environ.get(B.SB.USER_ENV, ""),
+                    help="the unprivileged account submissions are built and run as")
+    ap.add_argument("--no-sandbox", action="store_true",
+                    help="build and run submissions as this account; nothing to protect here")
     a = ap.parse_args()
     a.pr = None
     a.once = True
+
+    # Checked every round, not once at setup: file modes are box configuration, and it drifts.
+    if not a.dry_run and not B.box_is_safe(a, [GPU_LOCK_PATH, LOCK_PATH]):
+        return 2
 
     try:
         with Lock():

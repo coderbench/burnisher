@@ -56,7 +56,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import sandbox as SB
 from burnscore import verdict as V
+from runner import GPU_LOCK_PATH
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -446,6 +448,87 @@ def report(verdict: dict, receipt: dict, *, raw_name, receipt_name) -> str:
     return "\n".join(lines)
 
 
+def sandbox(args):
+    """The account submitted code is built and run as, or None when the operator opted out."""
+    if getattr(args, "no_sandbox", False):
+        return None
+    name = getattr(args, "sandbox_user", "") or ""
+    if not name:
+        raise RuntimeError(
+            "refusing to build or run a submission as the evaluator's own account, which holds the "
+            "GitHub token and writes the ledger. Set BURNISH_SANDBOX_USER (eval/setup_sandbox.sh "
+            "creates the account), or pass --no-sandbox on a machine with nothing to protect.")
+    return SB.Sandbox.named(name)
+
+
+def child_env(jail, **extra) -> dict:
+    """The environment for the evaluator's own scripts, which launch the runtime as `jail`."""
+    env = {k: v for k, v in os.environ.items() if k != SB.USER_ENV}
+    if jail is not None:
+        env[SB.USER_ENV] = jail.user
+    env.update(extra)
+    return env
+
+
+def box_problems(args, locks=()) -> list:
+    """Every way this box would let submitted code reach the evaluator. Empty means go."""
+    jail = sandbox(args)
+    if jail is None:
+        return []
+    home = Path.home()
+    secrets = [ROOT / ".env.eval", home / ".config" / "gh", home / ".git-credentials",
+               home / ".netrc", home / ".ssh"]
+    secrets += [Path(p) for p in os.environ.get("BURNISH_SECRETS", "").split(":") if p]
+    protected = [ROOT, args.ledger, getattr(args, "copycat_corpus", ""),
+                 os.environ.get("BURNISH_GATE_CACHE") or home / ".cache" / "burnish",
+                 args.weights, args.noise]
+    problems = SB.preflight(jail, secrets=secrets, protected=protected,
+                            readable=[args.weights, args.noise])
+    problems += [f"git remote {name!r} carries credentials in its URL, readable by anything that "
+                 f"can read .git/config" for name in SB.credentials_in_remotes(ROOT)]
+    problems += [f"the lock {p} is in a directory anyone can write, so the sandbox account can "
+                 f"create it first; point it under a root-only directory" for p in locks
+                 if SB.world_writable_parent(p)]
+    return problems
+
+
+def box_is_safe(args, locks) -> bool:
+    """Print every way submitted code could reach the evaluator on this box; True if there is none."""
+    try:
+        problems = box_problems(args, locks)
+    except RuntimeError as exc:
+        problems = [str(exc)]
+    if problems:
+        print("!! not evaluating: on this box, submitted code could reach the evaluator",
+              file=sys.stderr)
+        for p in problems:
+            print(f"   - {p}", file=sys.stderr)
+    return not problems
+
+
+def build_submission(sha, dest: Path, jail, cmd, *, timeout=3600):
+    """Build the submission in `dest`, as the sandbox account when there is one.
+
+    Sandboxed, the account unpacks and builds its own copy of the head commit rather than the
+    worktree: the guards and the scoring script run git in the worktree as the evaluator, and git
+    run in a tree submitted code could write is git configured by submitted code.
+    """
+    if jail is None:
+        return subprocess.run(cmd, cwd=str(dest), capture_output=True, text=True, timeout=timeout)
+    archive = subprocess.Popen(["git", "-C", str(ROOT), "archive", "--format=tar", sha],
+                               stdout=subprocess.PIPE)
+    try:
+        unpack = jail.run(["tar", "-x", "-f", "-", "-C", str(dest)], stdin=archive.stdout,
+                          capture_output=True, timeout=600)
+    finally:
+        archive.stdout.close()
+        archive.wait()
+    if archive.returncode != 0 or unpack.returncode != 0:
+        raise RuntimeError(f"could not unpack {sha[:12]} for the sandboxed build: "
+                           f"{unpack.stderr.decode(errors='replace')[-400:]}")
+    return jail.run(cmd, cwd=str(dest), capture_output=True, text=True, timeout=timeout)
+
+
 def evaluate(repo, pr, args) -> dict:
     """Evaluate one pull request, and record which commit the outcome is for."""
     try:
@@ -462,6 +545,7 @@ def _evaluate(repo, pr, args) -> dict:
     num = pr["number"]
     print(f">> #{num}  {pr['title'][:70]}")
     work = Path(tempfile.mkdtemp(prefix=f"burnish-pr{num}-"))
+    scratch = []
     try:
         # The head can live on a fork, which the evaluator's `git fetch origin main` never brings in.
         subprocess.run(["git", "-C", str(ROOT), "fetch", "--quiet", "origin",
@@ -554,8 +638,14 @@ def _evaluate(repo, pr, args) -> dict:
                 + ("is" if len(missing) == 1 else "are") + " not set. The guard pass before "
                 "this point needs none of them, which is why they are not required at startup.")
 
-        build = subprocess.run(["./scripts/build_cuda.sh"], cwd=str(wt),
-                               capture_output=True, text=True, timeout=3600)
+        # Built and run as the sandbox account, from its own copy of the head commit. See
+        # eval/sandbox.py for what that keeps out of the submission's reach.
+        jail = sandbox(args)
+        build_dir = wt if jail is None else jail.writable_dir(f"burnish-pr{num}-")
+        if jail is not None:
+            scratch.append(build_dir)
+        build = build_submission(pr["headRefOid"], build_dir, jail, ["./scripts/build_cuda.sh"])
+        binary = build_dir / "build-cuda" / "burnisher"
         if build.returncode != 0:
             set_label(repo, num, f"{V.PREFIX}:build-fail")
             comment(repo, num, "### `burnish:build-fail`\n\nThe submission did not build on the "
@@ -572,7 +662,8 @@ def _evaluate(repo, pr, args) -> dict:
              "--weights", args.weights, "--noise", args.noise,
              *(["--calibration", args.calibration] if args.calibration else []),
              "--work-dir", str(out_dir)],
-            capture_output=True, text=True, timeout=args.timeout)
+            capture_output=True, text=True, timeout=args.timeout,
+            env=child_env(jail, BURNISHER_BIN=str(binary)))
         print(r.stdout[-1500:])
         if r.returncode != 0 or not (out_dir / "receipt.json").exists():
             set_label(repo, num, f"{V.PREFIX}:eval-error")
@@ -608,6 +699,8 @@ def _evaluate(repo, pr, args) -> dict:
         return {"pr": num, "outcome": v["status"], "label": v["label"],
                 "payout_fraction": v["payout_fraction"]}
     finally:
+        for d in scratch:
+            shutil.rmtree(d, ignore_errors=True)
         subprocess.run(["git", "-C", str(ROOT), "worktree", "remove", "--force",
                         str(work / "src")], capture_output=True)
         shutil.rmtree(work, ignore_errors=True)
@@ -622,10 +715,12 @@ def _evaluate_cartography(repo, num, wt, g, args) -> dict:
     cmd = [sys.executable, str(ROOT / "eval" / "cartography.py"), "check",
            "--generation", names[0], "--base", args.base, "--repo", str(wt),
            "--cells-root", str(wt / "eval" / "cells"), "--json", str(out)]
+    env = None
     if args.weights and args.noise:
         cmd += ["--measure", "--binary", str(wt / "build-cuda" / "burnisher"),
                 "--weights", args.weights, "--noise", args.noise]
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=args.timeout)
+        env = child_env(sandbox(args))          # the gate and calibration launch the runtime
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=args.timeout, env=env)
     print(r.stdout[-2000:])
     result = json.loads(out.read_text()) if out.exists() else {"pass": False, "checks": []}
     v = result.get("verdict") or {}
@@ -719,8 +814,21 @@ def main():
     ap.add_argument("--dry-run", action="store_true",
                     help="classify and report, touch no GPU and write no labels")
     ap.add_argument("--json", help="write the pass result here")
+    ap.add_argument("--sandbox-user", default=os.environ.get(SB.USER_ENV, ""),
+                    help="the unprivileged account submissions are built and run as "
+                         "(eval/setup_sandbox.sh)")
+    ap.add_argument("--no-sandbox", action="store_true",
+                    help="build and run submissions as this account. Only on a machine with no "
+                         "token, ledger or anything else to protect.")
+    ap.add_argument("--check-box", action="store_true",
+                    help="check that submitted code could reach nothing it must not, then exit")
     a = ap.parse_args()
 
+    if (a.check_box or not a.dry_run) and not box_is_safe(a, [GPU_LOCK_PATH]):
+        return 2
+    if a.check_box:
+        print(f"box ok: submissions run as {a.sandbox_user or 'this account (--no-sandbox)'}")
+        return 0
 
     everything = open_prs(a.repo)
     a.open_prs = [p["number"] for p in everything]      # the copycat guard's references

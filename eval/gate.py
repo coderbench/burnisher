@@ -46,9 +46,11 @@ The tolerance is in the generation, is justified in writing there, and is falsif
 from __future__ import annotations
 
 import argparse
+import atexit
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import time
 import sys
@@ -56,6 +58,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import sandbox as SB
 from burnscore import cells as C
 from paths import add_argument as add_cells_root_arg, cells_root, generation_path
 from runner import (GpuLock, RunnerError, device_fingerprint, parse_result,
@@ -100,6 +103,10 @@ def generate(binary, generation, token_ids_file, seed, impl, *, out_dir, label, 
         raise RunnerError(f"{label}: the runtime exited {code}\n{text[-4000:]}")
     result = parse_result(text, label)
     require_not_degenerate(result, label)
+    try:
+        SB.require_plain_file(out)
+    except (OSError, SB.SandboxError) as exc:
+        raise RunnerError(f"{label}: no latent the gate can read: {exc}") from None
     result["latent_path"] = str(out)
     result["latent_sha256"] = hashlib.sha256(out.read_bytes()).hexdigest()
     return result
@@ -164,8 +171,23 @@ def main():
               f"scripts/tokenize_prompts.py.", file=sys.stderr)
         return 2
     ids_doc = json.loads(ids_doc_path.read_text())
-    work = Path(args.work_dir)
-    work.mkdir(parents=True, exist_ok=True)
+    try:
+        jail = SB.from_environment()
+    except SB.SandboxError as exc:
+        print(f"!! {exc}", file=sys.stderr)
+        return 2
+    if jail is None:
+        work = Path(args.work_dir)
+        work.mkdir(parents=True, exist_ok=True)
+    else:
+        # The runtime runs as the sandbox account, which cannot read the staged instrument or
+        # write the evaluator's directories. It gets copies of the token ids and a directory of
+        # its own for latents -- and the evaluator never writes into that directory afterwards.
+        work = jail.writable_dir("burnish-gate-")
+        ids_dir = jail.readable_copy(
+            [ids_dir / f"token-ids-{p['id']}.txt" for p in prompts["prompts"]], "burnish-ids-")
+        for d in (work, ids_dir):
+            atexit.register(shutil.rmtree, d, True)
     tol = generation.tolerance
 
     # The one input this file reads before it reports anything: a missing noise file used to

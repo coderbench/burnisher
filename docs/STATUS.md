@@ -92,6 +92,9 @@ one layer) until they separate.
   original, and a block is automatic, so a wrong one waits for a maintainer.
 - **How the re-registration guard does on real submissions.** It is tested on this repository's
   registry only. A copy that changes a kernel just enough to fall under 95% similarity is clear.
+- **Whether the sandbox holds on a rented box.** Submitted code builds and runs as its own account
+  (`eval/sandbox.py`). Its tests run without root, so the account switch itself has not run on a
+  GPU box; the check before each round is where it first will.
 - **Device memory on a CUDA run.** `peak_vram_bytes` now reports the device allocator's high-water
   mark. That path only compiles in the CUDA build and has not run on a GPU yet, and the peak
   memory recorded in the committed anchors is host RSS.

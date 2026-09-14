@@ -25,10 +25,17 @@ cd "$REPO_DIR"
 # Secrets and box-local paths. Not committed: the ledger lives outside the worktree, and the
 # token is a token. BURNISH_CALIBRATION is optional and normally unset.
 #   GH_TOKEN, BURNISH_REPO, BURNISH_LEDGER, BURNISH_WEIGHTS, BURNISH_NOISE, BURNISH_CALIBRATION,
-#   BURNISH_GENERATION (defaults to BG-1)
+#   BURNISH_GENERATION (defaults to BG-1), BURNISH_SANDBOX_USER (eval/setup_sandbox.sh)
 [ -f "$REPO_DIR/.env.eval" ] && . "$REPO_DIR/.env.eval"
 
 : "${BURNISH_REPO:?set BURNISH_REPO=owner/name in .env.eval}"
+
+# Locks and round results live where only this account can write. Their defaults are under /tmp,
+# where the sandbox account that runs submissions (eval/sandbox.py) could create them first.
+STATE="${BURNISH_STATE:-/var/lib/burnish}"
+install -d -m 700 "$STATE"
+export BURNISH_ROUND_LOCK="${BURNISH_ROUND_LOCK:-$STATE/round.lock}"
+export BURNISH_EVAL_LOCK="${BURNISH_EVAL_LOCK:-$STATE/eval.lock}"
 
 # Bring the instrument up to date BEFORE the round. The evaluator scores against `main`, and a
 # stale checkout would measure submissions against a baseline that has already moved -- which is
@@ -38,6 +45,8 @@ git checkout --quiet main
 git merge --quiet --ff-only origin/main
 
 # Rebuild, because the base arm is the runtime at `main` and it has to be the current one.
+# As this account, not the sandbox one: only merged code is on `main`. With BURNISH_AUTOMERGE on,
+# merged means scored, not reviewed.
 ./scripts/build_cuda.sh >/dev/null
 
 exec python3 -u eval/round.py \
@@ -45,6 +54,6 @@ exec python3 -u eval/round.py \
     --slots "${BURNISH_SLOTS:-3}" \
     --interval 120 \
     --base origin/main \
-    --json "${BURNISH_ROUND_JSON:-/tmp/burnish-round-$(date -u +%Y%m%dT%H%M%SZ).json}" \
+    --json "${BURNISH_ROUND_JSON:-$STATE/round-$(date -u +%Y%m%dT%H%M%SZ).json}" \
     ${BURNISH_AUTOMERGE:+--merge} \
     "$@"

@@ -16,6 +16,8 @@ import sys
 import time
 from pathlib import Path
 
+import sandbox as SB
+
 # INCIDENT: two eval processes on one GPU. The second fails to allocate, the harness retries
 # into the same contention, and what comes out is a number for a run that never happened. It
 # does not look like an error -- it looks like a slowdown. An advisory lock turns a corrupt
@@ -123,15 +125,22 @@ def run_once(cmd, env_extra=None, *, timeout=1800, scrub=True, retry_on_load_fai
     """One invocation of the runtime, with the settle-and-retry the driver makes necessary."""
     env = scrubbed_environment() if scrub else dict(os.environ)
     env.update(env_extra or {})
+    # The runtime is submitted code. Under the bot it runs as the sandbox account (eval/sandbox.py),
+    # which cannot reach the token or the ledger; unset, it runs as whoever called this.
+    try:
+        jail = SB.from_environment()
+    except SB.SandboxError as exc:
+        raise RunnerError(str(exc)) from None
+    launch = subprocess.run if jail is None else jail.run
     time.sleep(SETTLE_SECONDS)
     t0 = time.time()
-    p = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout)
+    p = launch(cmd, env=env, capture_output=True, text=True, timeout=timeout)
     out = p.stdout + p.stderr
     if p.returncode != 0 and retry_on_load_failure and any(m in out for m in
                                                            LOAD_FAILURE_MARKERS):
         print(">> load failure; settling and retrying once", flush=True)
         time.sleep(SETTLE_SECONDS * 4)
-        p = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=timeout)
+        p = launch(cmd, env=env, capture_output=True, text=True, timeout=timeout)
         out = p.stdout + p.stderr
     return p.returncode, out, time.time() - t0
 

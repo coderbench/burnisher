@@ -175,7 +175,8 @@ labelled `burnish:skipped-instrument`.
   them too.
 - **Exceptions:** adding a new generation under `eval/cells/<new>/` (cartography), with its own new
   entry in `configs/tolerance.json`. Editing an existing generation or entry is not allowed.
-- **Limit:** the box builds and runs submitted code. Isolate it. The guard is not a sandbox.
+- **The guard is not a sandbox.** Submitted code runs as its own account (*Isolating submitted
+  code* below).
 
 ## Running a validator
 
@@ -191,6 +192,8 @@ Setting up a new box:
 ```bash
 scripts/build_cuda.sh             # CMAKE_CUDA_ARCHITECTURES=121 for DGX Spark
 build-cuda/burnisher check-weights --weights <checkpoint>
+eval/setup_sandbox.sh             # as root: the account submissions run as
+eval/pr_bot.py --repo <owner/name> --check-box
 ```
 
 Two guards on every run replace per-box calibration:
@@ -199,6 +202,30 @@ Two guards on every run replace per-box calibration:
   than 25% means the base code changed, or this is not the pinned hardware.
 - **The base arm's repeats must spread less than 3× the floor.** Otherwise the box was too noisy,
   and the run is refused as the box's fault, not the submission's.
+
+## Isolating submitted code
+
+The evaluator runs as root, holds the GitHub token and writes the ledger. Submitted code -- the
+build, its tests and every launch of the runtime -- runs as a separate account named by
+`BURNISH_SANDBOX_USER` (`eval/sandbox.py`).
+
+- **Its environment is an allowlist:** CUDA, locale and the runtime's own variables. The token
+  never reaches it.
+- **It builds its own copy of the head commit**, in its own home. The evaluator never runs git in a
+  tree the submission could write.
+- **Nothing it starts outlives the step.** Every process running as the account is killed when a
+  step ends.
+- **Checked every round, as the account.** Nothing is evaluated if the account can read
+  `.env.eval`, `gh`'s config or ssh keys; can write the checkout, the ledger, the copycat record,
+  the gate cache, the weights or the noise; cannot read the weights or see the GPU; if a git remote
+  URL carries credentials; or if a lock is in a directory anyone can write.
+- **`--no-sandbox` runs everything as the evaluator.** Only on a machine with nothing to protect.
+
+Limits:
+- **The network is not cut.** Rented boxes are containers and cannot nest one. The account can
+  read nothing secret, which the check verifies, so there is nothing to send.
+- **Merged code is trusted.** Each round rebuilds `main` as the evaluator. With
+  `BURNISH_AUTOMERGE` on, merged means scored, not reviewed.
 
 ## Anchoring a generation
 
