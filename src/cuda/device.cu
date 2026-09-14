@@ -17,9 +17,8 @@
 // theoretically issue". A roofline is only useful if a contributor could in principle reach it,
 // and nothing in this pipeline will beat a tuned vendor GEMM on a square problem.
 //
-// NOT COMPILED. There was no CUDA toolkit and no Blackwell device available when this was
-// written. docs/STATUS.md says so in those words and the CI job `cuda-compile` exists to make it
-// stop being true. Treat every line here as unverified until that job is green.
+// Measured on the pinned RTX 5090: the bandwidth and GEMM peaks behind the committed rooflines
+// came from this probe (`docs/STATUS.md`).
 #include <algorithm>
 
 #include <cuda_runtime.h>

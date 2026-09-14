@@ -225,7 +225,7 @@ def main():
                      "request from the pinned revisions. Compared against what the runtime "
                      "requires by scripts/verify_checkpoint_layout.py.",
             # The outcome, recorded here so nothing downstream has to re-derive it or, worse,
-            # type it. `issues/checkpoint-load.md` quotes these.
+            # type it.
             "verified": {
                 "required_by_runtime": len(wanted_here),
                 "missing": len(missing),

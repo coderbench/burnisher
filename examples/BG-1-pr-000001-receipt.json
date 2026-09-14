@@ -1,6 +1,6 @@
 {
  "benchmark_generation": "BG-1",
- "content_digest": "sha256:abcbf60e499d4652245f27a71045d4607069b259b0f4f7164eea7b17a6c910d5",
+ "content_digest": "sha256:a9e395f7aa1b9e23a121e4976aa9955d61bd87202125d5b27e45f01126dbd715",
  "correctness": "PASS",
  "coverage": {
   "_note": "A partial matrix credits nothing. Dropping the cell a change hurts is the cheapest way to raise a score, and a rule that stops a drop from PAYING removes the incentive rather than policing it.",
@@ -21,7 +21,7 @@
  "determinism": true,
  "frontier": {
   "_why_per_cell": "Latency is not comparable between cells -- a 64 ms DiT step and a 278 ms VAE decode are different quantities. Normalizing both against one generation-wide bracket makes the latency axis nearly constant and hands the whole frontier to memory and fidelity.",
-  "delta": -0.9439152607563656,
+  "delta": -0.03738401370921804,
   "expanded": false,
   "method": "weighted mean of per-cell relative hypervolume change, each cell's frontier computed over its own configurations against its own frozen bounds",
   "objectives": [
@@ -32,35 +32,69 @@
   "per_cell": {
    "dit-step/1024/bf16": {
     "_dropped_note": "A dropped point is a configuration that produced no operating point -- it OOMed, timed out, blew the tolerance, or failed to report an objective. It is not counted as a slow point, and a candidate that drops one of the base's frontier points loses that volume.",
-    "delta": -0.30039437939801517,
+    "delta": -7.932316696213082e-05,
     "dropped_base_points": 0,
     "dropped_candidate_points": 0,
     "expanded": false,
-    "frontier_points_gained": [
-     [
-      0.0,
-      0.9095874896598706,
-      0.9861240479733699
-     ]
-    ],
+    "frontier_points_gained": [],
     "frontier_points_lost": [
      [
-      0.3355078351989675,
-      0.9095790959077417,
-      0.9749793118764946
-     ],
-     [
-      0.3360240503039279,
-      0.9095737433701523,
-      0.9749793118764946
-     ],
-     [
-      0.33873179344716453,
-      0.9095721619385918,
-      0.9749793118764946
+      0.5302343744347369,
+      0.9541493417623762,
+      0.9824650172662464
      ]
     ],
-    "hypervolume_base": 0.30039437939801517,
+    "hypervolume_base": 0.49705143214623265,
+    "hypervolume_candidate": 0.4969721089792705,
+    "objectives": [
+     "latency_s",
+     "peak_vram_bytes",
+     "latent_l2_vs_reference"
+    ],
+    "points_base": 3,
+    "points_candidate": 3,
+    "relative_delta": -0.00015958744273126635
+   },
+   "t5-encode/1024/bf16": {
+    "_dropped_note": "A dropped point is a configuration that produced no operating point -- it OOMed, timed out, blew the tolerance, or failed to report an objective. It is not counted as a slow point, and a candidate that drops one of the base's frontier points loses that volume.",
+    "delta": -0.00019815180008220246,
+    "dropped_base_points": 0,
+    "dropped_candidate_points": 0,
+    "expanded": false,
+    "frontier_points_gained": [],
+    "frontier_points_lost": [
+     [
+      0.6169909682622691,
+      0.7127134471672607,
+      0.9824650172662464
+     ]
+    ],
+    "hypervolume_base": 0.4320269658347209,
+    "hypervolume_candidate": 0.4318288140346387,
+    "objectives": [
+     "latency_s",
+     "peak_vram_bytes",
+     "latent_l2_vs_reference"
+    ],
+    "points_base": 3,
+    "points_candidate": 3,
+    "relative_delta": -0.0004586560926801239
+   },
+   "vae-decode/1024/bf16": {
+    "_dropped_note": "A dropped point is a configuration that produced no operating point -- it OOMed, timed out, blew the tolerance, or failed to report an objective. It is not counted as a slow point, and a candidate that drops one of the base's frontier points loses that volume.",
+    "delta": -0.33639593952305846,
+    "dropped_base_points": 0,
+    "dropped_candidate_points": 0,
+    "expanded": false,
+    "frontier_points_gained": [],
+    "frontier_points_lost": [
+     [
+      0.4013109429690074,
+      0.8532035374053232,
+      0.9824650172662464
+     ]
+    ],
+    "hypervolume_base": 0.33639593952305846,
     "hypervolume_candidate": 0.0,
     "objectives": [
      "latency_s",
@@ -70,73 +104,6 @@
     "points_base": 3,
     "points_candidate": 3,
     "relative_delta": -1.0
-   },
-   "t5-encode/1024/bf16": {
-    "_dropped_note": "A dropped point is a configuration that produced no operating point -- it OOMed, timed out, blew the tolerance, or failed to report an objective. It is not counted as a slow point, and a candidate that drops one of the base's frontier points loses that volume.",
-    "delta": -0.01133884473828986,
-    "dropped_base_points": 0,
-    "dropped_candidate_points": 0,
-    "expanded": false,
-    "frontier_points_gained": [
-     [
-      0.34862138262901027,
-      0.41708006909639433,
-      0.9861240479733699
-     ]
-    ],
-    "frontier_points_lost": [
-     [
-      0.3805232754836396,
-      0.4170439394676658,
-      0.9749793118764946
-     ]
-    ],
-    "hypervolume_base": 0.15472426961993999,
-    "hypervolume_candidate": 0.14338542488165013,
-    "objectives": [
-     "latency_s",
-     "peak_vram_bytes",
-     "latent_l2_vs_reference"
-    ],
-    "points_base": 3,
-    "points_candidate": 3,
-    "relative_delta": -0.07328420270551127
-   },
-   "vae-decode/1024/bf16": {
-    "_dropped_note": "A dropped point is a configuration that produced no operating point -- it OOMed, timed out, blew the tolerance, or failed to report an objective. It is not counted as a slow point, and a candidate that drops one of the base's frontier points loses that volume.",
-    "delta": 0.0029760481946974893,
-    "dropped_base_points": 0,
-    "dropped_candidate_points": 0,
-    "expanded": true,
-    "frontier_points_gained": [
-     [
-      0.3342029952490875,
-      0.9792898155807503,
-      0.9861240479733699
-     ],
-     [
-      0.33535387269589356,
-      0.9792895722835872,
-      0.9861240479733699
-     ]
-    ],
-    "frontier_points_lost": [
-     [
-      0.33607028243282644,
-      0.9792896939321688,
-      0.9749793118764946
-     ]
-    ],
-    "hypervolume_base": 0.3208756012510364,
-    "hypervolume_candidate": 0.3238516494457339,
-    "objectives": [
-     "latency_s",
-     "peak_vram_bytes",
-     "latent_l2_vs_reference"
-    ],
-    "points_base": 3,
-    "points_candidate": 3,
-    "relative_delta": 0.009274772475982627
    }
   }
  },
@@ -144,167 +111,53 @@
  "held_out_survived": true,
  "per_cell": {
   "dit-step/1024/bf16": {
-   "achieved_base": 0.015245658417544026,
-   "achieved_candidate": 0.009574239678510881,
-   "anchor_achieved": 0.015245658417544026,
-   "anchor_measured_seconds": 3.5714364124999998,
+   "achieved_base": 0.5564249426108512,
+   "achieved_candidate": 0.5564484631312758,
+   "anchor_achieved": 0.5564249426108512,
+   "anchor_measured_seconds": 0.0978548865,
    "base_seconds": [
-    3.5611446,
-    3.575503711,
-    3.57824119
+    0.097659462,
+    0.097678358,
+    0.097733171
    ],
-   "base_spread_pct": 0.4800869360935156,
-   "base_vs_anchor_pct": 0.005195218123743572,
+   "base_spread_pct": 0.07547553354327885,
+   "base_vs_anchor_pct": -0.16816857427437437,
    "candidate_seconds": [
-    5.682593726,
-    5.688234538,
-    5.69112362
+    0.097693109,
+    0.09769822,
+    0.097667262
    ],
    "ceiling_basis": "model",
    "ceiling_seconds": 0.05444889960495386,
    "cell_room_after": {
-    "achieved": 0.009574239678510881,
-    "floor_as_gap_closed": 5.616903170886974e-05,
-    "floor_pct": 0.5776947200587813,
-    "floors_of_room": 17803.404644450875,
+    "achieved": 0.5564484631312758,
+    "floor_as_gap_closed": 0.0052938588095089185,
+    "floor_pct": 0.4202064524308587,
+    "floors_of_room": 188.89812440856622,
     "ratio_required": 20.0,
     "resolvable": true,
-    "room_fraction": 0.9904257603214891,
+    "room_fraction": 0.44355153686872417,
     "verdict": "measurable"
    },
    "confidence_interval": {
     "level": 0.99,
-    "lower": -0.005796955314687825,
+    "lower": -0.00043234587534458636,
     "method": "paired_percentile_bootstrap",
-    "point": -0.00575922186838946,
+    "point": 5.302489405758526e-05,
     "repeats": 3,
     "resamples": 20000,
     "seed": 20260911,
-    "upper": -0.0057369231096611375
-   },
-   "credited_gap_closed": -0.00575922186838946,
-   "floor_as_gap_closed": 8.995656227070114e-05,
-   "floor_pct": 0.5776947200587813,
-   "gap_closed": -0.00575922186838946,
-   "remaining_before": 0.984754341582456,
-   "repeats": 3,
-   "resolution_note": "credited only when the interval clears this cell's own measured floor, not a constant threshold",
-   "resolved": true,
-   "run_ceiling_seconds": 0.05445172834405432,
-   "sign_test": {
-    "candidate_faster": 0,
-    "comparable": 3,
-    "note": "exact two-sided binomial over paired repeats",
-    "p_value": 0.25,
-    "pairs": 3
-   },
-   "speedup": 0.6279977824698781
-  },
-  "t5-encode/1024/bf16": {
-   "achieved_base": 0.18153324094970438,
-   "achieved_candidate": 0.17417471302898715,
-   "anchor_achieved": 0.18153324094970438,
-   "anchor_measured_seconds": 0.1271231175,
-   "base_seconds": [
-    0.128067363,
-    0.127518336,
-    0.127465426
-   ],
-   "base_spread_pct": 0.47223550643449297,
-   "base_vs_anchor_pct": 0.4407546836473486,
-   "candidate_seconds": [
-    0.133467507,
-    0.132930722,
-    0.132835993
-   ],
-   "ceiling_basis": "model",
-   "ceiling_seconds": 0.02307707151940508,
-   "cell_room_after": {
-    "achieved": 0.17417471302898715,
-    "floor_as_gap_closed": 0.008224685840608233,
-    "floor_pct": 3.7532580815317766,
-    "floors_of_room": 121.58519114038863,
-    "ratio_required": 20.0,
-    "resolvable": true,
-    "room_fraction": 0.8258252869710129,
-    "verdict": "measurable"
-   },
-   "confidence_interval": {
-    "level": 0.99,
-    "lower": -0.009044927649261212,
-    "method": "paired_percentile_bootstrap",
-    "point": -0.00899062526284594,
-    "repeats": 3,
-    "resamples": 20000,
-    "seed": 20260911,
-    "upper": -0.008941126865537974
-   },
-   "credited_gap_closed": -0.00899062526284594,
-   "floor_as_gap_closed": 0.008649231212388121,
-   "floor_pct": 3.7532580815317766,
-   "gap_closed": -0.00899062526284594,
-   "remaining_before": 0.8184667590502956,
-   "repeats": 3,
-   "resolution_note": "credited only when the interval clears this cell's own measured floor, not a constant threshold",
-   "resolved": true,
-   "run_ceiling_seconds": 0.023178784792975506,
-   "sign_test": {
-    "candidate_faster": 0,
-    "comparable": 3,
-    "note": "exact two-sided binomial over paired repeats",
-    "p_value": 0.25,
-    "pairs": 3
-   },
-   "speedup": 0.9594645703331216
-  },
-  "vae-decode/1024/bf16": {
-   "achieved_base": 0.007913030168201135,
-   "achieved_candidate": 0.007910467013387837,
-   "anchor_achieved": 0.007913030168201135,
-   "anchor_measured_seconds": 5.433579165499999,
-   "base_seconds": [
-    5.44230014,
-    5.425828168,
-    5.422274975
-   ],
-   "base_spread_pct": 0.3693129745785395,
-   "base_vs_anchor_pct": -0.06352610078542709,
-   "candidate_seconds": [
-    5.437404151,
-    5.43018146,
-    5.428079486
-   ],
-   "ceiling_basis": "model",
-   "ceiling_seconds": 0.04299607585791064,
-   "cell_room_after": {
-    "achieved": 0.007910467013387837,
-    "floor_as_gap_closed": 6.7973706990569e-05,
-    "floor_pct": 0.8452848208762251,
-    "floors_of_room": 14711.570756891997,
-    "ratio_required": 20.0,
-    "resolvable": true,
-    "room_fraction": 0.9920895329866122,
-    "verdict": "measurable"
-   },
-   "confidence_interval": {
-    "level": 0.99,
-    "lower": -8.541733462048817e-06,
-    "method": "paired_percentile_bootstrap",
-    "point": -2.5835989094108625e-06,
-    "repeats": 3,
-    "resamples": 20000,
-    "seed": 20260911,
-    "upper": 7.1657504360958e-06
+    "upper": 0.0008456798514270471
    },
    "credited_gap_closed": 0.0,
-   "floor_as_gap_closed": 6.799590755027801e-05,
-   "floor_pct": 0.8452848208762251,
-   "gap_closed": -2.5835989094108625e-06,
-   "remaining_before": 0.9920869698317989,
+   "floor_as_gap_closed": 0.005293354348950528,
+   "floor_pct": 0.4202064524308587,
+   "gap_closed": 5.302489405758526e-05,
+   "remaining_before": 0.4435750573891488,
    "repeats": 3,
    "resolution_note": "credited only when the interval clears this cell's own measured floor, not a constant threshold",
    "resolved": false,
-   "run_ceiling_seconds": 0.04296876212742737,
+   "run_ceiling_seconds": 0.054357333666780125,
    "sign_test": {
     "candidate_faster": 1,
     "comparable": 3,
@@ -312,41 +165,155 @@
     "p_value": 1.0,
     "pairs": 3
    },
-   "speedup": 0.999676084286447
+   "speedup": 1.0000422707873486
+  },
+  "t5-encode/1024/bf16": {
+   "achieved_base": 0.6870401055450467,
+   "achieved_candidate": 0.6872660198040481,
+   "anchor_achieved": 0.6870401055450467,
+   "anchor_measured_seconds": 0.0335891185,
+   "base_seconds": [
+    0.033788607,
+    0.033700606,
+    0.033664184
+   ],
+   "base_spread_pct": 0.36960052262071663,
+   "base_vs_anchor_pct": 0.38298136931500526,
+   "candidate_seconds": [
+    0.03375129,
+    0.033696843,
+    0.033671941
+   ],
+   "ceiling_basis": "model",
+   "ceiling_seconds": 0.02307707151940508,
+   "cell_room_after": {
+    "achieved": 0.6872660198040481,
+    "floor_as_gap_closed": 0.006460115383211158,
+    "floor_pct": 0.29309991295579524,
+    "floors_of_room": 154.79599677102448,
+    "ratio_required": 20.0,
+    "resolvable": true,
+    "room_fraction": 0.3127339801959519,
+    "verdict": "measurable"
+   },
+   "confidence_interval": {
+    "level": 0.99,
+    "lower": -0.0005083110991484517,
+    "method": "paired_percentile_bootstrap",
+    "point": 0.0007218632898470085,
+    "repeats": 3,
+    "resamples": 20000,
+    "seed": 20260911,
+    "upper": 0.002411035640976629
+   },
+   "credited_gap_closed": 0.0,
+   "floor_as_gap_closed": 0.006453330062812715,
+   "floor_pct": 0.29309991295579524,
+   "gap_closed": 0.0007218632898470085,
+   "remaining_before": 0.3129598944549533,
+   "repeats": 3,
+   "resolution_note": "credited only when the interval clears this cell's own measured floor, not a constant threshold",
+   "resolved": false,
+   "run_ceiling_seconds": 0.0231654524039079,
+   "sign_test": {
+    "candidate_faster": 2,
+    "comparable": 3,
+    "note": "exact two-sided binomial over paired repeats",
+    "p_value": 1.0,
+    "pairs": 3
+   },
+   "speedup": 1.0003288225202256
+  },
+  "vae-decode/1024/bf16": {
+   "achieved_base": 0.25376138116199276,
+   "achieved_candidate": 0.16897961201629275,
+   "anchor_achieved": 0.25376138116199276,
+   "anchor_measured_seconds": 0.169435064,
+   "base_seconds": [
+    0.169398732,
+    0.169413909,
+    0.169449224
+   ],
+   "base_spread_pct": 0.029806598552362118,
+   "base_vs_anchor_pct": -0.008524595461512074,
+   "candidate_seconds": [
+    0.254506355,
+    0.254346833,
+    0.254417804
+   ],
+   "ceiling_basis": "model",
+   "ceiling_seconds": 0.04299607585791064,
+   "cell_room_after": {
+    "achieved": 0.16897961201629275,
+    "floor_as_gap_closed": 0.00012989623349411676,
+    "floor_pct": 0.06384054471850394,
+    "floors_of_room": 7698.452627152517,
+    "ratio_required": 20.0,
+    "resolvable": true,
+    "room_fraction": 0.8310203879837073,
+    "verdict": "measurable"
+   },
+   "confidence_interval": {
+    "level": 0.99,
+    "lower": -0.11373466012834887,
+    "method": "paired_percentile_bootstrap",
+    "point": -0.11361214363003151,
+    "repeats": 3,
+    "resamples": 20000,
+    "seed": 20260911,
+    "upper": -0.1135430154537197
+   },
+   "credited_gap_closed": -0.11361214363003151,
+   "floor_as_gap_closed": 0.0002172309679075922,
+   "floor_pct": 0.06384054471850394,
+   "gap_closed": -0.11361214363003151,
+   "remaining_before": 0.7462386188380072,
+   "repeats": 3,
+   "resolution_note": "credited only when the interval clears this cell's own measured floor, not a constant threshold",
+   "resolved": true,
+   "run_ceiling_seconds": 0.04299241061637943,
+   "sign_test": {
+    "candidate_faster": 0,
+    "comparable": 3,
+    "note": "exact two-sided binomial over paired repeats",
+    "p_value": 0.25,
+    "pairs": 3
+   },
+   "speedup": 0.6658996386389535
   }
  },
  "pr": 1,
  "provenance": {
   "_instrument_note": "warmup and iters are the counts the cell noise floors were calibrated with. A measurement averaged over a different number of invocations than its floor was is a different instrument, and the comparison does not mean anything.",
   "_pairing": "interleaved base/candidate, one process per record",
-  "base_commit": "e0ac6cffaf196b8bd161bbe016855648bed17b60",
+  "base_commit": "5a7199884d0befcb0b1afbb57c53b69fc2cd2911",
   "calibration": {
    "_why": "The card the anchor's achieved fractions and floors were measured on. The run itself may come from any card of the pinned class: its score takes only the paired base/candidate ratio from the run.",
    "device_name": "NVIDIA GeForce RTX 5090",
-   "device_uuid": "GPU-da2aa62b-30d9-78a4-d9a1-86a21df7e530",
-   "driver_version": "595.91.07"
+   "device_uuid": "GPU-96bb53a0-233c-705e-bb11-fbbaf4e2727d",
+   "driver_version": "595.71.05"
   },
-  "candidate_commit": "e0ac6cffaf196b8bd161bbe016855648bed17b60",
+  "candidate_commit": "5a7199884d0befcb0b1afbb57c53b69fc2cd2911",
   "code_provenance_complete": true,
   "code_provenance_missing": [],
   "device": {
    "_clocks_note": "Clocks are not pinned and cannot be in a container. Only paired interleaved same-box deltas mean anything; absolute times from two different sessions are not comparable.",
-   "driver_version": "595.91.07",
+   "driver_version": "595.71.05",
    "memory.total": "32607 MiB",
    "name": "NVIDIA GeForce RTX 5090",
-   "pci.bus_id": "00000000:01:00.0",
-   "uuid": "GPU-da2aa62b-30d9-78a4-d9a1-86a21df7e530"
+   "pci.bus_id": "00000000:05:00.0",
+   "uuid": "GPU-96bb53a0-233c-705e-bb11-fbbaf4e2727d"
   },
   "fidelity": {
-   "base": 0.0005004137624701083,
-   "candidate": 0.0002775190405326029
+   "base": 0.0003506996546750731,
+   "candidate": 0.0003506996546750731
   },
   "impl_base": "cuda",
-  "impl_candidate": "cuda-tile1024",
-  "instrument_from": "e0ac6cf",
+  "impl_candidate": "cuda-rowblock",
+  "instrument_from": "5a71998",
   "iters": 5,
   "repeats": 3,
-  "wall_seconds_total": 933.8,
+  "wall_seconds_total": 85.0,
   "warmup": 2
  },
  "schema_version": 1,
@@ -356,16 +323,16 @@
   "basis": "measured",
   "confidence_interval": {
    "level": 0.99,
-   "lower": -0.005646377238258362,
-   "upper": -0.005587120530008731
+   "lower": -0.004651473324140726,
+   "upper": -0.003381095084806408
   },
   "credited_gap_closed": 0.0,
-  "gap_closed": -0.0056093994004775905,
+  "gap_closed": -0.004229142929584703,
   "resolution_rule": "over the cells that resolved on their own, the weighted lower bound of the paired bootstrap must clear their weighted noise floor (or the upper bound fall below minus it). TWO quantities, not one: an interval alone does not say an effect is bigger than the noise -- with enough repeats a tiny thermal bias becomes significant -- and a floor alone does not say the effect is real. Cells that did not resolve contribute zero, are named, and do not block the others.",
   "resolved": true
  },
  "status": "NO_GAIN",
  "supersede_reason": null,
  "supersedes": [],
- "timestamp_utc": "2026-09-14T02:46:20.239979+00:00"
+ "timestamp_utc": "2026-09-14T15:43:53.383479+00:00"
 }

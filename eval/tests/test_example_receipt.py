@@ -37,10 +37,6 @@ from burnscore import receipt as R
 EXAMPLES = ROOT / "examples"
 RAW = EXAMPLES / "BG-1-pr-000001-raw.json"
 RECEIPT = EXAMPLES / "BG-1-pr-000001-receipt.json"
-# The anchor the example was scored against. Scoring reads an anchor as well as the raw file, and
-# BG-1 was re-anchored when the vendor kernels became `cuda`; the example is a measurement of the
-# first kernels, so it reproduces against the anchor that describes them and no other.
-ANCHOR = EXAMPLES / "BG-1-anchor-v0.json"
 
 # Two fields cannot match and must not be asserted on: a receipt is stamped with the wall clock
 # at the moment it is built, and its digest covers that stamp. Everything else is a function of
@@ -66,7 +62,7 @@ class TestTheCommittedExampleStillReproduces(unittest.TestCase):
             out = Path(tmp) / "receipt.json"
             r = subprocess.run(
                 [sys.executable, str(ROOT / "tools" / "burnish"), "score", str(RAW),
-                 "--generation", "BG-1", "--calibration", str(ANCHOR), "--output", str(out),
+                 "--generation", "BG-1", "--output", str(out),
                  "--ledger", str(Path(tmp) / "ledger"), "--pr", str(self.want["pr"])],
                 capture_output=True, text=True, timeout=300)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
@@ -88,7 +84,7 @@ class TestTheCommittedExampleStillReproduces(unittest.TestCase):
         Demonstrated on real artifacts rather than argued: a receipt measured on the pinned card
         and audited against the COMMITTED calibration fails -- differs at `frontier` and
         `per_cell` -- because the floors came from a different calibration session on that same
-        card. Floors are not stable between sessions (up to 24x, measured), so "same hardware" is
+        card. Floors are not stable between sessions (measured; `docs/EVAL.md`), so "same hardware" is
         not enough. The calibration has to travel with the measurements it scored.
         """
         cal = self.raw.get("calibration") or {}
@@ -127,18 +123,19 @@ class TestTheCommittedExampleStillReproduces(unittest.TestCase):
     def test_the_readmes_claims_about_this_run_are_true_of_this_receipt(self):
         """Prose drifts. The specific claims examples/README.md makes are checked here."""
         r = self.want
-        # "It lost, and the receipt says so": two cells resolved a slowdown, so the submission
+        # "It lost, and the receipt says so": a cell resolved a slowdown, so the submission
         # resolved as measurably not an improvement, and NO_GAIN credits nothing.
         self.assertLess(r["score"]["gap_closed"], 0.0)
         self.assertEqual(r["score"]["credited_gap_closed"], 0.0)
         self.assertTrue(r["score"]["resolved"])
         self.assertEqual(r["status"], "NO_GAIN")
-        # "Two cells resolved a regression and are named."
+        # "vae-decode resolved the regression."
         resolved = {c for c, v in r["per_cell"].items() if v["resolved"]}
-        self.assertEqual(resolved, {"dit-step/1024/bf16", "t5-encode/1024/bf16"})
-        # "vae-decode did not resolve ... contributes zero and does not block."
-        vae = r["per_cell"]["vae-decode/1024/bf16"]
-        self.assertFalse(vae["resolved"])
+        self.assertEqual(resolved, {"vae-decode/1024/bf16"})
+        self.assertLess(r["per_cell"]["vae-decode/1024/bf16"]["gap_closed"], 0.0)
+        # "dit-step and t5-encode did not resolve ... each contributes zero without blocking."
+        for cid in ("dit-step/1024/bf16", "t5-encode/1024/bf16"):
+            self.assertFalse(r["per_cell"][cid]["resolved"])
         self.assertTrue(r["coverage"]["complete"],
                         "an unresolved cell must not drop out of the matrix")
         # "what makes this receipt evidence" -- it names the code it scored, including the
@@ -151,7 +148,7 @@ class TestTheCommittedExampleStillReproduces(unittest.TestCase):
         # produced by a different instrument than the one the repository ships would teach the
         # wrong thing to whoever copies it.
         import json as _json
-        cal = _json.loads(ANCHOR.read_text())
+        cal = _json.loads((ROOT / "eval" / "cells" / "BG-1" / "reference.json").read_text())
         self.assertEqual((r["provenance"]["warmup"], r["provenance"]["iters"]),
                          (cal["calibrated_with"]["warmup"], cal["calibrated_with"]["iters"]))
         self.assertGreaterEqual(r["provenance"]["repeats"], self.gen.repeats)

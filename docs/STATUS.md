@@ -20,7 +20,7 @@ What is real here and what is not. Read this before spending a week on anything.
 | `vae-decode/1024/bf16` | 25.4% | 3.9x | 0.064% |
 
 Nine paired repeats per cell, in two sessions, with the vendor kernels as `cuda`. Floors are **not
-stable between sessions** -- 1.6× apart here, and 24.2× on the first kernels -- so each cell's
+stable between sessions** -- 1.6× apart here -- so each cell's
 floor is the worst of the two (`docs/EVAL.md`).
 
 ## Against PyTorch on the same card
@@ -46,7 +46,7 @@ Not yet measured: PyTorch with `torch.compile`, which is a higher bar and the ne
 - CPU reference ops, CUDA backend for all 15 ops, T5 / PixArt DiT / VAE graphs, DPM-Solver++.
 - `cuda` on cuBLAS and cuDNN: fused attention for bf16, cuDNN convolution computed in float, a
   chunked GroupNorm, and a caching allocator. `tests/test_cuda_ops.cpp` checks them against the CPU
-  oracle on a device; the first kernels stay registered under their own names.
+  oracle on a device.
 - Checkpoint loading, verified against the real checkpoint's tensor names and shapes.
 - Correctness gate, paired bench, calibration, scorer, receipts, ledger, audit, challenge.
 - Evaluation in rounds, with the instrument taken from the base commit.
@@ -54,56 +54,6 @@ Not yet measured: PyTorch with `torch.compile`, which is a higher bar and the ne
 - A re-registration guard for kernels already on main, tested on the real registry.
 
 `scripts/check.sh` checks all of it without a GPU.
-
-## Defects found so far
-
-**Five correctness defects in the runtime.** Each gave a deterministic, plausible-looking image,
-so self-consistency tests passed every one. Comparing against the reference found them.
-
-1. **Attention read the wrong layout:** `[batch, heads, seq, dim]` over `[batch, seq, heads, dim]`.
-2. **The CUDA gather read fp32 token ids as bf16.** Every fp32 test passed.
-3. **The sampler used the wrong sigma ratio:** 157 where the reference uses 0.99998 at t=999.
-4. **The output patch order was transposed.** Identical mean and std, different arrangement.
-5. **Padding was never masked.**
-
-**In the CUDA backend:**
-- `burnisher generate` could not write the image on CUDA: the decoder hands pixels back on the
-  device, and writing them read device memory element by element. The benchmark writes latents
-  only, so nothing had noticed.
-- The first `cuda` GroupNorm (`cuda-rowblock`) accumulates in float and differs from the CPU oracle
-  by 3.3e-4 at a small fp32 shape. `tests/test_cuda_ops.cpp` found it; `cuda` sums in double.
-
-**In the harness:**
-- `bench.py` read all of `/dev/urandom` when picking a held-out shape.
-- The fidelity objective was never produced, so every result would have read
-  `MOVED_ALONG_FRONTIER`.
-- Floors and benches used different iteration counts.
-- A single-kernel submission fell back to CPU kernels on a GPU run. The first scored run found it.
-- `tools/burnish` picked the CPU build over the CUDA build when a box had both, so every GPU
-  command failed. The first calibration on a new box found it.
-- `eval/score_submission.sh` passed the generation to scoring but not to its gates or bench, so it
-  could only score BG-1. The first BG-2 control run found it. The bot never passed one either.
-- BG-2's frozen generation kept a provisional tolerance after the measured one was applied,
-  because the check only compared BG-1's generation with `configs/`.
-- A frontier gain with no speedup would have been labelled `burnish:gap+0.0000`, which reads as
-  paid while paying nothing.
-- Rounds measured `cuda` against `cuda`: nothing read which kernel a pull request registered.
-- A labelled pull request was never evaluated again, so a rebase, a fix or a retry went unmeasured,
-  and `needs-rebase` replaced the labels of results that had not paid.
-- An untouched noisy cell could keep a real gain elsewhere from resolving, and could make it look
-  overfit at the held-out shape.
-- A credit held in the ledger stayed paid on the pull request's label.
-- `peak_vram_bytes` was host RSS on CUDA runs too.
-- Once the runtime was fast, the text encoder's cell could not resolve: its floor was 23% of its
-  time. `bench` timed its own input synthesis, and T5 rebuilt and uploaded its position bias on
-  every forward. Both moved out of the timed path, and that floor is now 0.293%.
-
-**Left in on purpose:** the sampler rounds a ~300-magnitude value to bf16. Fixing it would make the
-runtime more accurate than the reference, so the gate would reject it
-(`issues/sampler-precision.md`).
-
-**The lesson:** when two explanations look the same at full scale, shrink the scale (one step,
-one layer) until they separate.
 
 ## Not known yet
 
@@ -134,12 +84,6 @@ one layer) until they separate.
   asked for; how much the driver holds on top of that is not measured.
 - **Launch overhead vs raw compute.** The ceiling treats both kinds of win the same. That is a
   choice.
-
-## The first scored run
-
-`cuda-tile1024`, a change nobody expected to win. It was measurably slower (`NO_GAIN` under today's
-rules), credited zero, correctly left one cell unresolved, and found the CPU-fallback bug above.
-`examples/README.md`.
 
 ## Easy to get wrong later
 

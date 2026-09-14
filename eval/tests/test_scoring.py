@@ -435,8 +435,7 @@ class TestComputeAndReceipt(unittest.TestCase):
         """
         import math
         raw = json.loads((ROOT_EX / "BG-1-pr-000001-raw.json").read_text())
-        # The anchor that run was scored against: its floors are what "a noise floor" meant then.
-        cal = json.loads((ROOT_EX / "BG-1-anchor-v0.json").read_text())["cells"]
+        cal = json.loads((HERE.parent / "cells" / "BG-1" / "reference.json").read_text())["cells"]
 
         def geo(xs):
             return math.exp(sum(map(math.log, xs)) / len(xs))

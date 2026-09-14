@@ -9,12 +9,12 @@ and a merged kernel would be paid a second time for a gain that already landed.
 A copy of an open pull request is the copycat guard's question. This one asks only about main,
 and answers it from the registry itself:
 
-* **The same callable under a new name** -- `attention_cuda_tiled<256>` registered again as
-  `fast` -- is a re-registration, whatever the name says.
-* **The same kernel with different constants is a variant, not a re-registration.**
-  `cuda-tile64` and `cuda-tile1024` are one function at different tile widths, and that
-  difference is exactly what they exist to measure. So constants are KEPT when kernels are
-  compared, and a new template argument to an existing function is never flagged.
+* **The same callable under a new name** -- `attention_cuda` registered again as `fast` -- is a
+  re-registration, whatever the name says.
+* **The same kernel with different constants is a variant, not a re-registration.** One function
+  templated on a tile width and registered at two widths is two kernels, and that difference is
+  exactly what they exist to measure. So constants are KEPT when kernels are compared, and a new
+  template argument to an existing function is never flagged.
 * **A renamed, reformatted copy of a kernel** -- its wrapper and the device kernels it launches,
   with every identifier changed -- is compared as structure: identifiers and comments normalized,
   numbers kept. At or above SIMILAR it is a re-registration. A copy of the baseline that was

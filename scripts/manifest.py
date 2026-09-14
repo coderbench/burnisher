@@ -66,15 +66,11 @@ def build_manifest(with_checks: bool):
         "what": ("A native C++/CUDA image and video generation runtime for consumer Blackwell, "
                  "and the instrument that scores changes to it."),
         "status": (
-            "v0. A correct, complete, SLOW pipeline plus the harness that scores changes to it. "
-            "Speed at launch is not the deliverable; contributors optimize, they do not "
-            "bootstrap. The harness is complete and tested. The runtime's CPU reference path is "
-            "complete, runs the whole graph end to end and reproduces itself byte for byte. "
-            "NOTHING HAS BEEN MEASURED: no Blackwell device was available when this was built, "
-            "so every cell's achieved fraction and every cell's noise floor is null, the device "
-            "peaks behind every roofline are VENDOR figures rather than probed ones, and the "
-            "CUDA backend has never been compiled. docs/STATUS.md is the full list and says "
-            "exactly what a first session on the pinned hardware would fill in."),
+            "A correct, complete pipeline on cuBLAS and cuDNN, calibrated on the pinned RTX 5090, "
+            "plus the harness that scores changes to it. The CPU reference path is the "
+            "correctness oracle; `cuda` passes the fp32 gate and reproduces itself byte for byte. "
+            "docs/STATUS.md is what is measured, how it compares with PyTorch on the same card, "
+            "and what is still unknown."),
         "scoring": (
             "Score is the fraction of a cell's REMAINING arithmetic-roofline gap that a change "
             "closes, credited only when it clears that cell's own MEASURED noise floor under a "

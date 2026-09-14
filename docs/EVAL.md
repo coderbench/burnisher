@@ -126,14 +126,14 @@ already on main -- a merged contributor's or a baseline one -- registered again 
 would be measured as a gain that already landed. Before anything is built,
 `scripts/reregistration_guard.py` reads the registry on main and in the submission:
 
-- **The same callable under a new name** (`attention_cuda_tiled<256>` again as `fast`) is
+- **The same callable under a new name** (`attention_cuda` again as `fast`) is
   re-registered.
 - **A renamed, reformatted copy** of a registered kernel -- its wrapper and the device kernels it
   launches -- is re-registered at 95% or more token similarity. Identifiers and comments are
   normalized and numbers are kept; helpers that three or more registered kernels call are left out.
-- **A new template argument to a registered function is a variant.** `attention_cuda_tiled<512>`
-  beside `cuda-tile64` and `cuda-tile1024` is clear. A copy registered with template arguments no
-  existing registration uses is not compared.
+- **A new template argument to a registered function is a variant.** A templated kernel
+  registered again at a new width is clear. A copy registered with template arguments no existing
+  registration uses is not compared.
 - **A changed copy is clear** once the change takes it below 95%. Changing one constant in a copied
   kernel is not enough.
 
@@ -256,9 +256,6 @@ vendor kernels as `cuda`, back to back (`eval/cells/BG-1/reference.json` and
 | `dit-step/1024/bf16` | 0.261% | 0.420% | 1.6× |
 | `t5-encode/1024/bf16` | 0.237% | 0.293% | 1.2× |
 | `vae-decode/1024/bf16` | 0.039% | 0.064% | 1.6× |
-
-On the first kernels, two sessions hours apart moved a floor 24.2× (`examples/BG-1-anchor-v0.json`
-and `examples/BG-1-anchor-v0-session-2.json`).
 
 `--merge` keeps the worst floor per cell. A floor too tight would pay for noise permanently; one
 too loose only refuses a gain too small to see.

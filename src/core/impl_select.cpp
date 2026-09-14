@@ -46,7 +46,7 @@ bool op_has(const std::string& op, const std::string& name) {
 // CUDA run every intermediate lives in device memory, so falling back to `stock` hands a host
 // kernel device pointers -- the exact fault the Device field on ImplSelection exists to prevent.
 // This is not a corner case: it is what EVERY single-kernel submission looks like. `--impl
-// cuda-tile1024` registers one attention variant and nothing else, so fourteen of fifteen ops
+// cuda-sdpa` registers one attention variant and nothing else, so fourteen of fifteen ops
 // take the fallback, and with a host baseline fourteen of fifteen ops fault. The first candidate
 // this harness ever scored died here, in the gate, before it timed anything -- which is the gate
 // working, but the bug was mine and every miner would have hit it on their first submission.

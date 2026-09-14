@@ -39,6 +39,23 @@ def candidate(registration="", appended=""):
     return {**BASE, CUDA: text + ("\n" + appended if appended else "")}
 
 
+# No kernel on main is templated, so the template cases use a base that has one: a tiled
+# attention kernel registered at one tile width.
+TILED_DEF = """
+template <int kTile>
+void attention_tiled(const AttentionArgs& a) {
+    require_device(*a.q, "attention", "q");
+    const int64_t rows = a.batch * a.heads * a.q_len;
+    for (int64_t base = 0; base < a.kv_len; base += kTile) {
+        check_launch("attention tile");
+    }
+    (void)rows;
+}
+"""
+TILED_BASE = candidate('register_impl<AttentionArgs>("attention", "tiled64", attention_tiled<64>, "x");',
+                       TILED_DEF)
+
+
 def renamed_modulate(modify=False):
     defs = RR.definitions(BASE)
     kernel, wrapper = defs["k_modulate"][0]["text"], defs["modulate_cuda"][0]["text"]
@@ -54,7 +71,9 @@ def renamed_modulate(modify=False):
 class TestTheRegistryOnMain(unittest.TestCase):
     def test_the_registrations_on_main_are_found(self):
         regs = {(r["op"], r["name"]): r for r in RR.registrations(BASE)}
-        self.assertEqual(regs[("attention", "cuda-tile64")]["callable"], "attention_cuda_tiled<64>")
+        self.assertEqual(regs[("attention", "cuda-sdpa")]["callable"], "attention_cuda_sdpa")
+        tiled = {(r["op"], r["name"]): r for r in RR.registrations(TILED_BASE)}
+        self.assertEqual(tiled[("attention", "tiled64")]["callable"], "attention_tiled<64>")
         self.assertEqual(regs[("modulate", "cuda")]["function"], "modulate_cuda")
         self.assertIn(("gemm", "stock"), regs)
 
@@ -70,9 +89,9 @@ class TestTheRegistryOnMain(unittest.TestCase):
 class TestReregistration(unittest.TestCase):
     def test_the_same_callable_under_a_new_name_is_a_reregistration(self):
         v = RR.judge(candidate('register_impl<AttentionArgs>("attention", "fast", '
-                               'attention_cuda_tiled<256>, "x");'), BASE)
+                               'attention_cuda, "x");'), BASE)
         self.assertEqual(v["outcome"], "REREGISTERED")
-        self.assertEqual(v["findings"][0]["matches"]["name"], "cuda-tiled")
+        self.assertEqual(v["findings"][0]["matches"]["name"], "cuda")
 
     def test_the_new_names_are_reported_as_what_the_candidate_arm_can_run(self):
         v = RR.judge(candidate('register_impl<ModulateArgs>("modulate", "fast", fastmod_cuda, "f");',
@@ -81,9 +100,10 @@ class TestReregistration(unittest.TestCase):
         self.assertEqual(RR.judge(BASE, BASE)["candidate_names"], [])
 
     def test_a_new_tile_width_is_a_variant_not_a_reregistration(self):
-        """cuda-tile64 and cuda-tile1024 exist to measure exactly this kind of difference."""
-        v = RR.judge(candidate('register_impl<AttentionArgs>("attention", "cuda-tile512", '
-                               'attention_cuda_tiled<512>, "x");'), BASE)
+        """One function at two tile widths exists to measure exactly this kind of difference."""
+        reg = 'register_impl<AttentionArgs>("attention", "tiled512", attention_tiled<512>, "x");'
+        sub = {**TILED_BASE, CUDA: TILED_BASE[CUDA].replace(ANCHOR, ANCHOR + "\n    " + reg)}
+        v = RR.judge(sub, TILED_BASE)
         self.assertEqual(v["outcome"], "CLEAR")
 
     def test_a_renamed_reformatted_copy_of_a_merged_kernel_is_a_reregistration(self):
@@ -113,7 +133,7 @@ class TestTheGuardEndToEnd(unittest.TestCase):
             subprocess.run(g + ["commit", "-q", "-m", "base"], check=True)
             subprocess.run(g + ["checkout", "-q", "-b", "sub"], check=True)
             (repo / CUDA).write_text(candidate('register_impl<AttentionArgs>("attention", "fast", '
-                                               'attention_cuda_tiled<256>, "x");')[CUDA])
+                                               'attention_cuda, "x");')[CUDA])
             subprocess.run(g + ["commit", "-qam", "sub"], check=True)
             out = Path(tmp) / "v.json"
             for extra, want in (([], "REREGISTERED"), (["--cleared"], "CLEARED")):

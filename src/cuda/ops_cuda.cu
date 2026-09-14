@@ -17,9 +17,7 @@
 //   modulate    unfused AdaLN modulation, the canonical fusion target.
 //
 // The ceiling is still well past all of it, and closing that gap is the work that is paid: kernels
-// written for this architecture and this card, fusion, fp8 and NVFP4. The first kernels, written to
-// be correct and readable rather than fast, stay registered under their own names -- `cuda-tiled`,
-// `cuda-direct`, `cuda-rowblock` -- as the CPU ones do.
+// written for this architecture and this card, fusion, fp8 and NVFP4.
 //
 // A contributor who beats any of them registers a new name and the harness measures the
 // difference in one process, one model load, one thermal state.
@@ -261,69 +259,20 @@ __global__ void k_layernorm(const T* x, const T* weight, const T* bias, T* out,
     }
 }
 
-template <typename T>
-__global__ void k_groupnorm(const T* x, const T* weight, const T* bias, T* out,
-                            int64_t cols, int64_t groups, int64_t channels, float eps) {
-    extern __shared__ float sdata[];
-    const int64_t row = blockIdx.x / groups;
-    const int64_t g = blockIdx.x % groups;
-    const int64_t per = cols / groups;
-    const int64_t base = row * cols + g * per;
-    const int64_t spatial = channels ? (cols / channels) : 1;
-
-    float sum = 0.0f, sumsq = 0.0f;
-    for (int64_t i = threadIdx.x; i < per; i += blockDim.x) {
-        const float v = ld(x, base + i);
-        sum += v;
-        sumsq += v * v;
-    }
-    sdata[threadIdx.x] = sum;
-    sdata[blockDim.x + threadIdx.x] = sumsq;
-    __syncthreads();
-    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
-        if (threadIdx.x < s) {
-            sdata[threadIdx.x] += sdata[threadIdx.x + s];
-            sdata[blockDim.x + threadIdx.x] += sdata[blockDim.x + threadIdx.x + s];
-        }
-        __syncthreads();
-    }
-    const float mean = sdata[0] / (float)per;
-    const float var = sdata[blockDim.x] / (float)per - mean * mean;
-    const float inv = rsqrtf(var + eps);
-    for (int64_t i = threadIdx.x; i < per; i += blockDim.x) {
-        float v = (ld(x, base + i) - mean) * inv;
-        if (weight || bias) {
-            const int64_t ch = (g * per + i) / spatial;
-            if (weight) v *= ld(weight, ch);
-            if (bias) v += ld(bias, ch);
-        }
-        st(out, base + i, v);
-    }
-}
-
-void norm_cuda(const NormArgs& a) {
+void layernorm_cuda(const NormArgs& a) {
     require_device(*a.x, "norm");
     const int threads = 256;
     const size_t shmem = 2 * threads * sizeof(float);
-    if (a.groups > 0) {
-        const int blocks = (int)(a.rows * a.groups);
-        DISPATCH(*a.x, T,
-                 k_groupnorm<T><<<blocks, threads, shmem>>>(
-                     (const T*)a.x->data(), a.weight ? (const T*)a.weight->data() : nullptr,
-                     a.bias ? (const T*)a.bias->data() : nullptr, (T*)a.out->data(),
-                     a.cols, a.groups, a.channels, a.eps));
-    } else {
-        DISPATCH(*a.x, T,
-                 k_layernorm<T><<<(int)a.rows, threads, shmem>>>(
-                     (const T*)a.x->data(), a.weight ? (const T*)a.weight->data() : nullptr,
-                     a.bias ? (const T*)a.bias->data() : nullptr, (T*)a.out->data(),
-                     a.cols, a.eps, a.rms));
-    }
+    DISPATCH(*a.x, T,
+             k_layernorm<T><<<(int)a.rows, threads, shmem>>>(
+                 (const T*)a.x->data(), a.weight ? (const T*)a.weight->data() : nullptr,
+                 a.bias ? (const T*)a.bias->data() : nullptr, (T*)a.out->data(),
+                 a.cols, a.eps, a.rms));
     check_launch("norm");
 }
 
 // --- GroupNorm in three passes ---------------------------------------------------------
-// The shared-memory reduction above gives each group one block and syncs its threads at every
+// The first GroupNorm kernel gave each group one shared-memory block and synced its threads at every
 // level of the tree. At the VAE's 1024px shapes a group is four million elements, and that kernel
 // was a third of the decode.
 //
@@ -421,8 +370,8 @@ void groupnorm_chunked(const NormArgs& a) {
     check_launch("groupnorm apply");
 }
 
-void norm_cuda_vendor(const NormArgs& a) {
-    if (a.groups <= 0) return norm_cuda(a);   // LayerNorm and RMSNorm keep the per-row kernel
+void norm_cuda(const NormArgs& a) {
+    if (a.groups <= 0) return layernorm_cuda(a);   // LayerNorm and RMSNorm: one block per row
     require_device(*a.x, "norm");
     if (a.cols % a.groups) throw std::runtime_error("cuda groupnorm: cols not divisible by groups");
     DISPATCH(*a.x, T, groupnorm_chunked<T>(a));
@@ -463,144 +412,6 @@ void patch_cuda(const PatchArgs& a) {
              k_patch<T><<<grid, kBlock>>>((const T*)a.in->data(), (T*)a.out->data(),
                                           a.batch, a.channels, a.grid, a.patch, a.inverse));
     check_launch("patch");
-}
-
-// --- attention --------------------------------------------------------------------------
-// One block per (batch, head, query row), streaming online softmax. Head-LAST layout, matching
-// every projection GEMM in this runtime -- see the comment on AttentionArgs.
-//
-// No tiling, no shared-memory staging of K/V, no tensor cores. It is correct and it is slow, and
-// it is the single largest opportunity in the repository: `issues/dit-attention.md` has the
-// arithmetic.
-
-template <typename T, int kTile>
-__global__ void k_attention(const T* q, const T* k, const T* v, const T* bias,
-                            const T* key_mask, T* out, int64_t heads, int64_t q_len,
-                            int64_t kv_len, int64_t head_dim, float scale) {
-    // One block per (batch, head, query row). Tiled online softmax, DETERMINISTIC.
-    //
-    // The first version of this kernel accumulated the weighted values with `atomicAdd` into
-    // shared memory. Every contribution was correct and the SET of contributions was fixed, but
-    // the ORDER was not -- and float addition is not associative, so two runs of the same build
-    // produced different last bits. `burnish gate --determinism` requires byte-identical
-    // replays, and a runtime that cannot reproduce itself cannot be a reference for anything.
-    //
-    // So: each tile of keys is scored into shared memory, and then each thread owns a fixed set
-    // of head_dim channels and walks the tile in a fixed order. No atomics, no race, one
-    // summation order. It is also faster, because atomics on a hot shared-memory address
-    // serialise anyway.
-    const int64_t row = blockIdx.x;
-    const int64_t i = row % q_len;
-    const int64_t h = (row / q_len) % heads;
-    const int64_t b = row / (q_len * heads);
-
-    extern __shared__ float shared[];
-    float* scores = shared;                   // kTile
-    float* red = shared + kTile;              // blockDim.x
-    float* acc = shared + kTile + blockDim.x; // head_dim
-
-    const int64_t qbase = ((b * q_len + i) * heads + h) * head_dim;
-
-    for (int64_t d = threadIdx.x; d < head_dim; d += blockDim.x) acc[d] = 0.0f;
-    float run_max = -INFINITY;
-    float run_den = 0.0f;
-    __syncthreads();
-
-    for (int64_t base = 0; base < kv_len; base += kTile) {
-        const int64_t tile = min((int64_t)kTile, kv_len - base);
-
-        for (int64_t t = threadIdx.x; t < tile; t += blockDim.x) {
-            const int64_t j = base + t;
-            if (key_mask && ld(key_mask, b * kv_len + j) == 0.0f) {
-                scores[t] = -INFINITY;
-                continue;
-            }
-            float s = 0.0f;
-            const int64_t kb = ((b * kv_len + j) * heads + h) * head_dim;
-            for (int64_t d = 0; d < head_dim; ++d) s += ld(q, qbase + d) * ld(k, kb + d);
-            s *= scale;
-            if (bias) s += ld(bias, (h * q_len + i) * kv_len + j);
-            scores[t] = s;
-        }
-        __syncthreads();
-
-        // Tile maximum, by a fixed reduction tree.
-        float local = -INFINITY;
-        for (int64_t t = threadIdx.x; t < tile; t += blockDim.x) local = fmaxf(local, scores[t]);
-        red[threadIdx.x] = local;
-        __syncthreads();
-        for (int s = blockDim.x / 2; s > 0; s >>= 1) {
-            if (threadIdx.x < s) red[threadIdx.x] = fmaxf(red[threadIdx.x], red[threadIdx.x + s]);
-            __syncthreads();
-        }
-        const float tile_max = red[0];
-        __syncthreads();
-
-        const float new_max = fmaxf(run_max, tile_max);
-        const float rescale = (run_max == -INFINITY) ? 0.0f : __expf(run_max - new_max);
-
-        // Weights for this tile, written back over the scores.
-        for (int64_t t = threadIdx.x; t < tile; t += blockDim.x) {
-            scores[t] = (scores[t] == -INFINITY) ? 0.0f : __expf(scores[t] - new_max);
-        }
-        __syncthreads();
-
-        float local_den = 0.0f;
-        for (int64_t t = threadIdx.x; t < tile; t += blockDim.x) local_den += scores[t];
-        red[threadIdx.x] = local_den;
-        __syncthreads();
-        for (int s = blockDim.x / 2; s > 0; s >>= 1) {
-            if (threadIdx.x < s) red[threadIdx.x] += red[threadIdx.x + s];
-            __syncthreads();
-        }
-        const float tile_den = red[0];
-        __syncthreads();
-
-        // Each thread owns a fixed set of channels and walks the tile in index order. This is
-        // the part that makes the kernel reproducible.
-        for (int64_t d = threadIdx.x; d < head_dim; d += blockDim.x) {
-            float a_d = acc[d] * rescale;
-            for (int64_t t = 0; t < tile; ++t) {
-                const float w = scores[t];
-                if (w == 0.0f) continue;
-                const int64_t kb = ((b * kv_len + base + t) * heads + h) * head_dim;
-                a_d += w * ld(v, kb + d);
-            }
-            acc[d] = a_d;
-        }
-        run_den = run_den * rescale + tile_den;
-        run_max = new_max;
-        __syncthreads();
-    }
-
-    const float denom = run_den > 0.0f ? run_den : 1.0f;
-    for (int64_t d = threadIdx.x; d < head_dim; d += blockDim.x) {
-        st(out, qbase + d, acc[d] / denom);
-    }
-}
-
-template <int kTile>
-void attention_cuda_tiled(const AttentionArgs& a) {
-    require_device(*a.q, "attention", "q");
-    const float scale = a.scale > 0.0f ? a.scale : rsqrtf((float)a.head_dim);
-    const int threads = 128;
-    const int64_t rows = a.batch * a.heads * a.q_len;
-    if (rows > 2147483647LL) throw std::runtime_error("cuda attention: too many rows");
-    // scores tile + reduction scratch + the accumulator. Fixed by the TILE, not by kv_len, so a
-    // 16384-key VAE mid-block needs no more shared memory than a 300-key cross-attention.
-    const size_t shmem = (kTile + threads + a.head_dim) * sizeof(float);
-    if (shmem > 48 * 1024) {
-        throw std::runtime_error("cuda attention: tile " + std::to_string(kTile) + " needs " +
-                                 std::to_string(shmem) + " bytes of shared memory, over the "
-                                 "48 kB default limit");
-    }
-    DISPATCH(*a.q, T,
-             k_attention<T, kTile><<<(int)rows, threads, shmem>>>(
-                 (const T*)a.q->data(), (const T*)a.k->data(), (const T*)a.v->data(),
-                 a.bias ? (const T*)a.bias->data() : nullptr,
-                 a.key_mask ? (const T*)a.key_mask->data() : nullptr,
-                 (T*)a.out->data(), a.heads, a.q_len, a.kv_len, a.head_dim, scale));
-    check_launch("attention");
 }
 
 // --- gemm -------------------------------------------------------------------------------
@@ -1069,7 +880,7 @@ bool attention_sdpa(const AttentionArgs& a) {
 }
 
 // The fused op where it can run the call exactly, the float path everywhere else.
-void attention_cuda_vendor(const AttentionArgs& a) {
+void attention_cuda(const AttentionArgs& a) {
     require_device(*a.q, "attention", "q");
     if (!attention_sdpa(a)) attention_cuda_blas(a);
 }
@@ -1197,57 +1008,10 @@ void conv2d_dnn(const Conv2dArgs& a) {
     check_launch("conv2d round");
 }
 
-void conv2d_cuda_dnn(const Conv2dArgs& a) {
+void conv2d_cuda(const Conv2dArgs& a) {
     require_device(*a.x, "conv2d");
     require_same_dtype(*a.x, *a.weight, "conv2d");
     DISPATCH(*a.x, T, conv2d_dnn<T>(a));
-}
-
-// --- conv2d -----------------------------------------------------------------------------
-// Direct convolution, one thread per output element. No im2col, no implicit GEMM, no tensor
-// cores. The VAE's shapes are few and fixed, which is exactly what makes a specialised path
-// plausible -- `issues/vae-decode.md`.
-
-template <typename T>
-__global__ void k_conv2d(const T* x, const T* w, const T* bias, T* out, int64_t batch,
-                         int64_t c_in, int64_t h_in, int64_t w_in, int64_t c_out, int64_t ksz,
-                         int64_t pad, int64_t h_out, int64_t w_out) {
-    const int64_t n = batch * c_out * h_out * w_out;
-    for (int64_t idx = blockIdx.x * (int64_t)blockDim.x + threadIdx.x; idx < n;
-         idx += (int64_t)gridDim.x * blockDim.x) {
-        const int64_t ox = idx % w_out;
-        const int64_t oy = (idx / w_out) % h_out;
-        const int64_t oc = (idx / (w_out * h_out)) % c_out;
-        const int64_t b = idx / (w_out * h_out * c_out);
-        float acc = bias ? ld(bias, oc) : 0.0f;
-        for (int64_t ic = 0; ic < c_in; ++ic) {
-            for (int64_t ky = 0; ky < ksz; ++ky) {
-                const int64_t iy = oy + ky - pad;
-                if (iy < 0 || iy >= h_in) continue;
-                for (int64_t kx = 0; kx < ksz; ++kx) {
-                    const int64_t ix = ox + kx - pad;
-                    if (ix < 0 || ix >= w_in) continue;
-                    acc += ld(x, ((b * c_in + ic) * h_in + iy) * w_in + ix) *
-                           ld(w, ((oc * c_in + ic) * ksz + ky) * ksz + kx);
-                }
-            }
-        }
-        st(out, idx, acc);
-    }
-}
-
-void conv2d_cuda(const Conv2dArgs& a) {
-    require_device(*a.x, "conv2d");
-    const int64_t h_out = a.h_in + 2 * a.pad - a.k + 1;
-    const int64_t w_out = a.w_in + 2 * a.pad - a.k + 1;
-    const int64_t n = a.batch * a.c_out * h_out * w_out;
-    const int grid = (int)std::min<int64_t>(65535, (n + kBlock - 1) / kBlock);
-    DISPATCH(*a.x, T,
-             k_conv2d<T><<<grid, kBlock>>>(
-                 (const T*)a.x->data(), (const T*)a.weight->data(),
-                 a.bias ? (const T*)a.bias->data() : nullptr, (T*)a.out->data(),
-                 a.batch, a.c_in, a.h_in, a.w_in, a.c_out, a.k, a.pad, h_out, w_out));
-    check_launch("conv2d");
 }
 
 template <typename T>
@@ -1412,42 +1176,21 @@ void register_cuda_ops() {
     register_impl<GemmArgs>("gemm", "cuda", gemm_cuda,
                             "cuBLAS matmul with a SEPARATE bias/activation pass; fusing that "
                             "epilogue is issues/fused-adaln.md");
-    register_impl<AttentionArgs>("attention", "cuda", attention_cuda_vendor,
+    register_impl<AttentionArgs>("attention", "cuda", attention_cuda,
                                  "cuDNN fused SDPA for bf16 without bias; cuBLAS scores and "
                                  "cuDNN softmax in float otherwise -- issues/dit-attention.md");
     register_impl<AttentionArgs>("attention", "cuda-sdpa", attention_cuda_sdpa,
                                  "cuDNN fused SDPA only; refuses a call it cannot run");
-    // The first attention kernel at three tile sizes, registered as three names.
-    //
-    // This is what the registry is FOR, and it is the smallest honest demonstration of the whole
-    // mechanism: three kernels that compute the same thing, differing in one constant, A/B'd in
-    // one process against one another. The tile decides how much shared memory a block holds and
-    // how many synchronisation points a row costs, and which one wins is a question for the
-    // hardware rather than for an argument.
-    register_impl<AttentionArgs>("attention", "cuda-tiled", attention_cuda_tiled<256>,
-                                 "tiled online softmax, 256 keys per tile, deterministic; "
-                                 "no tensor cores");
-    register_impl<AttentionArgs>("attention", "cuda-tile64", attention_cuda_tiled<64>,
-                                 "the same kernel at 64 keys per tile: less shared memory, more "
-                                 "synchronisation points per row");
-    register_impl<AttentionArgs>("attention", "cuda-tile1024", attention_cuda_tiled<1024>,
-                                 "the same kernel at 1024 keys per tile: fewer barriers, four "
-                                 "times the shared memory, fewer blocks resident");
-    register_impl<NormArgs>("norm", "cuda", norm_cuda_vendor,
+    register_impl<NormArgs>("norm", "cuda", norm_cuda,
                             "GroupNorm in fixed chunks with double sums; LayerNorm and RMSNorm "
                             "one block per row");
-    register_impl<NormArgs>("norm", "cuda-rowblock", norm_cuda,
-                            "one block per row or group, naive shared-memory reduction, fp32 "
-                            "accumulators");
     register_impl<ModulateArgs>("modulate", "cuda", modulate_cuda,
                                 "unfused AdaLN modulation: a full activation round trip for two "
                                 "flops per element. THE fusion target");
     register_impl<ActivationArgs>("activation", "cuda", activation_cuda, "elementwise");
-    register_impl<Conv2dArgs>("conv2d", "cuda", conv2d_cuda_dnn,
+    register_impl<Conv2dArgs>("conv2d", "cuda", conv2d_cuda,
                               "cuDNN, deterministic heuristic algorithm, in float -- "
                               "issues/vae-decode.md");
-    register_impl<Conv2dArgs>("conv2d", "cuda-direct", conv2d_cuda,
-                              "direct convolution, one thread per output element");
     register_impl<AddArgs>("add", "cuda", add_cuda, "residual and broadcast add");
     register_impl<ChunkArgs>("chunk", "cuda", chunk_cuda, "AdaLN-single modulation chunks");
     register_impl<PatchArgs>("patch", "cuda", patch_cuda, "patchify and unpatchify");

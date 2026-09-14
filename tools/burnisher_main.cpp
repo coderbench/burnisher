@@ -632,7 +632,7 @@ int cmd_noise(const Args& a) {
 // It exists so a single stage can be compared against the reference implementation without
 // running a whole generation: `scripts/differential_test.py` feeds both the same latent and
 // compares the results. That is the correctness gate's question asked at a scale a CPU can
-// answer, and it is how the two defects in docs/STATUS.md would have been caught earlier.
+// answer, and it catches the layout slips that still produce a plausible image.
 int cmd_decode(const Args& a) {
     register_all_ops();
     const std::string dir = a.get("weights");

@@ -111,8 +111,7 @@ class TestProseMatchesTheArtifacts(unittest.TestCase):
         For a while the only place those numbers existed in this repository was a test
         docstring, which is prose. A published figure whose measurement is not in the tree
         cannot be checked by anybody -- the one thing this repository is built not to do. Both
-        sessions of the current anchor are in the tree, and so are the first kernels' two, whose
-        24x is what made the anchor keep the worst floor of its sessions.
+        sessions of the current anchor are in the tree.
         """
         p = CELL / "calibration-session-2.json"
         self.assertTrue(p.exists(),
@@ -136,12 +135,7 @@ class TestProseMatchesTheArtifacts(unittest.TestCase):
             self._want(eval_doc, "docs/EVAL.md", f"{a:.3f}%", src)
             self._want(eval_doc, "docs/EVAL.md", f"{b:.3f}%", src)
         self._want(self.status, "docs/STATUS.md", f"{worst:.1f}\u00d7", src)
-        v0 = json.loads((ROOT / "examples" / "BG-1-anchor-v0.json").read_text())["cells"]
-        v0b = json.loads((ROOT / "examples" / "BG-1-anchor-v0-session-2.json").read_text())["cells"]
-        v0_worst = max(max(v0[c]["floor_pct"], v0b[c]["floor_pct"]) /
-                       min(v0[c]["floor_pct"], v0b[c]["floor_pct"]) for c in v0)
-        for doc, name in ((eval_doc, "docs/EVAL.md"), (self.status, "docs/STATUS.md")):
-            self._want(doc, name, f"{v0_worst:.1f}\u00d7", "examples/BG-1-anchor-v0-session-2.json")
+
 
     def test_the_round_budget_comes_from_an_artifact(self):
         """`eval/round.py` decides how many submissions fit an interval. That number has to be

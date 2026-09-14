@@ -319,13 +319,13 @@ int main() {
     // it stores function pointers, which is why this block runs on a machine with no GPU as
     // long as the build had a toolkit.
     register_cuda_ops();
-    for (const auto& kv : ImplSelection::from_request("cuda-tile1024", Device::CUDA).as_map()) {
+    for (const auto& kv : ImplSelection::from_request("cuda-sdpa", Device::CUDA).as_map()) {
         if (kv.first == "device") continue;
         CHECK(kv.second != "stock");
     }
-    CHECK(ImplSelection::from_request("cuda-tile1024", Device::CUDA).attention ==
-          "cuda-tile1024");
-    CHECK(ImplSelection::from_request("cuda-tile1024", Device::CUDA).gemm == "cuda");
+    CHECK(ImplSelection::from_request("cuda-sdpa", Device::CUDA).attention ==
+          "cuda-sdpa");
+    CHECK(ImplSelection::from_request("cuda-sdpa", Device::CUDA).gemm == "cuda");
     // And the plain device name still resolves to itself everywhere, which is the base arm.
     for (const auto& kv : ImplSelection::from_request("cuda", Device::CUDA).as_map()) {
         if (kv.first == "device") continue;

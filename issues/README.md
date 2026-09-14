@@ -22,12 +22,3 @@ that quotes a measurement says so in its Basis line.
 | [`offload`](offload.md) | Offload and streaming: bigger models do not fit | memory, streaming, frontier |
 | [`shape-specialization`](shape-specialization.md) | Per-resolution kernels and the held-out guard | kernel, anti-gaming |
 | [`video-temporal`](video-temporal.md) | Temporal and sparse attention across frames | future, video |
-
-## Closed
-
-Kept as a record of what was settled and how.
-
-| issue | title | labels |
-|:--|:--|:--|
-| [`cuda-op-backend`](cuda-op-backend.md) | The CUDA op backend | cuda, v0 |
-| [`checkpoint-load`](checkpoint-load.md) | Load the pinned checkpoint and pin the reference latents | correctness, v0 |

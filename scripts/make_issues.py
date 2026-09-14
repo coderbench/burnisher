@@ -421,45 +421,6 @@ A well-tuned general kernel counts. A lookup table keyed on one token count does
 """
 
 
-@issue("cuda-op-backend", "The CUDA op backend", ["cuda", "v0"],
-       closed_by="all 15 ops have a `cuda` implementation, gated and calibrated")
-def _(f):
-    return MEASURED_MARK + f"""
-**What it was.** `src/cuda/` held only the device probe. Nothing had been measured.
-
-**What closed it.** All fifteen ops register a `cuda` implementation beside the CPU reference, the
-cells are calibrated, and the first real receipt is in `examples/`.
-
-**What it cost:** six defects. Five are the correctness defects in `docs/STATUS.md`; the sixth was
-a non-deterministic reduction in attention, which the gate caught first.
-
-**What remains:** `dit-step/1024/bf16` is at {100 * f['dit_achieved']:.1f}% of its ceiling,
-{f['dit_ceiling_bf16_ms']:.1f} ms against a measured {f['dit_measured_ms']:.0f} ms. Every open issue
-is about that gap.
-"""
-
-
-@issue("checkpoint-load", "Load the pinned checkpoint and pin the reference latents",
-       ["correctness", "v0"],
-       closed_by="tensors verified, token ids and reference latents committed")
-def _(f):
-    return MEASURED_MARK + f"""
-**1. Tensor layout, verified.** {f['checkpoint_tensors_verified']} tensors checked against the
-real checkpoint: {f['checkpoint_missing']} missing, {f['checkpoint_wrong_shape']} wrong shape.
-Only the safetensors headers are read, over HTTP (about 1.8 MB, not 22 GB). CI re-checks
-`configs/checkpoint-layout.json`. The first run found a wrongly declared shape.
-
-**2. Token ids, committed** with the tokenizer's digest in `eval/cells/BG-1/token-ids.json`.
-
-**3. Reference latents, committed** in fp32 and bf16, with the starting noise as an input.
-
-**What it taught.** The reference differs from itself across dtypes by
-{f['reference_self_dtype_l2']:.4f} relative L2, so a bf16 end-to-end comparison can't gate
-correctness. The gate checks the whole pipeline in fp32 instead; per-stage bf16 tolerances are
-recorded, but not yet run by the gate (`docs/CORRECTNESS.md`).
-"""
-
-
 @issue("video-temporal", "Temporal and sparse attention across frames", ["future", "video"])
 def _(f):
     r = f["resolutions"]
