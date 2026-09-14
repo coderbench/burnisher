@@ -313,6 +313,23 @@ def run(args) -> dict:
             "waiting": waiting}
 
 
+def publish_ledger(args) -> None:
+    """Push the ledger to its own repository, so it outlives the rented box. Never fails a round.
+
+    Inside the lock, so two rounds never commit to the ledger at once.
+    """
+    import publish_ledger as P
+    remote = os.environ.get(P.REMOTE_ENV, "")
+    if args.dry_run or not args.ledger or not remote:
+        return
+    try:
+        r = P.publish(args.ledger, remote, token=os.environ.get(P.TOKEN_ENV))
+        print(f">> ledger published at {r['head']}" if r["pushed"]
+              else ">> the ledger is empty; nothing published")
+    except P.PublishError as exc:
+        print(f"!! could not publish the ledger: {exc}", file=sys.stderr)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -358,6 +375,7 @@ def main():
     try:
         with Lock():
             out = run(a)
+            publish_ledger(a)
     except RoundBusy as exc:
         print(f">> skipping this round: {exc}")
         return 0

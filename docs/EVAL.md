@@ -152,7 +152,7 @@ The score is pure arithmetic over recorded measurements, so anyone can re-derive
 
 ```bash
 tools/burnish audit pr-000042-raw.json pr-000042.json
-tools/burnish challenge <your receipt for the same submission> --ledger <the public ledger>
+tools/burnish challenge <your receipt for the same submission> --ledger <a clone of the published ledger>
 ```
 
 - The raw file carries the anchor it was scored against, so an audit works on any machine.
@@ -195,6 +195,11 @@ build-cuda/burnisher check-weights --weights <checkpoint>
 eval/setup_sandbox.sh             # as root: the account submissions run as
 eval/pr_bot.py --repo <owner/name> --check-box
 ```
+
+**The ledger is published after every round** (`eval/publish_ledger.py`): committed and pushed to
+`BURNISH_LEDGER_REMOTE` with a token in `BURNISH_LEDGER_TOKEN` that can write only that repository.
+Never force-pushed; protect its branch against force pushes too. A rented box is returned with its
+disk, and the published ledger is what survives it.
 
 Two guards on every run replace per-box calibration:
 - **The base arm must be within 25% of the anchor's time.** On a second card, BG-1's base times

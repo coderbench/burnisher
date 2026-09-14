@@ -25,7 +25,8 @@ cd "$REPO_DIR"
 # Secrets and box-local paths. Not committed: the ledger lives outside the worktree, and the
 # token is a token. BURNISH_CALIBRATION is optional and normally unset.
 #   GH_TOKEN, BURNISH_REPO, BURNISH_LEDGER, BURNISH_WEIGHTS, BURNISH_NOISE, BURNISH_CALIBRATION,
-#   BURNISH_GENERATION (defaults to BG-1), BURNISH_SANDBOX_USER (eval/setup_sandbox.sh)
+#   BURNISH_GENERATION (defaults to BG-1), BURNISH_SANDBOX_USER (eval/setup_sandbox.sh),
+#   BURNISH_LEDGER_REMOTE and BURNISH_LEDGER_TOKEN (eval/publish_ledger.py)
 [ -f "$REPO_DIR/.env.eval" ] && . "$REPO_DIR/.env.eval"
 
 : "${BURNISH_REPO:?set BURNISH_REPO=owner/name in .env.eval}"
