@@ -76,10 +76,6 @@ python3 scripts/check_links.py || fail=1
 step "manifest"
 python3 scripts/manifest.py --check || fail=1
 
-echo
-if [ "$fail" -eq 0 ]; then echo "all no-GPU checks passed"; else echo "FAILURES above"; fi
-exit "$fail"
-
 # A tensor declared `*_host` must be allocated on the host. Naming is the only signal available,
 # and it is worth enforcing: the failure mode is a fault deep inside a kernel rather than anywhere
 # near the declaration, and a blanket rewrite once left a variable called `_host` living on a GPU.
@@ -90,3 +86,7 @@ if grep -rnE 'Tensor\s+\w*_host\s*\([^;]*impls\.device' src/ ; then
 else
   echo "ok"
 fi
+
+echo
+if [ "$fail" -eq 0 ]; then echo "all no-GPU checks passed"; else echo "FAILURES above"; fi
+exit "$fail"
