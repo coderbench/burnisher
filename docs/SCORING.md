@@ -15,7 +15,7 @@ g = (a_candidate - a_base) / (1 - a_base)    your score
 The **ceiling** is arithmetic: the fastest the pinned card's measured compute and memory speed
 allow. A generation is anchored once, which fixes each cell's achieved fraction; a run contributes
 only its paired base/candidate ratio, so any card of the pinned class gives the same score
-(`docs/EVAL.md`).
+([`docs/EVAL.md`](EVAL.md#running-a-validator)).
 
 **Why not raw percent?** A percentage overpays easy cells:
 
@@ -58,12 +58,12 @@ averaged by weight. Peak memory is the device allocator's high-water mark on a C
 ## What cannot be gamed
 
 - **Held-out shape.** Every cell is also run at a resolution the evaluator draws after your code is
-  frozen (`held_out.resolutions` in `configs/axes.json`). Every cell whose gain resolved must still
+  frozen (`held_out.resolutions` in [`configs/axes.json`](../configs/axes.json)). Every cell whose gain resolved must still
   be faster there by more than its own noise floor, or the result is `SHAPE_OVERFIT`.
 - **Partial runs.** Skipping a cell your change hurts credits nothing (`PARTIAL`).
-- **Copies.** New code copied from someone else's open pull request is not paid (`docs/EVAL.md`).
+- **Copies.** New code copied from someone else's open pull request is not paid ([`docs/EVAL.md`](EVAL.md#copies)).
 - **The ruler.** The measuring code comes from the base commit, and generations are frozen. See
-  `docs/EVAL.md`.
+  [`docs/EVAL.md`](EVAL.md#the-instrument-guard).
 - **Grades.** A schema test fails if a receipt or generation contains `XS`, `XL`, `tier`, `grade`
   or `band`. The number is the result.
 
@@ -81,4 +81,4 @@ averaged by weight. Peak memory is the device allocator's high-water mark on a C
 ```
 
 (Illustrative, with BG-1's cell weights: the untouched cells count as zero. A real receipt is in
-`examples/`.) Status-to-label mapping: `docs/EVAL.md`.
+[`examples/`](../examples/).) Status-to-label mapping: [`docs/EVAL.md`](EVAL.md#labels).

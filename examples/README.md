@@ -9,7 +9,7 @@ tests read. It is not part of any ledger.
 | `BG-1-pr-000001-receipt.json` | what `tools/burnish score` made of them |
 
 Re-score it on any machine, no GPU. Every figure comes out the same, and
-`eval/tests/test_example_receipt.py` checks it:
+[`eval/tests/test_example_receipt.py`](../eval/tests/test_example_receipt.py) checks it:
 
 ```
 tools/burnish score examples/BG-1-pr-000001-raw.json --generation BG-1 \

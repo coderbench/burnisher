@@ -3,24 +3,24 @@
 ## What happens to a pull request
 
 1. **Copies.** A pull request from a blocked author, or whose new code copies another open pull
-   request, is labelled and closed (see *Copies*).
-2. **Instrument.** A change to the measuring instrument gets `burnish:skipped-instrument` (see *The
-   instrument guard*).
+   request, is labelled and closed (see [Copies](#copies)).
+2. **Instrument.** A change to the measuring instrument gets `burnish:skipped-instrument` (see [The
+   instrument guard](#the-instrument-guard)).
 3. **Candidate.** A kernel already on main registered under a new name gets `burnish:reregistered`
-   (see *Re-registered kernels*). Otherwise the new kernel name is the candidate. No new name, or
+   (see [Re-registered kernels](#re-registered-kernels)). Otherwise the new kernel name is the candidate. No new name, or
    several with none named in the `Implementation name` field, gets `burnish:no-candidate`.
 4. **Build** on the evaluation box.
-5. **Gate** correctness in fp32 and determinism, for `cuda` and the candidate (`docs/CORRECTNESS.md`).
+5. **Gate** correctness in fp32 and determinism, for `cuda` and the candidate ([`docs/CORRECTNESS.md`](CORRECTNESS.md)).
 6. **Bench** base and candidate alternately, plus a held-out shape drawn after the code is frozen.
 7. **Score** into an append-only ledger outside the repository.
 8. **Publish** the measurements and the receipt, and **label** the pull request.
 
-Steps 1–3 use no GPU time. Steps 5–7 are `eval/score_submission.sh`, which anyone can run.
+Steps 1–3 use no GPU time. Steps 5–7 are [`eval/score_submission.sh`](../eval/score_submission.sh), which anyone can run.
 
 ## Rounds
 
-- **Every two hours, oldest first,** up to twelve measured submissions (`eval/run_round_cron.sh`).
-  One costs about 4.5 GPU-minutes (`eval/cells/BG-1/round-cost.json`). Two benchmarks never share a
+- **Every two hours, oldest first,** up to twelve measured submissions ([`eval/run_round_cron.sh`](../eval/run_round_cron.sh)).
+  One costs about 4.5 GPU-minutes ([`eval/cells/BG-1/round-cost.json`](../eval/cells/BG-1/round-cost.json)). Two benchmarks never share a
   GPU.
 - **One generation per round:** BG-1 unless `BURNISH_GENERATION` names another, with that
   generation's pinned noise in `BURNISH_NOISE`.
@@ -38,7 +38,7 @@ Steps 1–3 use no GPU time. Steps 5–7 are `eval/score_submission.sh`, which a
 | label | meaning |
 |:--|:--|
 | `burnish:gap+N.NNNN` | **Paid.** The fraction of the remaining gap closed. |
-| `burnish:cell-opened` | **Paid.** A new cell (`docs/CARTOGRAPHY.md`). |
+| `burnish:cell-opened` | **Paid.** A new cell ([`docs/CARTOGRAPHY.md`](CARTOGRAPHY.md)). |
 | `burnish:merge-first` | Beside the paid label: the best verified gain of its round. |
 | `burnish:needs-rebase` | A resolved gain, but a larger one in its round was picked to merge. Push a rebase. |
 | `burnish:unresolved` | Inside the cells' noise. Not a judgement of the idea. |
@@ -88,7 +88,7 @@ scripts/copycat_guard.py --corpus <ledger>/copycat --unblock <login> --reason "i
 ## Re-registered kernels
 
 A kernel already on main registered under a new name would be measured as a gain that already
-landed. `scripts/reregistration_guard.py` compares the registry on main with the submission's:
+landed. [`scripts/reregistration_guard.py`](../scripts/reregistration_guard.py) compares the registry on main with the submission's:
 
 - **The same callable under a new name** (`attention_cuda` again as `fast`) is re-registered.
 - **A renamed, reformatted copy** at 95% or more token similarity is re-registered. Identifiers and
@@ -106,7 +106,7 @@ The score is arithmetic over recorded measurements, so anyone can re-derive it.
 | | audit | challenge |
 |:--|:--|:--|
 | asks | does the verdict follow from the published measurements? | did the measurements really happen? |
-| needs | nothing, about two seconds | an RTX 5090, about six minutes plus a build (`eval/cells/BG-1/round-cost.json`) |
+| needs | nothing, about two seconds | an RTX 5090, about six minutes plus a build ([`eval/cells/BG-1/round-cost.json`](../eval/cells/BG-1/round-cost.json)) |
 | catches | scoring bugs, edited receipts | measurements that never happened |
 
 ```bash
@@ -122,23 +122,23 @@ tools/burnish challenge <your receipt for the same submission> --ledger <a clone
 
 ## The instrument guard
 
-`eval/`, `configs/`, `schemas/`, `tools/burnish`, `.github/`, `.gittensor/` and `scripts/` (except
+[`eval/`](../eval/), [`configs/`](../configs/), [`schemas/`](../schemas/), `tools/burnish`, [`.github/`](../.github/), [`.gittensor/`](../.gittensor/) and [`scripts/`](../scripts/) (except
 `scripts/build*`) are the instrument. Changing any of them gets `burnish:skipped-instrument`.
 
-- **The instrument always comes from the base commit** (`eval/run_from_base.sh`), so an edit can't
+- **The instrument always comes from the base commit** ([`eval/run_from_base.sh`](../eval/run_from_base.sh)), so an edit can't
   help its author. A required CI check and `.github/CODEOWNERS` review also block merging it.
 - **The one exception** is a new generation under `eval/cells/<new>/` with its own new entry in
-  `configs/tolerance.json` (`docs/CARTOGRAPHY.md`).
+  [`configs/tolerance.json`](../configs/tolerance.json) ([`docs/CARTOGRAPHY.md`](CARTOGRAPHY.md)).
 
 ## Running a validator
 
 **No box needs its own calibration.** A generation is anchored once, on any card of the pinned
 class, and a run contributes only its paired base/candidate ratio, so a uniformly slower card scores
-the same (`eval/tests/test_portable_scoring.py`). Two checks on every run stand in for calibration:
+the same ([`eval/tests/test_portable_scoring.py`](../eval/tests/test_portable_scoring.py)). Two checks on every run stand in for calibration:
 
 - **The base arm must be within 25% of the anchor's time.** Otherwise the base code changed, or this
   is not the pinned hardware. Two cards of the class differed by up to 9.4% on the first kernels
-  (`eval/cells/BG-1/second-card-check.json`).
+  ([`eval/cells/BG-1/second-card-check.json`](../eval/cells/BG-1/second-card-check.json)).
 - **The base arm's repeats must spread less than 3× the floor.** Otherwise the box was too noisy.
 
 Setting up a box. The CUDA build needs the CUDA toolkit and cuDNN 9.
@@ -150,14 +150,14 @@ eval/setup_sandbox.sh             # as root: the account submissions run as
 eval/pr_bot.py --repo <owner/name> --check-box
 ```
 
-**The ledger is published after every round** (`eval/publish_ledger.py`) to `BURNISH_LEDGER_REMOTE`,
+**The ledger is published after every round** ([`eval/publish_ledger.py`](../eval/publish_ledger.py)) to `BURNISH_LEDGER_REMOTE`,
 with a token in `BURNISH_LEDGER_TOKEN` that can write only that repository. Never force-push it. A
 rented box is returned with its disk; the published ledger survives it.
 
 ### Isolating submitted code
 
 Submitted code (its build, its tests and every launch of the runtime) runs as the account named by
-`BURNISH_SANDBOX_USER` (`eval/sandbox.py`), never as the evaluator that holds the tokens.
+`BURNISH_SANDBOX_USER` ([`eval/sandbox.py`](../eval/sandbox.py)), never as the evaluator that holds the tokens.
 
 - **Its environment is an allowlist.** It builds its own copy of the head commit, and every process
   it starts is killed when the step ends.
@@ -183,7 +183,7 @@ tools/burnish calibrate --generation BG-N --impl cuda --repeats 9 --weights <che
 ```
 
 Floors move between sessions. Two back-to-back sessions of BG-1 on one RTX 5090
-(`eval/cells/BG-1/reference.json` and `calibration-session-2.json`):
+([`eval/cells/BG-1/reference.json`](../eval/cells/BG-1/reference.json) and `calibration-session-2.json`):
 
 | cell | session A | session B | ratio |
 |:--|--:|--:|--:|

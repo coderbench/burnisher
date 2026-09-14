@@ -19,7 +19,8 @@ limit that it closes.
 ## Where it stands
 
 Measured on an RTX 5090 at 1024px in bf16, against PyTorch (diffusers, eager) on the same card
-(`eval/cells/BG-1/pytorch-baseline.json`). PyTorch makes the whole image in **1.92 s**.
+([`eval/cells/BG-1/pytorch-baseline.json`](eval/cells/BG-1/pytorch-baseline.json)). PyTorch makes
+the whole image in **1.92 s**.
 
 | stage | runs per image | share of its ceiling reached | time against PyTorch |
 |:--|--:|--:|--:|
@@ -27,12 +28,12 @@ Measured on an RTX 5090 at 1024px in bf16, against PyTorch (diffusers, eager) on
 | `dit-step`, one denoising step | 20 | 55.6% | **1.1×** |
 | `vae-decode`, the image decoder | 1 | 25.4% | **1.4×** |
 
-- **Correct.** It passes the fp32 correctness gate against committed reference latents, and every
-  replay is byte-identical.
+- **Correct.** It passes the fp32 [correctness gate](docs/CORRECTNESS.md) against committed
+  reference latents, and every replay is byte-identical.
 - **Room left.** Every stage still has a measurable gap to its ceiling, and closing it is what is
   paid.
 
-Everything measured, and everything still unknown: `docs/STATUS.md`.
+Everything measured, and everything still unknown: [`docs/STATUS.md`](docs/STATUS.md).
 
 ## How it works
 
@@ -51,9 +52,10 @@ flowchart LR
 - **The CPU kernels are the oracle.** They are written to be correct, and every GPU kernel is
   checked against them and against the reference implementation.
 - **A cell** is one stage at one shape and dtype, such as `dit-step/1024/bf16`. Its **ceiling** is
-  arithmetic: the fastest the card's measured compute and memory speed allow.
+  arithmetic: the fastest the card's measured compute and memory speed allow
+  ([`docs/ROOFLINE.md`](docs/ROOFLINE.md)).
 - **A generation** freezes a set of cells, prompts and reference latents, so a score always means the
-  same thing: BG-1 at 1024px, BG-2 at 512px.
+  same thing: [BG-1](eval/cells/BG-1/) at 1024px, [BG-2](eval/cells/BG-2/) at 512px.
 
 ## Quick start
 
@@ -76,7 +78,8 @@ scripts/check.sh              # every check that needs no GPU
 
 ### 2. Get the checkpoint
 
-The revisions are pinned in the generation, so everyone runs the same weights.
+The revisions are pinned in [`eval/cells/BG-1/generation.json`](eval/cells/BG-1/generation.json), so
+everyone runs the same weights.
 
 ```bash
 pip install huggingface_hub
@@ -117,7 +120,8 @@ flowchart LR
 ```
 
 1. **Pick the work.** `tools/burnish roofline` shows every cell's ceiling, how full it is and its
-   time against PyTorch. `issues/README.md` lists the open work, each item with its arithmetic.
+   time against PyTorch. [`issues/README.md`](issues/README.md) lists the open work, each item with
+   its arithmetic.
 2. **Write your kernel beside the old one.** Copy the kernel you want to beat, change the copy, and
    register it under a new name:
 
@@ -127,20 +131,23 @@ flowchart LR
 
    Never edit an existing kernel in place. The validator measures your new name against `cuda` in
    the same binary, and an edited kernel has nothing to be measured against.
-3. **Check it.** `scripts/check.sh` needs no GPU. `scripts/differential_test.py` compares one stage
-   with the reference implementation.
-4. **Open a pull request** and follow the template. Write your kernel's name on its
-   `Implementation name` line.
+3. **Check it.** [`scripts/check.sh`](scripts/check.sh) needs no GPU.
+   [`scripts/differential_test.py`](scripts/differential_test.py) compares one stage with the
+   reference implementation.
+4. **Open a pull request** and fill in the [template](.github/PULL_REQUEST_TEMPLATE.md). Write your
+   kernel's name on its `Implementation name` line.
 5. **Get measured.** Every two hours the evaluator scores up to twelve pull requests, oldest first. A
-   paid result is labelled `burnish:gap+N.NNNN`, and the round's biggest gain is merged.
+   paid result is labelled `burnish:gap+N.NNNN`, and the round's biggest gain is merged. Every
+   label: [`docs/EVAL.md`](docs/EVAL.md#labels).
 
 More ways in:
 
-- **Quantization.** Read `issues/weight-formats.md` first: one DiT step costs 0.473 s at fp32 and
-  0.098 s at bf16, and the fp8 and NVFP4 cells have no implementation yet.
-- **A new cell,** such as a new resolution or model, is paid too: `docs/CARTOGRAPHY.md`.
+- **Quantization.** Read [`issues/weight-formats.md`](issues/weight-formats.md) first: one DiT step
+  costs 0.473 s at fp32 and 0.098 s at bf16, and the fp8 and NVFP4 cells have no implementation yet.
+- **A new cell,** such as a new resolution or model, is paid too:
+  [`docs/CARTOGRAPHY.md`](docs/CARTOGRAPHY.md).
 
-The full guide, with every label and rule: `CONTRIBUTING.md`.
+The full guide, step by step: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## How a change is scored
 
@@ -159,37 +166,37 @@ g = (a_candidate - a_base) / (1 - a_base)    the share of the remaining gap you 
 - **No shortcuts.** A held-out resolution, drawn after your code is frozen, catches kernels tuned to
   one shape. A speedup bought with more memory or less fidelity than it is worth pays nothing.
 - **Anyone can check.** `tools/burnish audit` re-derives any verdict from its published measurements
-  in about two seconds, with no GPU.
+  in about two seconds, with no GPU. A real one is in [`examples/`](examples/README.md).
 
-Worked through, with examples: `docs/SCORING.md`.
+Worked through, with examples: [`docs/SCORING.md`](docs/SCORING.md).
 
 ## Documents
 
 | document | read it to |
 |:--|:--|
-| `CONTRIBUTING.md` | pick, write, check and submit a kernel |
-| `docs/SCORING.md` | understand how the number is computed |
-| `docs/EVAL.md` | follow a pull request through evaluation, read its label, or run a validator |
-| `docs/CORRECTNESS.md` | know what the correctness gate checks |
-| `docs/CARTOGRAPHY.md` | add a new cell |
-| `docs/STATUS.md` | see what is measured and what is not |
-| `docs/ROOFLINE.md` | see every cell's ceiling (generated) |
-| `issues/README.md` | find open work |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | pick, write, check and submit a kernel |
+| [`docs/SCORING.md`](docs/SCORING.md) | understand how the number is computed |
+| [`docs/EVAL.md`](docs/EVAL.md) | follow a pull request through evaluation, read its label, or run a validator |
+| [`docs/CORRECTNESS.md`](docs/CORRECTNESS.md) | know what the correctness gate checks |
+| [`docs/CARTOGRAPHY.md`](docs/CARTOGRAPHY.md) | add a new cell |
+| [`docs/STATUS.md`](docs/STATUS.md) | see what is measured and what is not |
+| [`docs/ROOFLINE.md`](docs/ROOFLINE.md) | see every cell's ceiling (generated) |
+| [`issues/README.md`](issues/README.md) | find open work |
 
 ## Repository layout
 
-```
-include/burnisher/   tensor, dtype, op registry, models, scheduler, pipeline
-src/cpu/             reference ops: the correctness oracle, not the product
-src/cuda/            the CUDA op backend and the device probe
-src/models/          T5 encoder, PixArt DiT and VAE decoder, as graphs over the registry
-tools/               the burnisher binary's entry point and the burnish harness CLI
-eval/burnscore/      the scorer: geometry, roofline, floor, bootstrap, frontier, receipt, ledger
-eval/cells/          frozen generations: definition, anchor, prompts, reference latents
-scripts/             build, check, generate, and the correctness and measurement tools
-issues/              the backlog, generated from configs/
-examples/            one real scoring run, re-scorable with no GPU
-```
+| path | what is there |
+|:--|:--|
+| [`include/burnisher/`](include/burnisher/) | tensor, dtype, op registry, models, scheduler, pipeline |
+| [`src/cpu/`](src/cpu/) | reference ops: the correctness oracle, not the product |
+| [`src/cuda/`](src/cuda/) | the CUDA op backend and the device probe |
+| [`src/models/`](src/models/) | T5 encoder, PixArt DiT and VAE decoder, as graphs over the registry |
+| [`tools/`](tools/) | the `burnisher` binary's entry point and the `burnish` harness CLI |
+| [`eval/burnscore/`](eval/burnscore/) | the scorer: geometry, roofline, floor, bootstrap, frontier, receipt, ledger |
+| [`eval/cells/`](eval/cells/) | frozen generations: definition, anchor, prompts, reference latents |
+| [`scripts/`](scripts/) | build, check, generate, and the correctness and measurement tools |
+| [`issues/`](issues/README.md) | the backlog, generated from `configs/` |
+| [`examples/`](examples/README.md) | one real scoring run, re-scorable with no GPU |
 
 ## Licence
 

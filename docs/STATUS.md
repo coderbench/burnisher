@@ -18,12 +18,12 @@ What is measured, what is built, and what is still unknown.
 | `vae-decode/1024/bf16` | 25.4% | 3.9x | 0.064% |
 
 Nine paired repeats per cell in each of two sessions. Floors moved up to 1.6× between the sessions,
-so each cell keeps the worse of the two (`docs/EVAL.md`).
+so each cell keeps the worse of the two ([`docs/EVAL.md`](EVAL.md#anchoring-a-generation)).
 
 ## Against PyTorch on the same card
 
 The same stages in diffusers on PyTorch, eager as installed, at the same shapes and dtype
-(`eval/cells/BG-1/pytorch-baseline.json`, from `scripts/pytorch_baseline.py`).
+([`eval/cells/BG-1/pytorch-baseline.json`](../eval/cells/BG-1/pytorch-baseline.json), from [`scripts/pytorch_baseline.py`](../scripts/pytorch_baseline.py)).
 
 | cell | Burnisher | PyTorch | Burnisher's time over PyTorch's |
 |:--|--:|--:|--:|
@@ -40,11 +40,11 @@ ceiling, this runtime 55.6%. Not measured yet: PyTorch with `torch.compile`.
 - CPU reference ops, a CUDA backend for all 15 ops, T5 / PixArt DiT / VAE graphs, DPM-Solver++.
 - `cuda` on cuBLAS and cuDNN: fused attention for bf16, cuDNN convolution computed in float, a
   chunked GroupNorm and a caching allocator, checked against the CPU oracle by
-  `tests/test_cuda_ops.cpp`.
+  [`tests/test_cuda_ops.cpp`](../tests/test_cuda_ops.cpp).
 - Correctness gate, paired bench, calibration, scorer, receipts, ledger, audit and challenge.
 - Rounds that take the instrument from the base commit, a copycat guard and a re-registration guard.
 
-`scripts/check.sh` checks all of it without a GPU.
+[`scripts/check.sh`](../scripts/check.sh) checks all of it without a GPU.
 
 ## Cost of scoring
 
